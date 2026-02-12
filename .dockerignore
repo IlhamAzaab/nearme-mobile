@@ -1,0 +1,47 @@
+# Docker ignore file - Don't copy these to container
+
+# Dependencies (will be installed fresh in container)
+node_modules/
+
+# Expo cache
+.expo/
+dist/
+web-build/
+
+# Native builds
+ios/
+android/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files (sensitive data)
+.env
+.env.local
+.env*.local
+
+# Documentation
+README.md
+DOCKER_SETUP.md

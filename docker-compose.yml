@@ -1,0 +1,42 @@
+# NearMe Mobile - Docker Compose
+# Run: docker-compose up
+# Stop: docker-compose down
+
+version: '3.8'
+
+services:
+  nearme-mobile:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nearme-mobile-app
+    ports:
+      - "8081:8081"     # Metro bundler
+      - "19000:19000"   # Expo dev server
+      - "19001:19001"   # Expo dev tools
+      - "19002:19002"   # Expo tunnel
+    volumes:
+      # Mount source code for live reload (hot reload)
+      - ./src:/app/src
+      - ./assets:/app/assets
+      - ./app.json:/app/app.json
+      - ./index.js:/app/index.js
+      # Don't override node_modules (use container's version)
+      - /app/node_modules
+    environment:
+      - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
+      - REACT_NATIVE_PACKAGER_HOSTNAME=0.0.0.0
+      - CHOKIDAR_USEPOLLING=true
+    stdin_open: true
+    tty: true
+    # Restart policy
+    restart: unless-stopped
+
+  # Optional: Run with specific command
+  # nearme-android:
+  #   extends: nearme-mobile
+  #   command: npx expo start --android --tunnel
+
+  # nearme-ios:
+  #   extends: nearme-mobile
+  #   command: npx expo start --ios --tunnel
