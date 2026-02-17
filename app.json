@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "nearmemobile",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.nearme.mobile",
@@ -55,7 +55,8 @@
           "color": "#22c55e",
           "defaultChannel": "default"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "reactCompiler": false
