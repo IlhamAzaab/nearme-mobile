@@ -1,7 +1,9 @@
 // Environment Configuration
 const ENV = {
   development: {
-    API_URL: 'http://localhost:3000/api',
+    // For Android emulator, use 10.0.2.2 to refer to host machine
+    // For physical device or iOS simulator, replace with your machine's IP (e.g., 192.168.x.x)
+    API_URL: 'http://192.168.37.44:5000',
     ENABLE_LOGGING: true,
   },
   staging: {

@@ -4,6 +4,7 @@ import AuthNavigator from './AuthNavigator';
 import CustomerStack from './CustomerStack';
 import DriverNavigator from './DriverNavigator';
 import ManagerNavigator from './ManagerNavigator';
+import AdminNavigator from './AdminNavigator';
 import { useAuth } from '../app/providers/AuthProvider';
 
 export default function RootNavigator() {
@@ -27,6 +28,8 @@ export default function RootNavigator() {
         return <DriverNavigator />;
       case 'manager':
         return <ManagerNavigator />;
+      case 'admin':
+        return <AdminNavigator />;
       default:
         // If role is unknown but authenticated, default to Auth or a generic error
         return <AuthNavigator />;
