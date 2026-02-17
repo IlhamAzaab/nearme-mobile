@@ -19,6 +19,7 @@
     },
     "android": {
       "package": "com.nearme.mobile",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -54,6 +55,14 @@
         {
           "color": "#22c55e",
           "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
         }
       ],
       "@react-native-community/datetimepicker"
