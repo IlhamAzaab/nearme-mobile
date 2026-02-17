@@ -7,11 +7,18 @@
     "icon": "./assets/images/icon.png",
     "scheme": "nearmemobile",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nearme.mobile",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
+      }
     },
     "android": {
+      "package": "com.nearme.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -19,7 +26,11 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
     },
     "web": {
       "output": "single",
@@ -37,10 +48,23 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#22c55e",
+          "defaultChannel": "default"
+        }
       ]
     ],
     "experiments": {
-      "reactCompiler": true
+      "reactCompiler": false
+    },
+    "owner": "mohamedilham",
+    "extra": {
+      "eas": {
+        "projectId": "ae8e5d23-1d5a-4b87-81bf-feb46fe5dedb"
+      }
     }
   }
 }

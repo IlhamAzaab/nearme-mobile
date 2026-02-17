@@ -9,7 +9,7 @@ export const openMaps = async (latitude, longitude, label = 'Destination') => {
   const url = Platform.select({
     ios: `${scheme}${latitude},${longitude}?q=${label}`,
     android: `${scheme}${latitude},${longitude}?q=${latitude},${longitude}(${label})`,
-    default: `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`,
+    default: `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}&zoom=17`,
   });
   
   const canOpen = await Linking.canOpenURL(url);
@@ -17,9 +17,9 @@ export const openMaps = async (latitude, longitude, label = 'Destination') => {
   if (canOpen) {
     await Linking.openURL(url);
   } else {
-    // Fallback to Google Maps web
+    // Fallback to OpenStreetMap web
     await Linking.openURL(
-      `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`
+      `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}&zoom=17`
     );
   }
 };

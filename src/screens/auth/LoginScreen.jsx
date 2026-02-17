@@ -15,6 +15,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
 import { useAuth } from "../../app/providers/AuthProvider";
+import pushNotificationService from "../../services/pushNotificationService";
 
 export default function LoginScreen({ navigation }) {
   const { refreshAuthState } = useAuth();
@@ -52,12 +53,17 @@ export default function LoginScreen({ navigation }) {
     setIsLoading(true);
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
       const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
       const data = await res.json().catch(() => ({}));
 
       console.log("🔐 Login response:", {
@@ -89,6 +95,17 @@ export default function LoginScreen({ navigation }) {
 
       if (data?.userId) await AsyncStorage.setItem("userId", String(data.userId));
       if (data?.userName) await AsyncStorage.setItem("userName", String(data.userName));
+
+      // Save profile completion status for admin onboarding
+      await AsyncStorage.setItem("profileCompleted", data?.profileCompleted ? "true" : "false");
+
+      // Initialize push notifications after successful login
+      if (data?.token) {
+        console.log('🔔 Initializing push notifications after login...');
+        pushNotificationService.initialize(data.token).catch(err => {
+          console.warn('Push notification init error:', err);
+        });
+      }
 
       setIsLoading(false);
       setIsTransitioning(true);
