@@ -34,11 +34,10 @@ yarn-error.*
 .env*.local
 .env
 
-# Firebase / FCM credentials (NEVER commit these)
-google-services.json
-GoogleService-Info.plist
+# Firebase / FCM credentials (NEVER commit service account keys)
 fcm-service-account.json
 *-service-account.json
+GoogleService-Info.plist
 # typescript
 *.tsbuildinfo
 
