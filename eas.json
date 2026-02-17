@@ -41,11 +41,6 @@
       "android": {
         "serviceAccountKeyPath": "./google-services.json",
         "track": "internal"
-      },
-      "ios": {
-        "appleId": "",
-        "ascAppId": "",
-        "appleTeamId": ""
       }
     }
   }
