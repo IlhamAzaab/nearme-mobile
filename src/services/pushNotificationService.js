@@ -52,7 +52,7 @@ if (Platform.OS === 'android') {
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
 
-  // Order updates channel
+  // Order updates channel (non-urgent)
   Notifications.setNotificationChannelAsync('orders', {
     name: 'Order Updates',
     description: 'Notifications about your orders',
@@ -61,6 +61,63 @@ if (Platform.OS === 'android') {
     lightColor: '#22c55e',
     sound: 'default',
     enableVibrate: true,
+    showBadge: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+
+  // URGENT orders channel — persistent ringing for new orders/deliveries
+  // This channel uses MAX importance which shows as heads-up notification
+  // and keeps ringing until user interacts
+  Notifications.setNotificationChannelAsync('urgent_orders', {
+    name: 'Urgent Orders & Deliveries',
+    description: 'New orders and delivery requests that ring until you respond',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 500, 200, 500, 200, 500, 200, 500],
+    lightColor: '#ef4444',
+    sound: 'default',
+    enableVibrate: true,
+    enableLights: true,
+    showBadge: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+
+  // Alerts channel — for manager unassigned delivery alerts
+  Notifications.setNotificationChannelAsync('alerts', {
+    name: 'Critical Alerts',
+    description: 'Urgent alerts about unassigned deliveries and issues',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
+    lightColor: '#ef4444',
+    sound: 'default',
+    enableVibrate: true,
+    enableLights: true,
+    showBadge: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+
+  // Payments channel
+  Notifications.setNotificationChannelAsync('payments', {
+    name: 'Payments',
+    description: 'Payment and withdrawal notifications',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#22c55e',
+    sound: 'default',
+    enableVibrate: true,
+    showBadge: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+
+  // Milestones channel
+  Notifications.setNotificationChannelAsync('milestones', {
+    name: 'Milestones & Achievements',
+    description: 'Daily milestone achievements',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 300, 150, 300, 150, 300],
+    lightColor: '#f59e0b',
+    sound: 'default',
+    enableVibrate: true,
+    enableLights: true,
     showBadge: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
@@ -375,6 +432,16 @@ class PushNotificationService {
         break;
       case 'new_delivery':
         nav.navigate('AvailableDeliveries');
+        break;
+      case 'payment_received':
+        nav.navigate('DriverEarnings');
+        break;
+      case 'unassigned_delivery_alert':
+        nav.navigate('ManagerPendingDeliveries');
+        break;
+      case 'milestone':
+        // Navigate based on user screen in data
+        if (screen) nav.navigate(screen);
         break;
       default:
         if (screen) nav.navigate(screen);
