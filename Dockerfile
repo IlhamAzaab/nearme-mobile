@@ -18,8 +18,15 @@ WORKDIR /app
 # Copy package files first (for better Docker caching)
 COPY package*.json ./
 
+# Configure npm for better network resilience inside Docker
+RUN npm config set registry https://registry.npmjs.org/ && \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 60000 && \
+    npm config set fetch-retry-maxtimeout 300000 && \
+    npm config set fetch-timeout 600000
+
 # Install dependencies
-RUN npm install
+RUN npm install --prefer-offline --no-audit --no-fund
 
 # Copy the rest of the source code
 COPY . .
@@ -35,5 +42,5 @@ EXPOSE 8081 19000 19001 19002
 ENV EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
 ENV REACT_NATIVE_PACKAGER_HOSTNAME=0.0.0.0
 
-# Default command - start Expo
+# Default command - start Expo with tunnel for mobile access
 CMD ["npx", "expo", "start", "--tunnel"]

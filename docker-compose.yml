@@ -2,14 +2,16 @@
 # Run: docker-compose up
 # Stop: docker-compose down
 
-version: '3.8'
-
 services:
   nearme-mobile:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
     container_name: nearme-mobile-app
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     ports:
       - "8081:8081"     # Metro bundler
       - "19000:19000"   # Expo dev server
