@@ -39,6 +39,7 @@ fcm-service-account.json
 *-service-account.json
 GoogleService-Info.plist
 google-services.json
+
 # typescript
 *.tsbuildinfo
 
