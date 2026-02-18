@@ -17,6 +17,9 @@
       "env": {
         "APP_ENV": "development",
         "GOOGLE_SERVICES_JSON": "@GOOGLE_SERVICES_JSON"
+      },
+      "hooks": {
+        "preInstall": "./eas-hooks/pre-install.sh"
       }
     },
     "preview": {
@@ -27,6 +30,9 @@
       "env": {
         "APP_ENV": "preview",
         "GOOGLE_SERVICES_JSON": "@GOOGLE_SERVICES_JSON"
+      },
+      "hooks": {
+        "preInstall": "./eas-hooks/pre-install.sh"
       }
     },
     "production": {
@@ -36,6 +42,9 @@
       "env": {
         "APP_ENV": "production",
         "GOOGLE_SERVICES_JSON": "@GOOGLE_SERVICES_JSON"
+      },
+      "hooks": {
+        "preInstall": "./eas-hooks/pre-install.sh"
       }
     }
   },
