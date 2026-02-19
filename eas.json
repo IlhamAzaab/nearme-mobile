@@ -15,8 +15,7 @@
         "simulator": false
       },
       "env": {
-        "APP_ENV": "development",
-        "GOOGLE_SERVICES_JSON": "@GOOGLE_SERVICES_JSON"
+        "APP_ENV": "development"
       }
     },
     "preview": {
@@ -25,8 +24,7 @@
         "buildType": "apk"
       },
       "env": {
-        "APP_ENV": "preview",
-        "GOOGLE_SERVICES_JSON": "@GOOGLE_SERVICES_JSON"
+        "APP_ENV": "preview"
       }
     },
     "production": {
@@ -34,8 +32,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "APP_ENV": "production",
-        "GOOGLE_SERVICES_JSON": "@GOOGLE_SERVICES_JSON"
+        "APP_ENV": "production"
       }
     }
   },
