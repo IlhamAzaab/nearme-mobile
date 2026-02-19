@@ -1,4 +1,5 @@
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import apiClient from './api';
 
 const notificationService = {
@@ -15,7 +16,13 @@ const notificationService = {
       throw new Error('Push notification permission denied');
     }
     
-    const token = await Notifications.getExpoPushTokenAsync();
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      Constants.easConfig?.projectId;
+    
+    const token = await Notifications.getExpoPushTokenAsync({
+      ...(projectId ? { projectId } : {}),
+    });
     return token.data;
   },
 

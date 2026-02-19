@@ -2,28 +2,40 @@
 
 set -euo pipefail
 
-echo "🔧 EAS Build Pre-Install Hook Started"
+echo "🔧 EAS Build Post-Install Hook Started"
 echo "📂 Current directory: $(pwd)"
 
-# Create google-services.json from EAS secret
+# Create google-services.json from EAS environment variable
 if [ -z "${GOOGLE_SERVICES_JSON:-}" ]; then
   echo "❌ ERROR: GOOGLE_SERVICES_JSON environment variable is not set"
-  echo "Please ensure the secret is configured in EAS"
+  echo "Please ensure it is configured in EAS environment variables"
   exit 1
 fi
 
-echo "📦 Creating google-services.json from EAS secret..."
+echo "📦 Creating google-services.json from EAS environment variable..."
 echo "🔍 Environment variable length: ${#GOOGLE_SERVICES_JSON}"
 
-# Try to decode base64 content (try Linux syntax first, then Mac syntax)
-if echo "$GOOGLE_SERVICES_JSON" | base64 -d > ./google-services.json 2>/dev/null; then
+# EAS file-type secrets store a FILE PATH in the env var.
+# String-type secrets store the raw content (possibly base64).
+# Handle both cases:
+if [ -f "$GOOGLE_SERVICES_JSON" ]; then
+  # File-type secret: env var contains a path to the file
+  echo "📂 Detected file-type secret, copying from: $GOOGLE_SERVICES_JSON"
+  cp "$GOOGLE_SERVICES_JSON" ./google-services.json
+  echo "✅ Copied google-services.json from file-type secret"
+elif echo "$GOOGLE_SERVICES_JSON" | grep -q '^{'; then
+  # Raw JSON string
+  echo "📄 Detected raw JSON content"
+  echo "$GOOGLE_SERVICES_JSON" > ./google-services.json
+  echo "✅ Wrote raw JSON to google-services.json"
+elif echo "$GOOGLE_SERVICES_JSON" | base64 -d > ./google-services.json 2>/dev/null; then
   echo "✅ Decoded with 'base64 -d' (Linux/GNU)"
 elif echo "$GOOGLE_SERVICES_JSON" | base64 --decode > ./google-services.json 2>/dev/null; then
   echo "✅ Decoded with 'base64 --decode'"
 elif echo "$GOOGLE_SERVICES_JSON" | base64 -D > ./google-services.json 2>/dev/null; then
   echo "✅ Decoded with 'base64 -D' (Mac)"
 else
-  echo "❌ ERROR: Failed to decode base64 content with any known syntax"
+  echo "❌ ERROR: Could not process GOOGLE_SERVICES_JSON (not a file path, JSON, or base64)"
   exit 1
 fi
 
