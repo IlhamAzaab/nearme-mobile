@@ -24,7 +24,7 @@ import {
   Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
+import FreeMapView from "../../components/maps/FreeMapView";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
@@ -482,55 +482,39 @@ export default function DriverMapScreen({ route, navigation }) {
     <View style={styles.container}>
       {/* Map */}
       {driverLocation && (
-        <MapView
+        <FreeMapView
           ref={mapRef}
           style={styles.map}
-          mapType="none"
           initialRegion={{
             latitude: driverLocation.latitude,
             longitude: driverLocation.longitude,
             latitudeDelta: 0.02,
             longitudeDelta: 0.02,
           }}
-          showsUserLocation={false}
-          showsMyLocationButton={false}
-          onPanDrag={() => setUserHasInteracted(true)}
-        >
-          {/* 🆓 FREE OpenStreetMap Tiles */}
-          <UrlTile
-            urlTemplate="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"
-            maximumZ={19}
-            flipY={false}
-            tileSize={256}
-            zIndex={-1}
-          />
-          {/* Driver Marker */}
-          <Marker
-            coordinate={{
-              latitude: driverLocation.latitude,
-              longitude: driverLocation.longitude,
-            }}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <DriverMarker />
-          </Marker>
-
-          {/* Target Marker */}
-          {targetLocation && (
-            <Marker coordinate={targetLocation} anchor={{ x: 0.5, y: 1 }}>
-              {mode === "pickup" ? <RestaurantMarker /> : <CustomerMarker />}
-            </Marker>
-          )}
-
-          {/* Route Line - OSRM Route */}
-          {routeCoords.length > 1 && (
-            <Polyline
-              coordinates={routeCoords}
-              strokeColor={mode === "pickup" ? "#EF4444" : "#10B981"}
-              strokeWidth={4}
-            />
-          )}
-        </MapView>
+          markers={[
+            {
+              id: 'driver',
+              coordinate: {
+                latitude: driverLocation.latitude,
+                longitude: driverLocation.longitude,
+              },
+              type: 'driver',
+              emoji: '🚗',
+            },
+            ...(targetLocation ? [{
+              id: 'target',
+              coordinate: targetLocation,
+              type: mode === 'pickup' ? 'restaurant' : 'customer',
+              emoji: mode === 'pickup' ? '🏪' : '📍',
+            }] : []),
+          ]}
+          polylines={routeCoords.length > 1 ? [{
+            id: 'route',
+            coordinates: routeCoords,
+            strokeColor: mode === 'pickup' ? '#EF4444' : '#10B981',
+            strokeWidth: 4,
+          }] : []}
+        />
       )}
 
       {/* Mode Badge */}

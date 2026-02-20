@@ -3,10 +3,10 @@
  *
  * Converted from web version with same logic and styling:
  * - Full route map overview (Driver → All Restaurants → All Customers)
- * - Optimized route order (nearest first using Haversine)
+ * - Optimized route order using OSRM real driving distances
  * - OSRM routing for segment-by-segment directions
  * - Pickup and Deliver modes with auto-switch
- * - Interactive maps with FREE Carto tiles
+ * - Interactive maps with FREE OpenStreetMap tiles
  * - Polyline routes
  * - Skeleton loading with shimmer
  * - Caching for instant load
@@ -35,10 +35,11 @@ import {
   Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
+import FreeMapView from "../../components/maps/FreeMapView";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
 import * as Location from "expo-location";
+import { getOSRMRoute } from "../../services/mapService";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -99,11 +100,30 @@ const saveCacheData = async (data) => {
 };
 
 // ============================================================================
-// HAVERSINE DISTANCE CALCULATOR
+// OSRM DISTANCE CALCULATOR (Real driving distance via OSRM API)
 // ============================================================================
 
-const haversineDistance = (lat1, lng1, lat2, lng2) => {
-  const R = 6371000; // Earth's radius in meters
+/**
+ * Get driving distance using OSRM (free routing service)
+ * Returns distance in meters
+ */
+const getOSRMDistance = async (lat1, lng1, lat2, lng2) => {
+  try {
+    const result = await getOSRMRoute(lat1, lng1, lat2, lng2);
+    if (result.success) {
+      return result.distance_km * 1000; // Convert km to meters
+    }
+    // Fallback to straight-line if OSRM fails
+    return straightLineDistance(lat1, lng1, lat2, lng2);
+  } catch (error) {
+    console.warn('OSRM distance error:', error);
+    return straightLineDistance(lat1, lng1, lat2, lng2);
+  }
+};
+
+// Fallback straight-line distance (only used if OSRM fails)
+const straightLineDistance = (lat1, lng1, lat2, lng2) => {
+  const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
   const a =
@@ -113,7 +133,7 @@ const haversineDistance = (lat1, lng1, lat2, lng2) => {
       Math.sin(dLng / 2) *
       Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; // Distance in meters
+  return R * c;
 };
 
 // ============================================================================
@@ -338,8 +358,8 @@ export default function ActiveDeliveriesScreen({ navigation }) {
           setMode("pickup");
           setDeliveries([]);
 
-          // Build optimized route
-          const optimizedData = buildOptimizedRoute(location, list);
+          // Build optimized route using OSRM
+          const optimizedData = await buildOptimizedRoute(location, list);
           setFullRouteData(optimizedData);
 
           // Cache data
@@ -454,45 +474,49 @@ export default function ActiveDeliveriesScreen({ navigation }) {
   };
 
   // ============================================================================
-  // ROUTE OPTIMIZATION
+  // ROUTE OPTIMIZATION (Using OSRM for real driving distances)
   // ============================================================================
 
-  // Optimize restaurant pickup order: based on nearest customer distance
-  const getOptimizedRestaurantOrderByShortest = (pickupsList, driverLoc) => {
+  // Optimize restaurant pickup order: based on nearest customer distance using OSRM
+  const getOptimizedRestaurantOrderByShortest = async (pickupsList, driverLoc) => {
     if (pickupsList.length <= 1) return pickupsList;
 
     console.log(
-      `📍 [SMART ROUTE] Analyzing ${pickupsList.length} deliveries for shortest total distance...`
+      `📍 [SMART ROUTE] Analyzing ${pickupsList.length} deliveries using OSRM distances...`
     );
 
-    // For each restaurant, find which customer is nearest to it
-    const restaurantCustomerMap = pickupsList.map((pickup) => {
-      const distToCustomer = haversineDistance(
-        parseFloat(pickup.restaurant.latitude),
-        parseFloat(pickup.restaurant.longitude),
-        parseFloat(pickup.customer.latitude),
-        parseFloat(pickup.customer.longitude)
-      );
+    // For each restaurant, find driving distance to its customer using OSRM
+    const restaurantCustomerMap = await Promise.all(
+      pickupsList.map(async (pickup) => {
+        const distToCustomer = await getOSRMDistance(
+          parseFloat(pickup.restaurant.latitude),
+          parseFloat(pickup.restaurant.longitude),
+          parseFloat(pickup.customer.latitude),
+          parseFloat(pickup.customer.longitude)
+        );
 
-      return {
-        ...pickup,
-        distToOwnCustomer: distToCustomer,
-      };
-    });
+        return {
+          ...pickup,
+          distToOwnCustomer: distToCustomer,
+        };
+      })
+    );
 
-    // Calculate distance from driver to each restaurant
-    const withDriverDist = restaurantCustomerMap.map((item) => {
-      const distFromDriver = haversineDistance(
-        driverLoc.latitude,
-        driverLoc.longitude,
-        parseFloat(item.restaurant.latitude),
-        parseFloat(item.restaurant.longitude)
-      );
-      return {
-        ...item,
-        distFromDriver,
-      };
-    });
+    // Calculate driving distance from driver to each restaurant using OSRM
+    const withDriverDist = await Promise.all(
+      restaurantCustomerMap.map(async (item) => {
+        const distFromDriver = await getOSRMDistance(
+          driverLoc.latitude,
+          driverLoc.longitude,
+          parseFloat(item.restaurant.latitude),
+          parseFloat(item.restaurant.longitude)
+        );
+        return {
+          ...item,
+          distFromDriver,
+        };
+      })
+    );
 
     // Sort by: restaurant whose customer is farthest from driver should be picked first
     const sorted = [...withDriverDist].sort((a, b) => {
@@ -501,7 +525,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
       return totalB - totalA;
     });
 
-    console.log(`📍 [SMART ROUTE] Pickup order (by nearest customer distance):`);
+    console.log(`📍 [SMART ROUTE] Pickup order (OSRM driving distances):`);
     sorted.forEach((item, idx) => {
       console.log(
         `📍 [SMART ROUTE]   ${idx + 1}. ${item.restaurant.name} → ${item.customer.name} (${(item.distToOwnCustomer / 1000).toFixed(2)} km to customer)`
@@ -511,8 +535,8 @@ export default function ActiveDeliveriesScreen({ navigation }) {
     return sorted;
   };
 
-  // Optimize customer delivery order based on proximity after all pickups
-  const getOptimizedCustomerOrderByShortest = (pickupsList) => {
+  // Optimize customer delivery order based on proximity after all pickups using OSRM
+  const getOptimizedCustomerOrderByShortest = async (pickupsList) => {
     if (pickupsList.length <= 1) return pickupsList;
 
     // After all pickups, driver is at the last restaurant
@@ -531,13 +555,20 @@ export default function ActiveDeliveriesScreen({ navigation }) {
       let nearestIdx = 0;
       let nearestDist = Infinity;
 
-      remaining.forEach((pickup, idx) => {
-        const dist = haversineDistance(
-          currentLat,
-          currentLng,
-          parseFloat(pickup.customer.latitude),
-          parseFloat(pickup.customer.longitude)
-        );
+      // Get OSRM distances to all remaining customers
+      const distances = await Promise.all(
+        remaining.map(async (pickup) => {
+          return await getOSRMDistance(
+            currentLat,
+            currentLng,
+            parseFloat(pickup.customer.latitude),
+            parseFloat(pickup.customer.longitude)
+          );
+        })
+      );
+
+      // Find nearest
+      distances.forEach((dist, idx) => {
         if (dist < nearestDist) {
           nearestDist = dist;
           nearestIdx = idx;
@@ -548,7 +579,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
       ordered.push(nearest);
 
       console.log(
-        `📍 [SMART ROUTE]   C${ordered.length}. ${nearest.customer.name} (${(nearestDist / 1000).toFixed(2)} km from current location)`
+        `📍 [SMART ROUTE]   C${ordered.length}. ${nearest.customer.name} (${(nearestDist / 1000).toFixed(2)} km OSRM distance)`
       );
 
       currentLat = parseFloat(nearest.customer.latitude);
@@ -559,15 +590,15 @@ export default function ActiveDeliveriesScreen({ navigation }) {
     return ordered;
   };
 
-  const buildOptimizedRoute = (driverLoc, pickupsList) => {
-    // STEP 1: Optimize restaurant order
-    const optimizedRestaurants = getOptimizedRestaurantOrderByShortest(
+  const buildOptimizedRoute = async (driverLoc, pickupsList) => {
+    // STEP 1: Optimize restaurant order using OSRM
+    const optimizedRestaurants = await getOptimizedRestaurantOrderByShortest(
       pickupsList,
       driverLoc
     );
 
-    // STEP 2: Optimize customer delivery order
-    const optimizedCustomers = getOptimizedCustomerOrderByShortest(optimizedRestaurants);
+    // STEP 2: Optimize customer delivery order using OSRM
+    const optimizedCustomers = await getOptimizedCustomerOrderByShortest(optimizedRestaurants);
 
     console.log(`📍 [FULL ROUTE] ═══════════════════════════════════════════`);
     console.log(`📍 [FULL ROUTE] SMART ROUTE OPTIMIZED ORDER:`);
@@ -996,91 +1027,53 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
 
       {/* Map */}
       <View style={styles.fullRouteMapContainer}>
-        <MapView
+        <FreeMapView
           ref={mapRef}
           style={styles.fullRouteMap}
-          mapType="none"
           initialRegion={{
             ...getCenter(),
             latitudeDelta: 0.1,
             longitudeDelta: 0.1,
           }}
-        >
-          {/* FREE Carto Tiles */}
-          <UrlTile
-            urlTemplate={CARTO_TILE_URL}
-            maximumZ={19}
-            flipY={false}
-            tileSize={256}
-            zIndex={-1}
-          />
-
-          {/* Driver Marker */}
-          {driverLocation && (
-            <Marker
-              coordinate={{
+          markers={[
+            ...(driverLocation ? [{
+              id: 'driver',
+              coordinate: {
                 latitude: driverLocation.latitude,
                 longitude: driverLocation.longitude,
-              }}
-            >
-              <View style={[styles.mapMarker, styles.driverMarker]}>
-                <Text style={styles.mapMarkerText}>D</Text>
-              </View>
-            </Marker>
-          )}
-
-          {/* Restaurant Markers */}
-          {restOrder.map((pickup, idx) =>
-            pickup.restaurant && (
-              <Marker
-                key={`r-marker-${pickup.delivery_id}`}
-                coordinate={{
-                  latitude: parseFloat(pickup.restaurant.latitude),
-                  longitude: parseFloat(pickup.restaurant.longitude),
-                }}
-              >
-                <View style={[styles.mapMarker, styles.restaurantMarker]}>
-                  <Text style={styles.mapMarkerText}>R{idx + 1}</Text>
-                </View>
-              </Marker>
-            )
-          )}
-
-          {/* Customer Markers */}
-          {custOrder.map((pickup, idx) =>
-            pickup.customer && (
-              <Marker
-                key={`c-marker-${pickup.delivery_id}`}
-                coordinate={{
-                  latitude: parseFloat(pickup.customer.latitude),
-                  longitude: parseFloat(pickup.customer.longitude),
-                }}
-              >
-                <View style={[styles.mapMarker, styles.customerMarker]}>
-                  <Text style={styles.mapMarkerText}>C{idx + 1}</Text>
-                </View>
-              </Marker>
-            )
-          )}
-
-          {/* Route Polyline */}
-          {routePath.length > 1 && (
-            <>
-              {/* Shadow layer */}
-              <Polyline
-                coordinates={routePath}
-                strokeColor="rgba(255,255,255,0.4)"
-                strokeWidth={8}
-              />
-              {/* Main route */}
-              <Polyline
-                coordinates={routePath}
-                strokeColor={MARKER_COLORS.route}
-                strokeWidth={5}
-              />
-            </>
-          )}
-        </MapView>
+              },
+              type: 'driver',
+              emoji: '🚗',
+              title: 'D',
+            }] : []),
+            ...restOrder.filter(p => p.restaurant).map((pickup, idx) => ({
+              id: `r-${pickup.delivery_id}`,
+              coordinate: {
+                latitude: parseFloat(pickup.restaurant.latitude),
+                longitude: parseFloat(pickup.restaurant.longitude),
+              },
+              type: 'restaurant',
+              emoji: '🏪',
+              title: `R${idx + 1}`,
+            })),
+            ...custOrder.filter(p => p.customer).map((pickup, idx) => ({
+              id: `c-${pickup.delivery_id}`,
+              coordinate: {
+                latitude: parseFloat(pickup.customer.latitude),
+                longitude: parseFloat(pickup.customer.longitude),
+              },
+              type: 'customer',
+              emoji: '📍',
+              title: `C${idx + 1}`,
+            })),
+          ]}
+          polylines={routePath.length > 1 ? [{
+            id: 'route',
+            coordinates: routePath,
+            strokeColor: MARKER_COLORS.route,
+            strokeWidth: 5,
+          }] : []}
+        />
       </View>
 
       {/* Ordered Stops List */}

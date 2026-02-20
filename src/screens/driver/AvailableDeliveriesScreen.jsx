@@ -35,11 +35,11 @@ import {
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
+import FreeMapView from "../../components/maps/FreeMapView";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { API_BASE_URL } from "../../constants/api";
-import { getOSRMRoute, haversineDistance } from "../../services/mapService";
+import { getOSRMRoute } from "../../services/mapService";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -992,10 +992,9 @@ function DeliveryCard({
       {/* Map Section */}
       <View style={styles.mapContainer}>
         {restaurant && customer ? (
-          <MapView
+          <FreeMapView
             ref={mapRef}
             style={styles.map}
-            mapType="none"
             initialRegion={{
               latitude: parseFloat(restaurant.latitude),
               longitude: parseFloat(restaurant.longitude),
@@ -1004,111 +1003,74 @@ function DeliveryCard({
             }}
             scrollEnabled={false}
             zoomEnabled={false}
-            rotateEnabled={false}
-            pitchEnabled={false}
-          >
-            {/* FREE Carto Tiles */}
-            <UrlTile
-              urlTemplate={CARTO_TILE_URL}
-              maximumZ={19}
-              flipY={false}
-              tileSize={256}
-              zIndex={-1}
-            />
-
-            {/* Driver Marker */}
-            {driverLocation && (
-              <Marker
-                coordinate={{
+            markers={[
+              ...(driverLocation ? [{
+                id: 'driver',
+                coordinate: {
                   latitude: driverLocation.latitude,
                   longitude: driverLocation.longitude,
-                }}
-                anchor={{ x: 0.5, y: 0.5 }}
-              >
-                <View style={styles.markerDriver}>
-                  <Text style={styles.markerEmoji}>🛵</Text>
-                </View>
-              </Marker>
-            )}
-
-            {/* Restaurant Marker */}
-            <Marker
-              coordinate={{
-                latitude: parseFloat(restaurant.latitude),
-                longitude: parseFloat(restaurant.longitude),
-              }}
-              anchor={{ x: 0.5, y: 1 }}
-            >
-              <View style={styles.markerRestaurant}>
-                <Text style={styles.markerEmoji}>🏪</Text>
-              </View>
-            </Marker>
-
-            {/* Customer Marker */}
-            <Marker
-              coordinate={{
-                latitude: parseFloat(customer.latitude),
-                longitude: parseFloat(customer.longitude),
-              }}
-              anchor={{ x: 0.5, y: 1 }}
-            >
-              <View style={styles.markerCustomer}>
-                <Text style={styles.markerEmoji}>📍</Text>
-              </View>
-            </Marker>
-
-            {/* FIRST DELIVERY: Solid polyline routes */}
-            {showRoutes && hasPolylineData && driverToRestaurantPath.length > 1 && (
-              <Polyline
-                coordinates={driverToRestaurantPath}
-                strokeColor="#1a1a1a"
-                strokeWidth={4}
-              />
-            )}
-            {showRoutes && hasPolylineData && restaurantToCustomerPath.length > 1 && (
-              <Polyline
-                coordinates={restaurantToCustomerPath}
-                strokeColor="#1a1a1a"
-                strokeWidth={3}
-              />
-            )}
-
-            {/* FIRST DELIVERY FALLBACK: Curved solid lines */}
-            {showRoutes && !hasPolylineData && driverToRestaurantCurved.length > 0 && (
-              <Polyline
-                coordinates={driverToRestaurantCurved}
-                strokeColor="#1a1a1a"
-                strokeWidth={4}
-              />
-            )}
-            {showRoutes && !hasPolylineData && restaurantToCustomerCurved.length > 0 && (
-              <Polyline
-                coordinates={restaurantToCustomerCurved}
-                strokeColor="#1a1a1a"
-                strokeWidth={3}
-              />
-            )}
-
-            {/* STACKED DELIVERY: Dashed curved lines */}
-            {isStackedDelivery && driverToRestaurantCurved.length > 0 && (
-              <Polyline
-                coordinates={driverToRestaurantCurved}
-                strokeColor="#1a1a1a"
-                strokeWidth={4}
-                lineDashPattern={[8, 12]}
-                lineCap="round"
-              />
-            )}
-            {isStackedDelivery && restaurantToCustomerCurved.length > 0 && (
-              <Polyline
-                coordinates={restaurantToCustomerCurved}
-                strokeColor="#1a1a1a"
-                strokeWidth={4}
-                lineDashPattern={[8, 12]}
-                lineCap="round"
-              />
-            )}
-          </MapView>
+                },
+                type: 'driver',
+                emoji: '🛵',
+              }] : []),
+              {
+                id: 'restaurant',
+                coordinate: {
+                  latitude: parseFloat(restaurant.latitude),
+                  longitude: parseFloat(restaurant.longitude),
+                },
+                type: 'restaurant',
+                emoji: '🏪',
+              },
+              {
+                id: 'customer',
+                coordinate: {
+                  latitude: parseFloat(customer.latitude),
+                  longitude: parseFloat(customer.longitude),
+                },
+                type: 'customer',
+                emoji: '📍',
+              },
+            ]}
+            polylines={[
+              ...(showRoutes && hasPolylineData && driverToRestaurantPath.length > 1 ? [{
+                id: 'driverToRestaurant',
+                coordinates: driverToRestaurantPath,
+                strokeColor: '#1a1a1a',
+                strokeWidth: 4,
+              }] : []),
+              ...(showRoutes && hasPolylineData && restaurantToCustomerPath.length > 1 ? [{
+                id: 'restaurantToCustomer',
+                coordinates: restaurantToCustomerPath,
+                strokeColor: '#1a1a1a',
+                strokeWidth: 3,
+              }] : []),
+              ...(showRoutes && !hasPolylineData && driverToRestaurantCurved.length > 0 ? [{
+                id: 'driverToRestaurantCurved',
+                coordinates: driverToRestaurantCurved,
+                strokeColor: '#1a1a1a',
+                strokeWidth: 4,
+              }] : []),
+              ...(showRoutes && !hasPolylineData && restaurantToCustomerCurved.length > 0 ? [{
+                id: 'restaurantToCustomerCurved',
+                coordinates: restaurantToCustomerCurved,
+                strokeColor: '#1a1a1a',
+                strokeWidth: 3,
+              }] : []),
+              ...(isStackedDelivery && driverToRestaurantCurved.length > 0 ? [{
+                id: 'stackedDriverToRestaurant',
+                coordinates: driverToRestaurantCurved,
+                strokeColor: '#1a1a1a',
+                strokeWidth: 4,
+              }] : []),
+              ...(isStackedDelivery && restaurantToCustomerCurved.length > 0 ? [{
+                id: 'stackedRestaurantToCustomer',
+                coordinates: restaurantToCustomerCurved,
+                strokeColor: '#1a1a1a',
+                strokeWidth: 4,
+              }] : []),
+            ]}
+          />
         ) : (
           <View style={styles.mapLoading}>
             <ActivityIndicator size="large" color="#13ec37" />

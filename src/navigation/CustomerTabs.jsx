@@ -11,17 +11,29 @@ import ProfileScreen from "../screens/customer/ProfileScreen";
 const Tab = createBottomTabNavigator();
 
 function TabIcon({ label, focused, badge }) {
+  // Modern icon mapping
+  const getIcon = () => {
+    switch (label) {
+      case "Home":
+        return focused ? "🏡" : "🏠";
+      case "Orders":
+        return focused ? "📋" : "📄";
+      case "Cart":
+        return focused ? "🛍️" : "🛒";
+      case "Profile":
+        return focused ? "👨" : "👤";
+      default:
+        return "⚫";
+    }
+  };
+
   return (
     <View style={styles.iconWrap}>
-      <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
-        {label === "Home"
-          ? "🏠"
-          : label === "Cart"
-            ? "🛒"
-            : label === "Orders"
-              ? "🧾"
-              : "👤"}
-      </Text>
+      <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+        <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
+          {getIcon()}
+        </Text>
+      </View>
 
       <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
         {label}
@@ -97,26 +109,42 @@ export default function CustomerTabs() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    paddingTop: 10,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: "#EEF2F7",
     backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 8,
   },
   iconWrap: { width: 70, alignItems: "center", justifyContent: "center" },
-  iconEmoji: { fontSize: 20, opacity: 0.7 },
+  iconContainer: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  iconContainerActive: {
+    backgroundColor: "#ECFDF5",
+  },
+  iconEmoji: { fontSize: 22, opacity: 0.6 },
   iconEmojiActive: { opacity: 1 },
   iconLabel: {
-    marginTop: 4,
+    marginTop: 2,
     fontSize: 11,
     color: "#9CA3AF",
-    fontWeight: "800",
+    fontWeight: "700",
   },
-  iconLabelActive: { color: "#10b981" },
+  iconLabelActive: { color: "#10b981", fontWeight: "800" },
 
   badge: {
     position: "absolute",
     top: -2,
-    right: 10,
+    right: 8,
     minWidth: 18,
     height: 18,
     paddingHorizontal: 5,
@@ -124,6 +152,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#fff",
   },
   badgeText: { color: "#fff", fontSize: 10, fontWeight: "900" },
 });

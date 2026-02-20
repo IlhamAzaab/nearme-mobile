@@ -18,13 +18,13 @@ import { API_BASE_URL } from "../../constants/api";
 // ✅ simple emoji category icons (web svg -> RN easiest)
 const CategoryIcon = ({ type }) => {
   const map = {
-    pizza: "🍕",
-    burger: "🍔",
+    kothu: "🥘",
+    friedrice: "🍚",
     biryani: "🍛",
-    desserts: "🧁",
-    drinks: "🥤",
+    parotta: "🫓",
+    shorteats: "🥟",
   };
-  return <Text style={styles.catEmoji}>{map[type] || "🍕"}</Text>;
+  return <Text style={styles.catEmoji}>{map[type] || "🍛"}</Text>;
 };
 
 export default function HomeScreen({ navigation }) {
@@ -42,11 +42,11 @@ export default function HomeScreen({ navigation }) {
 
   const categories = useMemo(
     () => [
-      { id: 1, name: "Pizza", type: "pizza" },
-      { id: 2, name: "Burger", type: "burger" },
+      { id: 1, name: "Kothu", type: "kothu" },
+      { id: 2, name: "Fried Rice", type: "friedrice" },
       { id: 3, name: "Biryani", type: "biryani" },
-      { id: 4, name: "Desserts", type: "desserts" },
-      { id: 5, name: "Drinks", type: "drinks" },
+      { id: 4, name: "Parotta", type: "parotta" },
+      { id: 5, name: "Short Eats", type: "shorteats" },
     ],
     []
   );
@@ -137,8 +137,6 @@ export default function HomeScreen({ navigation }) {
     return () => clearTimeout(t);
   }, [searchQuery, activeTab]);
 
-  const featuredRestaurant = restaurants?.[0];
-
   const onSelectCategory = (category) => {
     setSelectedCategory(category.id);
     setActiveTab("food");
@@ -151,14 +149,21 @@ export default function HomeScreen({ navigation }) {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <View style={styles.brandRow}>
-            <View style={styles.logoBox}>
-              <Text style={styles.logoText}>N</Text>
-            </View>
-            <View>
-              <Text style={styles.brandTitle}>Near Me</Text>
-              <Text style={styles.brandSub}>Nearby restaurants & food</Text>
-            </View>
+          {/* Logo */}
+          <View style={styles.logoBox}>
+            <Text style={styles.logoText}>N</Text>
+          </View>
+
+          {/* Search */}
+          <View style={styles.searchWrap}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search restaurants or dishes"
+              placeholderTextColor="#9CA3AF"
+              style={styles.searchInput}
+            />
           </View>
 
           {/* Notifications */}
@@ -166,7 +171,9 @@ export default function HomeScreen({ navigation }) {
             onPress={() => navigation.navigate("Notifications")}
             style={({ pressed }) => [styles.bellBtn, pressed && { opacity: 0.85 }]}
           >
-            <Text style={styles.bellIcon}>🔔</Text>
+            <View style={styles.bellIconWrap}>
+              <Text style={styles.bellIcon}>🔔</Text>
+            </View>
             {unreadCount > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
@@ -174,36 +181,9 @@ export default function HomeScreen({ navigation }) {
             )}
           </Pressable>
         </View>
-
-        {/* Search */}
-        <View style={styles.searchWrap}>
-          <Text style={styles.searchIcon}>🔎</Text>
-          <TextInput
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="Search restaurants or dishes near you"
-            placeholderTextColor="#9CA3AF"
-            style={styles.searchInput}
-          />
-        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Promo banner */}
-        <View style={styles.banner}>
-          <Image
-            source={{
-              uri: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=1200&q=80",
-            }}
-            style={styles.bannerImg}
-          />
-          <View style={styles.bannerOverlay} />
-          <View style={styles.bannerTextWrap}>
-            <Text style={styles.bannerTitle}>Get Up To 20% Discount{"\n"}On Your First Order</Text>
-            <Text style={styles.bannerSub}>Enjoy delicious meals from nearby restaurants</Text>
-          </View>
-        </View>
-
         {/* Categories */}
         <View style={styles.sectionRow}>
           <Text style={styles.sectionTitle}>Category</Text>
@@ -268,50 +248,14 @@ export default function HomeScreen({ navigation }) {
         {/* Loading */}
         {loading ? (
           <View style={styles.loadingBox}>
-            <ActivityIndicator size="large" />
+            <ActivityIndicator size="large" color="#10b981" />
             <Text style={styles.loadingText}>Finding delicious options...</Text>
           </View>
         ) : activeTab === "restaurant" ? (
           <>
-            {/* Featured */}
-            {!!featuredRestaurant && (
-              <>
-                <Text style={[styles.sectionTitle, { marginTop: 6, marginBottom: 10 }]}>
-                  Featured Restaurant
-                </Text>
-
-                <Pressable
-                  onPress={() =>
-                    navigation.navigate("RestaurantFoods", { restaurantId: featuredRestaurant.id })
-                  }
-                  style={styles.featureCard}
-                >
-                  <Image
-                    source={{
-                      uri:
-                        featuredRestaurant.logo_url ||
-                        "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800",
-                    }}
-                    style={styles.featureImg}
-                  />
-                  <View style={styles.featureOverlay} />
-                  <View style={styles.featureBottom}>
-                    <Text style={styles.featureName}>{featuredRestaurant.restaurant_name}</Text>
-                    <Text style={styles.featureMeta}>
-                      {featuredRestaurant.cuisine || "Multi-cuisine"}
-                      {featuredRestaurant.delivery_time ? ` • ${featuredRestaurant.delivery_time}` : ""}
-                    </Text>
-                  </View>
-                  <View style={styles.featureTag}>
-                    <Text style={styles.featureTagText}>⭐ Featured</Text>
-                  </View>
-                </Pressable>
-              </>
-            )}
-
-            {/* All Restaurants list */}
-            <Text style={[styles.sectionTitle, { marginTop: 16, marginBottom: 10 }]}>
-              All Restaurants
+            {/* All Restaurants as Featured Cards */}
+            <Text style={[styles.sectionTitle, { marginTop: 6, marginBottom: 10 }]}>
+              Restaurants
             </Text>
 
             {restaurants.length === 0 ? (
@@ -321,32 +265,54 @@ export default function HomeScreen({ navigation }) {
                 data={restaurants}
                 keyExtractor={(item) => String(item.id)}
                 scrollEnabled={false}
-                ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+                ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
                 renderItem={({ item }) => (
                   <Pressable
                     onPress={() => navigation.navigate("RestaurantFoods", { restaurantId: item.id })}
-                    style={({ pressed }) => [styles.rowCard, pressed && { opacity: 0.92 }]}
+                    style={({ pressed }) => [styles.featureCard, pressed && { opacity: 0.92 }]}
                   >
                     <Image
                       source={{
                         uri:
+                          item.cover_image ||
                           item.logo_url ||
-                          "https://images.unsplash.com/photo-1552566626-52f8b828add9?w=400",
+                          "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800",
                       }}
-                      style={styles.rowImg}
+                      style={styles.featureImg}
                     />
-                    <View style={styles.rowBody}>
-                      <Text style={styles.rowTitle} numberOfLines={1}>
-                        {item.restaurant_name}
-                      </Text>
-                      <Text style={styles.rowSub} numberOfLines={1}>
-                        {item.cuisine || "Multi-cuisine"}
-                      </Text>
-                      <Text style={styles.rowMeta}>
-                        {item.rating ? `★ ${item.rating}  ` : ""}
-                        {item.delivery_time ? `${item.delivery_time}  ` : ""}
-                        {item.delivery_fee === 0 ? "Free delivery" : item.delivery_fee ? `Rs. ${item.delivery_fee}` : ""}
-                      </Text>
+                    <View style={styles.featureOverlay} />
+                    
+                    {/* Closed Badge - Top Left */}
+                    {item.is_open === false && (
+                      <View style={styles.closedTag}>
+                        <Text style={styles.closedTagText}>Closed</Text>
+                      </View>
+                    )}
+                    
+                    {/* Featured Badge - Top Right */}
+                    <View style={styles.featureTag}>
+                      <Text style={styles.featureTagText}>⭐ Featured</Text>
+                    </View>
+                    
+                    {/* Bottom Info with Logo */}
+                    <View style={styles.featureBottom}>
+                      <View style={styles.featureInfoRow}>
+                        <Image
+                          source={{
+                            uri:
+                              item.logo_url ||
+                              "https://images.unsplash.com/photo-1552566626-52f8b828add9?w=100",
+                          }}
+                          style={styles.featureLogo}
+                        />
+                        <View style={styles.featureTextWrap}>
+                          <Text style={styles.featureName}>{item.restaurant_name}</Text>
+                          <Text style={styles.featureMeta}>
+                            {item.cuisine || "Multi-cuisine"}
+                            {item.delivery_time ? ` • ${item.delivery_time}` : ""}
+                          </Text>
+                        </View>
+                      </View>
                     </View>
                   </Pressable>
                 )}
@@ -440,41 +406,51 @@ const styles = StyleSheet.create({
 
   header: {
     backgroundColor: "#fff",
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingTop: 12,
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#EEF2F7",
   },
-  headerTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  headerTop: { flexDirection: "row", alignItems: "center", gap: 10 },
 
-  brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   logoBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#10b981",
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
-  logoText: { color: "#fff", fontWeight: "900", fontSize: 16 },
-  brandTitle: { fontSize: 18, fontWeight: "900", color: "#111827" },
-  brandSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  logoText: { color: "#fff", fontWeight: "900", fontSize: 18 },
 
   bellBtn: {
     width: 44,
     height: 44,
-    borderRadius: 999,
+    borderRadius: 14,
     backgroundColor: "#F3F4F6",
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
-  bellIcon: { fontSize: 18 },
+  bellIconWrap: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bellIcon: { fontSize: 20 },
   badge: {
     position: "absolute",
-    top: -2,
-    right: -2,
+    top: -4,
+    right: -4,
     minWidth: 20,
     height: 20,
     paddingHorizontal: 6,
@@ -482,29 +458,26 @@ const styles = StyleSheet.create({
     backgroundColor: "#EF4444",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#fff",
   },
-  badgeText: { color: "#fff", fontWeight: "900", fontSize: 11 },
+  badgeText: { color: "#fff", fontWeight: "900", fontSize: 10 },
 
   searchWrap: {
-    marginTop: 10,
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#F3F4F6",
-    borderRadius: 16,
+    borderRadius: 14,
     paddingHorizontal: 12,
-    height: 48,
+    height: 44,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
-  searchIcon: { fontSize: 16, opacity: 0.7, marginRight: 8 },
+  searchIcon: { fontSize: 14, opacity: 0.6, marginRight: 8 },
   searchInput: { flex: 1, color: "#111827", fontSize: 14 },
 
   content: { padding: 14 },
-
-  banner: { borderRadius: 22, overflow: "hidden", height: 190, marginBottom: 16 },
-  bannerImg: { width: "100%", height: "100%" },
-  bannerOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.35)" },
-  bannerTextWrap: { position: "absolute", left: 16, right: 16, top: 26 },
-  bannerTitle: { color: "#fff", fontSize: 20, fontWeight: "900", lineHeight: 26 },
-  bannerSub: { color: "rgba(255,255,255,0.9)", marginTop: 8, fontSize: 13 },
 
   sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionTitle: { fontSize: 16, fontWeight: "900", color: "#111827" },
@@ -542,12 +515,30 @@ const styles = StyleSheet.create({
   loadingBox: { alignItems: "center", justifyContent: "center", paddingVertical: 40, gap: 10 },
   loadingText: { color: "#6B7280", fontWeight: "700" },
 
-  featureCard: { borderRadius: 22, overflow: "hidden", height: 220 },
+  featureCard: { 
+    borderRadius: 22, 
+    overflow: "hidden", 
+    height: 200,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+  },
   featureImg: { width: "100%", height: "100%" },
-  featureOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.35)" },
-  featureBottom: { position: "absolute", left: 16, right: 16, bottom: 16 },
-  featureName: { color: "#fff", fontSize: 20, fontWeight: "900" },
-  featureMeta: { color: "rgba(255,255,255,0.9)", marginTop: 6 },
+  featureOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.4)" },
+  featureBottom: { position: "absolute", left: 0, right: 0, bottom: 0, padding: 14, backgroundColor: "rgba(0,0,0,0.3)" },
+  featureInfoRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  featureLogo: { 
+    width: 48, 
+    height: 48, 
+    borderRadius: 12, 
+    borderWidth: 2, 
+    borderColor: "#fff",
+  },
+  featureTextWrap: { flex: 1 },
+  featureName: { color: "#fff", fontSize: 18, fontWeight: "900" },
+  featureMeta: { color: "rgba(255,255,255,0.9)", marginTop: 4, fontSize: 13 },
   featureTag: {
     position: "absolute",
     top: 12,
@@ -556,8 +547,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   featureTagText: { color: "#fff", fontWeight: "900", fontSize: 12 },
+  closedTag: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    backgroundColor: "#EF4444",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  closedTagText: { color: "#fff", fontWeight: "900", fontSize: 12 },
 
   rowCard: {
     flexDirection: "row",
