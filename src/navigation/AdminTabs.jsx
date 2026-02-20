@@ -1,6 +1,6 @@
-import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { View, Text, StyleSheet } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Admin Screens
 import AdminDashboard from "../screens/admin/AdminDashboard";
@@ -21,47 +21,63 @@ function TabIcon({ label, focused }) {
       <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
         {emoji}
       </Text>
-      <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>{label}</Text>
+      <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
+        {label}
+      </Text>
     </View>
   );
 }
 
 export default function AdminTabs() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       initialRouteName="Dashboard"
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: {
+          ...styles.tabBar,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
+        },
       }}
     >
       <Tab.Screen
         name="Dashboard"
         component={AdminDashboard}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Dashboard" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Dashboard" focused={focused} />
+          ),
         }}
       />
       <Tab.Screen
         name="Orders"
         component={Orders}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Orders" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Orders" focused={focused} />
+          ),
         }}
       />
       <Tab.Screen
         name="Products"
         component={Products}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Products" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Products" focused={focused} />
+          ),
         }}
       />
       <Tab.Screen
         name="Profile"
         component={Profile}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Profile" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Profile" focused={focused} />
+          ),
         }}
       />
     </Tab.Navigator>
@@ -70,9 +86,7 @@ export default function AdminTabs() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    height: 72,
     paddingTop: 10,
-    paddingBottom: 12,
     borderTopWidth: 1,
     borderTopColor: "#EEF2F7",
     backgroundColor: "#fff",
@@ -80,6 +94,11 @@ const styles = StyleSheet.create({
   iconWrap: { width: 70, alignItems: "center", justifyContent: "center" },
   iconEmoji: { fontSize: 20, opacity: 0.7 },
   iconEmojiActive: { opacity: 1 },
-  iconLabel: { marginTop: 4, fontSize: 11, color: "#9CA3AF", fontWeight: "800" },
+  iconLabel: {
+    marginTop: 4,
+    fontSize: 11,
+    color: "#9CA3AF",
+    fontWeight: "800",
+  },
   iconLabelActive: { color: "#22c55e" },
 });

@@ -1,11 +1,11 @@
 /**
  * Push Notification Service for NearMe
- * 
+ *
  * Works in:
  * - Expo Go (development testing on physical devices)
  * - EAS Development builds
  * - EAS Production builds (Play Store / App Store)
- * 
+ *
  * Features:
  * - Sound on every notification (foreground + background + locked)
  * - Works when app is locked/background/killed
@@ -15,37 +15,44 @@
  * - Handles notification taps for navigation
  */
 
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
-import Constants from 'expo-constants';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform, Alert, Linking } from 'react-native';
-import { API_URL } from '../config/env';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import * as Device from "expo-device";
+import * as Notifications from "expo-notifications";
+import { Alert, Linking, Platform } from "react-native";
+import { API_URL } from "../config/env";
+import alarmService from "./alarmService";
 
 // Detect if running in Expo Go (no native push support since SDK 53)
-const isExpoGo = Constants.appOwnership === 'expo';
+const isExpoGo = Constants.appOwnership === "expo";
 
 // ─── FOREGROUND HANDLER ───────────────────────────────────────
-// Controls what happens when a notification arrives while app is OPEN
+// Controls what happens when a notification arrives while app is OPEN.
+// Alarm pulse notifications (isAlarm=true) suppress the banner so the
+// in-app modal stays clean, but we still play the sound.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,   // Show banner even in foreground
-    shouldPlaySound: true,   // Play sound even in foreground
-    shouldSetBadge: true,    // Update badge count
-    priority: Notifications.AndroidNotificationPriority.MAX,
-  }),
+  handleNotification: async (notification) => {
+    const data = notification.request.content.data || {};
+    const isAlarmPulse = data.isAlarm === "true" || data.isAlarm === true;
+    return {
+      shouldShowAlert: !isAlarmPulse, // no banner for alarm pulses
+      shouldPlaySound: true, // always play sound
+      shouldSetBadge: !isAlarmPulse,
+      priority: Notifications.AndroidNotificationPriority.MAX,
+    };
+  },
 });
 
 // ─── ANDROID CHANNELS (Required for Android 8+) ──────────────
-if (Platform.OS === 'android') {
+if (Platform.OS === "android") {
   // Default channel
-  Notifications.setNotificationChannelAsync('default', {
-    name: 'Default',
-    description: 'General notifications',
+  Notifications.setNotificationChannelAsync("default", {
+    name: "Default",
+    description: "General notifications",
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#22c55e',
-    sound: 'default',
+    lightColor: "#22c55e",
+    sound: "default",
     enableVibrate: true,
     enableLights: true,
     showBadge: true,
@@ -53,13 +60,13 @@ if (Platform.OS === 'android') {
   });
 
   // Order updates channel (non-urgent)
-  Notifications.setNotificationChannelAsync('orders', {
-    name: 'Order Updates',
-    description: 'Notifications about your orders',
+  Notifications.setNotificationChannelAsync("orders", {
+    name: "Order Updates",
+    description: "Notifications about your orders",
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#22c55e',
-    sound: 'default',
+    lightColor: "#22c55e",
+    sound: "default",
     enableVibrate: true,
     showBadge: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
@@ -67,14 +74,18 @@ if (Platform.OS === 'android') {
 
   // URGENT orders channel — persistent ringing for new orders/deliveries
   // This channel uses MAX importance which shows as heads-up notification
-  // and keeps ringing until user interacts
-  Notifications.setNotificationChannelAsync('urgent_orders', {
-    name: 'Urgent Orders & Deliveries',
-    description: 'New orders and delivery requests that ring until you respond',
+  // and keeps ringing until user interacts.
+  // sound: "alarm" → references res/raw/alarm.mp3 compiled into the APK
+  // via the expo-notifications plugin `sounds` array in app.config.js.
+  // ⚠️ Android cannot update a channel's sound after first creation.
+  //    Clear app data or reinstall if the custom sound doesn't apply.
+  Notifications.setNotificationChannelAsync("urgent_orders", {
+    name: "Urgent Orders & Deliveries",
+    description: "New orders and delivery requests that ring until you respond",
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 500, 200, 500, 200, 500, 200, 500],
-    lightColor: '#ef4444',
-    sound: 'default',
+    lightColor: "#ef4444",
+    sound: "alarm",
     enableVibrate: true,
     enableLights: true,
     showBadge: true,
@@ -82,13 +93,13 @@ if (Platform.OS === 'android') {
   });
 
   // Alerts channel — for manager unassigned delivery alerts
-  Notifications.setNotificationChannelAsync('alerts', {
-    name: 'Critical Alerts',
-    description: 'Urgent alerts about unassigned deliveries and issues',
+  Notifications.setNotificationChannelAsync("alerts", {
+    name: "Critical Alerts",
+    description: "Urgent alerts about unassigned deliveries and issues",
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
-    lightColor: '#ef4444',
-    sound: 'default',
+    lightColor: "#ef4444",
+    sound: "default",
     enableVibrate: true,
     enableLights: true,
     showBadge: true,
@@ -96,26 +107,26 @@ if (Platform.OS === 'android') {
   });
 
   // Payments channel
-  Notifications.setNotificationChannelAsync('payments', {
-    name: 'Payments',
-    description: 'Payment and withdrawal notifications',
+  Notifications.setNotificationChannelAsync("payments", {
+    name: "Payments",
+    description: "Payment and withdrawal notifications",
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#22c55e',
-    sound: 'default',
+    lightColor: "#22c55e",
+    sound: "default",
     enableVibrate: true,
     showBadge: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
 
   // Milestones channel
-  Notifications.setNotificationChannelAsync('milestones', {
-    name: 'Milestones & Achievements',
-    description: 'Daily milestone achievements',
+  Notifications.setNotificationChannelAsync("milestones", {
+    name: "Milestones & Achievements",
+    description: "Daily milestone achievements",
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 300, 150, 300, 150, 300],
-    lightColor: '#f59e0b',
-    sound: 'default',
+    lightColor: "#f59e0b",
+    sound: "default",
     enableVibrate: true,
     enableLights: true,
     showBadge: true,
@@ -123,13 +134,13 @@ if (Platform.OS === 'android') {
   });
 
   // Approval notifications channel - MAX priority
-  Notifications.setNotificationChannelAsync('approvals', {
-    name: 'Approvals',
-    description: 'Restaurant and driver approval notifications',
+  Notifications.setNotificationChannelAsync("approvals", {
+    name: "Approvals",
+    description: "Restaurant and driver approval notifications",
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 500, 200, 500, 200, 500],
-    lightColor: '#22c55e',
-    sound: 'default',
+    lightColor: "#22c55e",
+    sound: "default",
     enableVibrate: true,
     enableLights: true,
     showBadge: true,
@@ -143,6 +154,8 @@ class PushNotificationService {
     this.foregroundSubscription = null;
     this.responseSubscription = null;
     this.isInitialized = false;
+
+    this._onUrgentNotification = null; // callback for in-app modal
   }
 
   /**
@@ -150,6 +163,41 @@ class PushNotificationService {
    */
   setNavigationRef(ref) {
     this.navigationRef = ref;
+  }
+
+  /**
+   * Register a callback for urgent notifications (new_order, new_delivery)
+   * The callback receives { title, body, data } and should show an in-app modal
+   */
+  onUrgentNotification(callback) {
+    this._onUrgentNotification = callback;
+  }
+
+  // ─── PERSISTENT RINGING ───────────────────────────────────────
+
+  /**
+   * Start persistent alarm for urgent notifications.
+   * Uses expo-av to loop the custom alarm.mp3 continuously.
+   * Works in foreground AND while the app is minimised
+   * (Audio.setAudioModeAsync staysActiveInBackground:true).
+   */
+  async startAlarm(title, body, data = {}) {
+    console.log("[Push] 🔔 Starting alarm:", title);
+    await alarmService.start();
+  }
+
+  /**
+   * Stop the persistent alarm. Call when user accepts or rejects.
+   */
+  async stopAlarm() {
+    await alarmService.stop();
+  }
+
+  /**
+   * Check if alarm is currently ringing
+   */
+  isAlarmActive() {
+    return alarmService.isPlaying();
   }
 
   // ─── PERMISSION ──────────────────────────────────────────────
@@ -161,14 +209,15 @@ class PushNotificationService {
    */
   async requestPermission() {
     if (!Device.isDevice) {
-      console.log('[Push] Not a physical device - wont work');
+      console.log("[Push] Not a physical device - wont work");
       return false;
     }
 
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    const { status: existingStatus } =
+      await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
-    if (existingStatus !== 'granted') {
+    if (existingStatus !== "granted") {
       const { status } = await Notifications.requestPermissionsAsync({
         ios: {
           allowAlert: true,
@@ -180,12 +229,12 @@ class PushNotificationService {
       finalStatus = status;
     }
 
-    if (finalStatus !== 'granted') {
-      console.log('[Push] Permission denied');
+    if (finalStatus !== "granted") {
+      console.log("[Push] Permission denied");
       return false;
     }
 
-    console.log('[Push] Permission granted');
+    console.log("[Push] Permission granted");
     return true;
   }
 
@@ -202,21 +251,21 @@ class PushNotificationService {
    */
   showEnableNotificationsAlert() {
     Alert.alert(
-      'Enable Notifications',
-      'Turn on notifications to receive updates about orders, deliveries, and approvals.',
+      "Enable Notifications",
+      "Turn on notifications to receive updates about orders, deliveries, and approvals.",
       [
-        { text: 'Not Now', style: 'cancel' },
+        { text: "Not Now", style: "cancel" },
         {
-          text: 'Open Settings',
+          text: "Open Settings",
           onPress: () => {
-            if (Platform.OS === 'ios') {
-              Linking.openURL('app-settings:');
+            if (Platform.OS === "ios") {
+              Linking.openURL("app-settings:");
             } else {
               Linking.openSettings();
             }
           },
         },
-      ]
+      ],
     );
   }
 
@@ -224,7 +273,7 @@ class PushNotificationService {
 
   /**
    * Get Expo Push Token
-   * 
+   *
    * NOTE: Since SDK 53, remote push does NOT work in Expo Go on Android.
    * You MUST use a development build (eas build --profile development).
    * iOS Expo Go still supports push tokens.
@@ -232,13 +281,15 @@ class PushNotificationService {
   async getExpoPushToken() {
     try {
       if (!Device.isDevice) {
-        console.log('[Push] Need physical device');
+        console.log("[Push] Need physical device");
         return null;
       }
 
       // Expo Go on Android cannot get push tokens since SDK 53
-      if (isExpoGo && Platform.OS === 'android') {
-        console.log('[Push] Expo Go on Android - remote push not supported. Use development build.');
+      if (isExpoGo && Platform.OS === "android") {
+        console.log(
+          "[Push] Expo Go on Android - remote push not supported. Use development build.",
+        );
         return null;
       }
 
@@ -249,21 +300,21 @@ class PushNotificationService {
 
       let tokenData;
 
-      if (projectId && projectId !== 'YOUR_PROJECT_ID_HERE') {
-        console.log('[Push] Getting token with projectId:', projectId);
+      if (projectId && projectId !== "YOUR_PROJECT_ID_HERE") {
+        console.log("[Push] Getting token with projectId:", projectId);
         tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
       } else {
-        console.log('[Push] Getting token without projectId...');
+        console.log("[Push] Getting token without projectId...");
         tokenData = await Notifications.getExpoPushTokenAsync();
       }
 
       const token = tokenData.data;
-      console.log('[Push] Got token:', token);
+      console.log("[Push] Got token:", token);
 
-      await AsyncStorage.setItem('expoPushToken', token);
+      await AsyncStorage.setItem("expoPushToken", token);
       return token;
     } catch (error) {
-      console.error('[Push] Token error:', error);
+      console.error("[Push] Token error:", error);
       return null;
     }
   }
@@ -271,10 +322,10 @@ class PushNotificationService {
   // ─── DEVICE ID ──────────────────────────────────────────────
 
   async getDeviceId() {
-    let deviceId = await AsyncStorage.getItem('deviceId');
+    let deviceId = await AsyncStorage.getItem("deviceId");
     if (!deviceId) {
       deviceId = `${Platform.OS}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      await AsyncStorage.setItem('deviceId', deviceId);
+      await AsyncStorage.setItem("deviceId", deviceId);
     }
     return deviceId;
   }
@@ -283,7 +334,7 @@ class PushNotificationService {
 
   /**
    * Register push token with your backend
-   * 
+   *
    * FLOW:
    * 1. User logs in as admin
    * 2. App gets Expo Push Token
@@ -304,14 +355,14 @@ class PushNotificationService {
 
       const deviceId = await this.getDeviceId();
 
-      console.log('[Push] Registering with backend...');
-      console.log('[Push] Token:', expoPushToken);
-      console.log('[Push] Device:', deviceId, Platform.OS);
+      console.log("[Push] Registering with backend...");
+      console.log("[Push] Token:", expoPushToken);
+      console.log("[Push] Device:", deviceId, Platform.OS);
 
       const response = await fetch(`${API_URL}/push/register-token`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
@@ -323,15 +374,15 @@ class PushNotificationService {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('[Push] Registered!', data);
+        console.log("[Push] Registered!", data);
         return true;
       } else {
         const err = await response.json().catch(() => ({}));
-        console.error('[Push] Register failed:', response.status, err);
+        console.error("[Push] Register failed:", response.status, err);
         return false;
       }
     } catch (error) {
-      console.error('[Push] Register error:', error);
+      console.error("[Push] Register error:", error);
       return false;
     }
   }
@@ -345,19 +396,19 @@ class PushNotificationService {
 
       if (authToken) {
         await fetch(`${API_URL}/push/unregister-token`, {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
             Authorization: `Bearer ${authToken}`,
           },
           body: JSON.stringify({ deviceId }),
         });
       }
 
-      await AsyncStorage.removeItem('expoPushToken');
-      console.log('[Push] Token unregistered');
+      await AsyncStorage.removeItem("expoPushToken");
+      console.log("[Push] Token unregistered");
     } catch (error) {
-      console.error('[Push] Unregister error:', error);
+      console.error("[Push] Unregister error:", error);
     }
   }
 
@@ -365,6 +416,7 @@ class PushNotificationService {
 
   /**
    * Handle notifications in FOREGROUND (app is open)
+   * For urgent/persistent notifications, starts the alarm & triggers the in-app modal
    */
   setupForegroundHandler() {
     if (this.foregroundSubscription) {
@@ -374,8 +426,30 @@ class PushNotificationService {
     this.foregroundSubscription = Notifications.addNotificationReceivedListener(
       (notification) => {
         const { title, body, data } = notification.request.content;
-        console.log('[Push] Foreground:', { title, body, data });
-      }
+        console.log("[Push] Foreground:", { title, body, data });
+
+        // IMPORTANT: Ignore alarm pulse notifications fired by this service itself.
+        // They have isAlarm:"true" and would cause an infinite loop if processed.
+        if (data?.isAlarm === "true" || data?.isAlarm === true) {
+          return;
+        }
+
+        // Check if this is a persistent/urgent notification
+        const isPersistent =
+          data?.persistent === "true" || data?.persistent === true;
+        const isUrgent =
+          data?.type === "new_order" || data?.type === "new_delivery";
+
+        if (isPersistent || isUrgent) {
+          // Start persistent alarm (sound + modal)
+          this.startAlarm(title, body, data);
+
+          // Trigger in-app modal via callback
+          if (this._onUrgentNotification) {
+            this._onUrgentNotification({ title, body, data });
+          }
+        }
+      },
     );
   }
 
@@ -389,9 +463,28 @@ class PushNotificationService {
 
     this.responseSubscription =
       Notifications.addNotificationResponseReceivedListener((response) => {
-        console.log('[Push] Tapped notification');
-        const data = response.notification.request.content.data || {};
-        this.handleNotificationPress(data);
+        console.log("[Push] Tapped notification");
+        const content = response.notification.request.content;
+        const notifData = content.data || {};
+
+        // Navigate based on notification type
+        this.handleNotificationPress(notifData);
+
+        // If urgent notification tapped from background/locked screen, show modal
+        const isPersistent =
+          notifData?.persistent === "true" || notifData?.persistent === true;
+        const isUrgent =
+          notifData?.type === "new_order" || notifData?.type === "new_delivery";
+        if (isPersistent || isUrgent) {
+          this.startAlarm(content.title, content.body, notifData);
+          if (this._onUrgentNotification) {
+            this._onUrgentNotification({
+              title: content.title,
+              body: content.body,
+              data: notifData,
+            });
+          }
+        }
       });
   }
 
@@ -401,9 +494,30 @@ class PushNotificationService {
   async getInitialNotification() {
     const response = await Notifications.getLastNotificationResponseAsync();
     if (response) {
-      console.log('[Push] App opened from notification');
-      const data = response.notification.request.content.data || {};
-      setTimeout(() => this.handleNotificationPress(data), 1500);
+      console.log("[Push] App opened from notification");
+      const content = response.notification.request.content;
+      const notifData = content.data || {};
+
+      // Extra delay — navigation ref and modal callback must be ready
+      setTimeout(() => {
+        this.handleNotificationPress(notifData);
+
+        // If urgent notification, show modal (even when app was killed)
+        const isPersistent =
+          notifData?.persistent === "true" || notifData?.persistent === true;
+        const isUrgent =
+          notifData?.type === "new_order" || notifData?.type === "new_delivery";
+        if (isPersistent || isUrgent) {
+          this.startAlarm(content.title, content.body, notifData);
+          if (this._onUrgentNotification) {
+            this._onUrgentNotification({
+              title: content.title,
+              body: content.body,
+              data: notifData,
+            });
+          }
+        }
+      }, 2000);
     }
   }
 
@@ -411,35 +525,37 @@ class PushNotificationService {
 
   handleNotificationPress(data) {
     const { type, screen, orderId } = data || {};
-    console.log('[Push] Navigate:', { type, screen, orderId });
+    console.log("[Push] Navigate:", { type, screen, orderId });
 
     if (!this.navigationRef) return;
     const nav = this.navigationRef;
 
     switch (type) {
-      case 'restaurant_approval':
-      case 'admin_approval':
-        nav.reset({ index: 0, routes: [{ name: 'AdminMain' }] });
+      case "restaurant_approval":
+      case "admin_approval":
+        nav.reset({ index: 0, routes: [{ name: "AdminMain" }] });
         break;
-      case 'driver_approval':
-        nav.reset({ index: 0, routes: [{ name: 'DriverMain' }] });
+      case "driver_approval":
+        nav.reset({ index: 0, routes: [{ name: "DriverMain" }] });
         break;
-      case 'order_update':
-        if (orderId) nav.navigate('OrderDetails', { orderId });
+      case "order_update":
+        if (orderId) nav.navigate("OrderDetails", { orderId });
         break;
-      case 'new_order':
-        nav.navigate('AdminOrders');
+      case "new_order":
+        // AdminTabs screen is 'Orders' inside the 'AdminMain' stack screen
+        nav.navigate("AdminMain", { screen: "Orders" });
         break;
-      case 'new_delivery':
-        nav.navigate('AvailableDeliveries');
+      case "new_delivery":
+        // DriverTabs screen is 'Available' inside the 'DriverTabs' stack screen
+        nav.navigate("DriverTabs", { screen: "Available" });
         break;
-      case 'payment_received':
-        nav.navigate('DriverEarnings');
+      case "payment_received":
+        nav.navigate("DriverTabs", { screen: "Earnings" });
         break;
-      case 'unassigned_delivery_alert':
-        nav.navigate('ManagerPendingDeliveries');
+      case "unassigned_delivery_alert":
+        nav.navigate("ManagerPendingDeliveries");
         break;
-      case 'milestone':
+      case "milestone":
         // Navigate based on user screen in data
         if (screen) nav.navigate(screen);
         break;
@@ -455,12 +571,16 @@ class PushNotificationService {
    * Full initialization - call after login or on app start
    */
   async initialize(authToken) {
-    console.log('[Push] Initializing...');
+    console.log("[Push] Initializing...");
 
     // Warn if running in Expo Go on Android
-    if (isExpoGo && Platform.OS === 'android') {
-      console.log('[Push] Running in Expo Go on Android - remote push not available.');
-      console.log('[Push] Local notifications still work. Use dev build for full push support.');
+    if (isExpoGo && Platform.OS === "android") {
+      console.log(
+        "[Push] Running in Expo Go on Android - remote push not available.",
+      );
+      console.log(
+        "[Push] Local notifications still work. Use dev build for full push support.",
+      );
     }
 
     try {
@@ -472,16 +592,16 @@ class PushNotificationService {
       this.setupNotificationResponseHandler();
 
       // Check if app opened from notification
-      if (!isExpoGo || Platform.OS !== 'android') {
+      if (!isExpoGo || Platform.OS !== "android") {
         await this.getInitialNotification();
       }
 
       this.isInitialized = true;
-      console.log('[Push] Done! Registered:', registered);
+      console.log("[Push] Done! Registered:", registered);
 
       return { success: registered, isExpoGo };
     } catch (error) {
-      console.error('[Push] Init error:', error);
+      console.error("[Push] Init error:", error);
       return { success: false, isExpoGo };
     }
   }
@@ -490,6 +610,7 @@ class PushNotificationService {
    * Cleanup (call on logout)
    */
   cleanup() {
+    alarmService.stop(); // fire-and-forget — no need to await on logout
     if (this.foregroundSubscription) {
       this.foregroundSubscription.remove();
       this.foregroundSubscription = null;
@@ -498,6 +619,7 @@ class PushNotificationService {
       this.responseSubscription.remove();
       this.responseSubscription = null;
     }
+    this._onUrgentNotification = null;
     this.isInitialized = false;
   }
 
@@ -508,11 +630,11 @@ class PushNotificationService {
    * Good for testing - triggers in 1 second
    */
   async scheduleLocalNotification(title, body, data = {}) {
-    const channelId = data.type?.includes('approval')
-      ? 'approvals'
-      : data.type?.includes('order')
-        ? 'orders'
-        : 'default';
+    const channelId = data.type?.includes("approval")
+      ? "approvals"
+      : data.type?.includes("order")
+        ? "orders"
+        : "default";
 
     await Notifications.scheduleNotificationAsync({
       content: {
@@ -521,10 +643,10 @@ class PushNotificationService {
         data,
         sound: true,
         priority: Notifications.AndroidNotificationPriority.MAX,
-        ...(Platform.OS === 'android' ? { channelId } : {}),
+        ...(Platform.OS === "android" ? { channelId } : {}),
       },
       trigger: {
-        type: 'timeInterval',
+        type: "timeInterval",
         seconds: 1,
       },
     });
@@ -538,25 +660,25 @@ class PushNotificationService {
   async sendTestNotification(authToken) {
     try {
       const response = await fetch(`${API_URL}/push/send-test`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
-          title: 'NearMe Test',
-          body: 'Push notifications are working! You will get notified when your restaurant is approved.',
-          data: { type: 'test' },
-          sound: 'default',
-          channelId: 'default',
+          title: "NearMe Test",
+          body: "Push notifications are working! You will get notified when your restaurant is approved.",
+          data: { type: "test" },
+          sound: "default",
+          channelId: "default",
         }),
       });
 
       const result = await response.json();
-      console.log('[Push] Test result:', result);
+      console.log("[Push] Test result:", result);
       return result;
     } catch (error) {
-      console.error('[Push] Test error:', error);
+      console.error("[Push] Test error:", error);
       throw error;
     }
   }

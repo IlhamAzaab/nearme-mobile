@@ -1,15 +1,15 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import DashboardScreen from '../screens/driver/DashboardScreen';
-import ActiveDeliveriesScreen from '../screens/driver/ActiveDeliveriesScreen';
-import AvailableDeliveriesScreen from '../screens/driver/AvailableDeliveriesScreen';
-import DeliveryHistoryScreen from '../screens/driver/DeliveryHistoryScreen';
-import DriverMapScreen from '../screens/driver/DriverMapScreen';
-import DriverNotificationsScreen from '../screens/driver/DriverNotificationsScreen';
-import DriverEarningsScreen from '../screens/driver/DriverEarningsScreen';
-import DriverProfileScreen from '../screens/driver/DriverProfileScreen';
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import ActiveDeliveriesScreen from "../screens/driver/ActiveDeliveriesScreen";
+import AvailableDeliveriesScreen from "../screens/driver/AvailableDeliveriesScreen";
+import DashboardScreen from "../screens/driver/DashboardScreen";
+import DeliveryHistoryScreen from "../screens/driver/DeliveryHistoryScreen";
+import DriverEarningsScreen from "../screens/driver/DriverEarningsScreen";
+import DriverMapScreen from "../screens/driver/DriverMapScreen";
+import DriverNotificationsScreen from "../screens/driver/DriverNotificationsScreen";
+import DriverProfileScreen from "../screens/driver/DriverProfileScreen";
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -44,40 +44,54 @@ function TabIcon({ label, focused }) {
 }
 
 function DriverTabs() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: {
+          ...styles.tabBar,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
+        },
       }}
     >
       <Tab.Screen
         name="Dashboard"
         component={DashboardScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Home" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Home" focused={focused} />
+          ),
         }}
       />
       <Tab.Screen
         name="Available"
         component={AvailableDeliveriesScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Find" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Find" focused={focused} />
+          ),
         }}
       />
       <Tab.Screen
         name="Active"
         component={ActiveDeliveriesScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Active" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Active" focused={focused} />
+          ),
         }}
       />
       <Tab.Screen
         name="Earnings"
         component={DriverEarningsScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Earnings" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Earnings" focused={focused} />
+          ),
         }}
       />
     </Tab.Navigator>
@@ -89,7 +103,10 @@ export default function DriverNavigator() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="DriverTabs" component={DriverTabs} />
       <Stack.Screen name="DriverMap" component={DriverMapScreen} />
-      <Stack.Screen name="DriverNotifications" component={DriverNotificationsScreen} />
+      <Stack.Screen
+        name="DriverNotifications"
+        component={DriverNotificationsScreen}
+      />
       <Stack.Screen name="History" component={DeliveryHistoryScreen} />
       <Stack.Screen name="DriverProfile" component={DriverProfileScreen} />
     </Stack.Navigator>
@@ -98,9 +115,7 @@ export default function DriverNavigator() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    height: 72,
     paddingTop: 10,
-    paddingBottom: 12,
     borderTopWidth: 1,
     borderTopColor: "#EEF2F7",
     backgroundColor: "#fff",

@@ -3,22 +3,22 @@ const ENV = {
   development: {
     // For Android emulator, use 10.0.2.2 to refer to host machine
     // For physical device or iOS simulator, replace with your machine's IP (e.g., 192.168.x.x)
-    API_URL: 'http://192.168.37.44:5000',
+    API_URL: "http://192.168.189.161:5000",
     ENABLE_LOGGING: true,
   },
   staging: {
-    API_URL: 'https://staging-api.nearme.com/api',
+    API_URL: "https://staging-api.nearme.com/api",
     ENABLE_LOGGING: true,
   },
   production: {
-    API_URL: 'https://api.nearme.com/api',
+    API_URL: "https://api.nearme.com/api",
     ENABLE_LOGGING: false,
   },
 };
 
 const getEnvVars = () => {
   // Default to development
-  const environment = process.env.NODE_ENV || 'development';
+  const environment = process.env.NODE_ENV || "development";
   return ENV[environment] || ENV.development;
 };
 

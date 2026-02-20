@@ -29,7 +29,11 @@ export default {
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
-      permissions: ["RECEIVE_BOOT_COMPLETED", "VIBRATE"],
+      permissions: [
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "android.permission.USE_FULL_SCREEN_INTENT",
+      ],
     },
     web: {
       output: "single",
@@ -53,6 +57,10 @@ export default {
         {
           color: "#22c55e",
           defaultChannel: "default",
+          // Custom alarm sound compiled into res/raw/alarm at build time.
+          // Used by the urgent_orders notification channel so background/killed
+          // FCM notifications ring with the custom sound (requires a new build).
+          sounds: ["./assets/sounds/alarm.mp3"],
         },
       ],
       [

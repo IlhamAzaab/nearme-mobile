@@ -1,25 +1,26 @@
-import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
-import apiClient from './api';
+import Constants from "expo-constants";
+import * as Notifications from "expo-notifications";
+import apiClient from "./api";
 
 const notificationService = {
   async registerForPushNotifications() {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    const { status: existingStatus } =
+      await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
-    
-    if (existingStatus !== 'granted') {
+
+    if (existingStatus !== "granted") {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
-    
-    if (finalStatus !== 'granted') {
-      throw new Error('Push notification permission denied');
+
+    if (finalStatus !== "granted") {
+      throw new Error("Push notification permission denied");
     }
-    
+
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ??
       Constants.easConfig?.projectId;
-    
+
     const token = await Notifications.getExpoPushTokenAsync({
       ...(projectId ? { projectId } : {}),
     });
@@ -27,11 +28,11 @@ const notificationService = {
   },
 
   async savePushToken(token) {
-    return apiClient.post('/notifications/token', { token });
+    return apiClient.post("/notifications/token", { token });
   },
 
   async getNotifications() {
-    return apiClient.get('/notifications');
+    return apiClient.get("/notifications");
   },
 
   async markAsRead(notificationId) {
@@ -39,7 +40,7 @@ const notificationService = {
   },
 
   async markAllAsRead() {
-    return apiClient.post('/notifications/read-all');
+    return apiClient.post("/notifications/read-all");
   },
 
   async deleteNotification(notificationId) {

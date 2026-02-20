@@ -1,10 +1,10 @@
-import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { View, Text, StyleSheet } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Tab Screens
-import HomeScreen from "../screens/customer/HomeScreen";
 import CartScreen from "../screens/customer/CartScreen";
+import HomeScreen from "../screens/customer/HomeScreen";
 import OrdersScreen from "../screens/customer/OrdersScreen";
 import ProfileScreen from "../screens/customer/ProfileScreen";
 
@@ -14,10 +14,18 @@ function TabIcon({ label, focused, badge }) {
   return (
     <View style={styles.iconWrap}>
       <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
-        {label === "Home" ? "🏠" : label === "Cart" ? "🛒" : label === "Orders" ? "🧾" : "👤"}
+        {label === "Home"
+          ? "🏠"
+          : label === "Cart"
+            ? "🛒"
+            : label === "Orders"
+              ? "🧾"
+              : "👤"}
       </Text>
 
-      <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>{label}</Text>
+      <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
+        {label}
+      </Text>
 
       {!!badge && badge > 0 && (
         <View style={styles.badge}>
@@ -29,20 +37,28 @@ function TabIcon({ label, focused, badge }) {
 }
 
 export default function CustomerTabs() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       initialRouteName="Home"
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: {
+          ...styles.tabBar,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
+        },
       }}
     >
       <Tab.Screen
         name="Home"
         component={HomeScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Home" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Home" focused={focused} />
+          ),
         }}
       />
 
@@ -50,7 +66,9 @@ export default function CustomerTabs() {
         name="Orders"
         component={OrdersScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Orders" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Orders" focused={focused} />
+          ),
         }}
       />
 
@@ -58,7 +76,9 @@ export default function CustomerTabs() {
         name="Cart"
         component={CartScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Cart" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Cart" focused={focused} />
+          ),
         }}
       />
 
@@ -66,7 +86,9 @@ export default function CustomerTabs() {
         name="Profile"
         component={ProfileScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="Profile" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Profile" focused={focused} />
+          ),
         }}
       />
     </Tab.Navigator>
@@ -75,9 +97,7 @@ export default function CustomerTabs() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    height: 72,
     paddingTop: 10,
-    paddingBottom: 12,
     borderTopWidth: 1,
     borderTopColor: "#EEF2F7",
     backgroundColor: "#fff",
@@ -85,7 +105,12 @@ const styles = StyleSheet.create({
   iconWrap: { width: 70, alignItems: "center", justifyContent: "center" },
   iconEmoji: { fontSize: 20, opacity: 0.7 },
   iconEmojiActive: { opacity: 1 },
-  iconLabel: { marginTop: 4, fontSize: 11, color: "#9CA3AF", fontWeight: "800" },
+  iconLabel: {
+    marginTop: 4,
+    fontSize: 11,
+    color: "#9CA3AF",
+    fontWeight: "800",
+  },
   iconLabelActive: { color: "#10b981" },
 
   badge: {

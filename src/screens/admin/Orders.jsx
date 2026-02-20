@@ -1,23 +1,23 @@
-import React, { useState, useEffect, useRef } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation } from "@react-navigation/native";
+import { useEffect, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  Modal,
-  TextInput,
   Alert,
-  Image,
-  Linking,
-  Pressable,
   Animated,
   Dimensions,
+  Image,
+  Linking,
+  Modal,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_URL } from "../../config/env";
 import supabaseClient from "../../services/supabaseClient";
 
@@ -71,7 +71,7 @@ export default function Orders() {
   const computeCounts = (list) => {
     const allOrders = list || [];
     const pending = allOrders.filter(
-      (o) => getDeliveryStatus(o) === "placed"
+      (o) => getDeliveryStatus(o) === "placed",
     ).length;
     const accepted = allOrders.filter((o) => {
       const s = getDeliveryStatus(o);
@@ -172,7 +172,7 @@ export default function Orders() {
           });
           setTimeout(() => setNewOrderNotification(null), 5000);
           fetchOrdersRef.current?.(true);
-        }
+        },
       )
       .subscribe();
 
@@ -192,7 +192,7 @@ export default function Orders() {
             "Delivery status updated:",
             updatedDelivery?.status,
             "delivery_id:",
-            updatedDelivery?.id
+            updatedDelivery?.id,
           );
 
           // Immediately update local state for instant UI feedback
@@ -209,7 +209,7 @@ export default function Orders() {
                           status: updatedDelivery.status,
                           driver_id: updatedDelivery.driver_id,
                         }
-                      : d
+                      : d,
                   ),
                 };
               }
@@ -220,7 +220,7 @@ export default function Orders() {
           });
 
           fetchOrdersRef.current?.(true);
-        }
+        },
       )
       .subscribe();
 
@@ -284,7 +284,7 @@ export default function Orders() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ status: "accepted" }),
-        }
+        },
       );
 
       if (!response.ok) {
@@ -337,7 +337,7 @@ export default function Orders() {
             status: "rejected",
             reason: rejectReason.trim(),
           }),
-        }
+        },
       );
 
       if (!response.ok) {
@@ -498,28 +498,80 @@ export default function Orders() {
         <View style={styles.statsHeader}>
           <View style={styles.statsHeaderTop}>
             <View>
-              <View style={[styles.skeleton, styles.skeletonLight, { width: 80, height: 20, marginBottom: 4 }]} />
-              <View style={[styles.skeleton, styles.skeletonLight, { width: 120, height: 12 }]} />
+              <View
+                style={[
+                  styles.skeleton,
+                  styles.skeletonLight,
+                  { width: 80, height: 20, marginBottom: 4 },
+                ]}
+              />
+              <View
+                style={[
+                  styles.skeleton,
+                  styles.skeletonLight,
+                  { width: 120, height: 12 },
+                ]}
+              />
             </View>
-            <View style={[styles.skeleton, styles.skeletonLight, { width: 40, height: 40, borderRadius: 20 }]} />
+            <View
+              style={[
+                styles.skeleton,
+                styles.skeletonLight,
+                { width: 40, height: 40, borderRadius: 20 },
+              ]}
+            />
           </View>
           <View style={styles.statsRow}>
             <View style={styles.statCardSkeleton}>
-              <View style={[styles.skeleton, styles.skeletonLight, { width: 80, height: 10, marginBottom: 8 }]} />
-              <View style={[styles.skeleton, styles.skeletonLight, { width: 50, height: 28 }]} />
+              <View
+                style={[
+                  styles.skeleton,
+                  styles.skeletonLight,
+                  { width: 80, height: 10, marginBottom: 8 },
+                ]}
+              />
+              <View
+                style={[
+                  styles.skeleton,
+                  styles.skeletonLight,
+                  { width: 50, height: 28 },
+                ]}
+              />
             </View>
             <View style={styles.statCardSkeleton}>
-              <View style={[styles.skeleton, styles.skeletonLight, { width: 80, height: 10, marginBottom: 8 }]} />
-              <View style={[styles.skeleton, styles.skeletonLight, { width: 80, height: 28 }]} />
+              <View
+                style={[
+                  styles.skeleton,
+                  styles.skeletonLight,
+                  { width: 80, height: 10, marginBottom: 8 },
+                ]}
+              />
+              <View
+                style={[
+                  styles.skeleton,
+                  styles.skeletonLight,
+                  { width: 80, height: 28 },
+                ]}
+              />
             </View>
           </View>
         </View>
 
         <View style={styles.mainContent}>
           {/* Filter Tabs Skeleton */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterTabs}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterTabs}
+          >
             {[1, 2, 3, 4].map((i) => (
-              <View key={i} style={[styles.skeleton, { width: 70, height: 36, borderRadius: 18, marginRight: 8 }]} />
+              <View
+                key={i}
+                style={[
+                  styles.skeleton,
+                  { width: 70, height: 36, borderRadius: 18, marginRight: 8 },
+                ]}
+              />
             ))}
           </ScrollView>
 
@@ -528,16 +580,38 @@ export default function Orders() {
             <View key={i} style={styles.skeletonOrderCard}>
               <View style={styles.skeletonOrderHeader}>
                 <View>
-                  <View style={[styles.skeleton, { width: 100, height: 16, marginBottom: 6 }]} />
+                  <View
+                    style={[
+                      styles.skeleton,
+                      { width: 100, height: 16, marginBottom: 6 },
+                    ]}
+                  />
                   <View style={[styles.skeleton, { width: 130, height: 12 }]} />
                 </View>
-                <View style={[styles.skeleton, { width: 70, height: 24, borderRadius: 12 }]} />
+                <View
+                  style={[
+                    styles.skeleton,
+                    { width: 70, height: 24, borderRadius: 12 },
+                  ]}
+                />
               </View>
               <View style={styles.skeletonOrderCustomer}>
-                <View style={[styles.skeleton, { width: 40, height: 40, borderRadius: 20 }]} />
+                <View
+                  style={[
+                    styles.skeleton,
+                    { width: 40, height: 40, borderRadius: 20 },
+                  ]}
+                />
                 <View style={{ flex: 1, marginLeft: 12 }}>
-                  <View style={[styles.skeleton, { width: "60%", height: 14, marginBottom: 6 }]} />
-                  <View style={[styles.skeleton, { width: "40%", height: 12 }]} />
+                  <View
+                    style={[
+                      styles.skeleton,
+                      { width: "60%", height: 14, marginBottom: 6 },
+                    ]}
+                  />
+                  <View
+                    style={[styles.skeleton, { width: "40%", height: 12 }]}
+                  />
                 </View>
                 <View style={[styles.skeleton, { width: 60, height: 20 }]} />
               </View>
@@ -568,7 +642,9 @@ export default function Orders() {
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>TODAY'S REVENUE</Text>
-            <Text style={styles.statValue}>Rs.{calculateTodayRevenue().toFixed(0)}</Text>
+            <Text style={styles.statValue}>
+              Rs.{calculateTodayRevenue().toFixed(0)}
+            </Text>
           </View>
         </View>
       </View>
@@ -581,7 +657,9 @@ export default function Orders() {
             <View style={styles.notificationContent}>
               <Text style={styles.notificationIcon}>🔔</Text>
               <View>
-                <Text style={styles.notificationText}>{newOrderNotification.message}</Text>
+                <Text style={styles.notificationText}>
+                  {newOrderNotification.message}
+                </Text>
                 <Text style={styles.notificationTime}>
                   {newOrderNotification.timestamp.toLocaleTimeString()}
                 </Text>
@@ -598,7 +676,6 @@ export default function Orders() {
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.filterTabs}
-          contentContainerStyle={styles.filterTabsContent}
         >
           {filterTabs.map((tab) => (
             <TouchableOpacity
@@ -626,10 +703,10 @@ export default function Orders() {
           {statusFilter === "all"
             ? "Recent Orders"
             : statusFilter === "pending"
-            ? "New Orders"
-            : statusFilter === "accepted"
-            ? "Active Orders"
-            : "Completed Orders"}
+              ? "New Orders"
+              : statusFilter === "accepted"
+                ? "Active Orders"
+                : "Completed Orders"}
         </Text>
 
         {/* Orders List */}
@@ -694,7 +771,10 @@ export default function Orders() {
                         </Text>
                       </View>
                       <Text style={styles.orderAmount}>
-                        Rs.{parseFloat(order.subtotal || order.total_amount || 0).toFixed(0)}
+                        Rs.
+                        {parseFloat(
+                          order.subtotal || order.total_amount || 0,
+                        ).toFixed(0)}
                       </Text>
                     </View>
 
@@ -716,7 +796,9 @@ export default function Orders() {
                       {order.customer_phone && (
                         <TouchableOpacity
                           style={styles.callButton}
-                          onPress={() => Linking.openURL(`tel:${order.customer_phone}`)}
+                          onPress={() =>
+                            Linking.openURL(`tel:${order.customer_phone}`)
+                          }
                         >
                           <Text style={styles.callIcon}>📞</Text>
                         </TouchableOpacity>
@@ -748,6 +830,9 @@ export default function Orders() {
                                 ? item.food_name.slice(0, 12) + "..."
                                 : item.food_name}
                             </Text>
+                            {item.size && item.size !== "regular" && (
+                              <Text style={styles.itemSize}>{item.size}</Text>
+                            )}
                           </View>
                         ))}
                         {items.length > 4 && (
@@ -784,7 +869,9 @@ export default function Orders() {
                         </View>
                         {driver.phone && (
                           <TouchableOpacity
-                            onPress={() => Linking.openURL(`tel:${driver.phone}`)}
+                            onPress={() =>
+                              Linking.openURL(`tel:${driver.phone}`)
+                            }
                           >
                             <Text style={styles.driverCallIcon}>📞</Text>
                           </TouchableOpacity>
@@ -818,14 +905,16 @@ export default function Orders() {
                           deliveryStatus === "accepted"
                             ? "Waiting for driver"
                             : deliveryStatus === "delivered"
-                            ? "Order completed"
-                            : "In progress"}
+                              ? "Order completed"
+                              : "In progress"}
                         </Text>
                         <TouchableOpacity
                           style={styles.viewDetailsButton}
                           onPress={() => setSelectedOrder(order)}
                         >
-                          <Text style={styles.viewDetailsText}>View Details</Text>
+                          <Text style={styles.viewDetailsText}>
+                            View Details
+                          </Text>
                           <Text style={styles.viewDetailsArrow}>›</Text>
                         </TouchableOpacity>
                       </View>
@@ -862,7 +951,10 @@ export default function Orders() {
           }}
         >
           <Animated.View
-            style={[styles.rejectModalContent, { transform: [{ translateY: slideAnim }] }]}
+            style={[
+              styles.rejectModalContent,
+              { transform: [{ translateY: slideAnim }] },
+            ]}
           >
             <Pressable onPress={(e) => e.stopPropagation()}>
               <View style={styles.rejectModalHeader}>
@@ -903,7 +995,9 @@ export default function Orders() {
                     onPress={handleConfirmReject}
                     disabled={!rejectReason.trim()}
                   >
-                    <Text style={styles.confirmRejectText}>Confirm Rejection</Text>
+                    <Text style={styles.confirmRejectText}>
+                      Confirm Rejection
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -953,7 +1047,12 @@ function OrderDetailsModal({
   };
 
   return (
-    <Modal visible={true} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={true}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
       <Pressable style={styles.modalOverlay} onPress={onClose}>
         <View style={styles.detailsModalContent}>
           <Pressable onPress={(e) => e.stopPropagation()}>
@@ -973,8 +1072,18 @@ function OrderDetailsModal({
                     {formatDateTime(order.placed_at || order.created_at)}
                   </Text>
                 </View>
-                <View style={[styles.statusBadge, { backgroundColor: statusConfig.bg }]}>
-                  <Text style={[styles.statusBadgeText, { color: statusConfig.text }]}>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    { backgroundColor: statusConfig.bg },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusBadgeText,
+                      { color: statusConfig.text },
+                    ]}
+                  >
                     {statusConfig.label}
                   </Text>
                 </View>
@@ -1000,7 +1109,9 @@ function OrderDetailsModal({
                   {order.customer_phone && (
                     <TouchableOpacity
                       style={styles.detailsCallButton}
-                      onPress={() => Linking.openURL(`tel:${order.customer_phone}`)}
+                      onPress={() =>
+                        Linking.openURL(`tel:${order.customer_phone}`)
+                      }
                     >
                       <Text style={styles.detailsCallIcon}>📞</Text>
                     </TouchableOpacity>
@@ -1009,7 +1120,9 @@ function OrderDetailsModal({
                 {order.delivery_address && (
                   <View style={styles.addressBox}>
                     <Text style={styles.addressLabel}>Delivery Address</Text>
-                    <Text style={styles.addressText}>{order.delivery_address}</Text>
+                    <Text style={styles.addressText}>
+                      {order.delivery_address}
+                    </Text>
                   </View>
                 )}
               </View>
@@ -1017,7 +1130,9 @@ function OrderDetailsModal({
               {/* Driver Info */}
               {driver && (
                 <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsSectionLabel, { color: "#15803d" }]}>
+                  <Text
+                    style={[styles.detailsSectionLabel, { color: "#15803d" }]}
+                  >
                     ASSIGNED DRIVER
                   </Text>
                   <View style={styles.detailsDriverCard}>
@@ -1069,14 +1184,21 @@ function OrderDetailsModal({
                         </View>
                       )}
                       <View style={styles.itemDetails}>
-                        <Text style={styles.itemNameLarge}>{item.food_name}</Text>
+                        <Text style={styles.itemNameLarge}>
+                          {item.food_name}
+                        </Text>
                         <Text style={styles.itemMeta}>
-                          {item.size && item.size !== "regular" && `${item.size} • `}
+                          {item.size &&
+                            item.size !== "regular" &&
+                            `${item.size} • `}
                           Qty: {item.quantity}
                         </Text>
                       </View>
                       <Text style={styles.itemPrice}>
-                        Rs.{parseFloat(item.total_price || item.unit_price * item.quantity).toFixed(0)}
+                        Rs.
+                        {parseFloat(
+                          item.total_price || item.unit_price * item.quantity,
+                        ).toFixed(0)}
                       </Text>
                     </View>
                   ))}
@@ -1214,9 +1336,6 @@ const styles = StyleSheet.create({
   filterTabs: {
     marginBottom: 16,
   },
-  filterTabsContent: {
-    gap: 8,
-  },
   filterTab: {
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -1224,6 +1343,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: "#e5e7eb",
+    marginRight: 8,
   },
   filterTabActive: {
     backgroundColor: "#065f46",
@@ -1408,6 +1528,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: "#374151",
+  },
+  itemSize: {
+    fontSize: 10,
+    fontWeight: "500",
+    color: "#9ca3af",
+    textTransform: "capitalize",
   },
   moreItemsCard: {
     paddingHorizontal: 12,
