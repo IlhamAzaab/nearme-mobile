@@ -66,12 +66,12 @@ export default function CustomerTabs() {
         tabBarShowLabel: false,
         tabBarStyle: {
           position: "absolute",
-          bottom: 20 + insets.bottom,
+          bottom: Math.max(24, insets.bottom + 12),
           left: 16,
           right: 16,
-          height: 68,
+          height: 64,
           backgroundColor: "#fff",
-          borderRadius: 24,
+          borderRadius: 20,
           borderWidth: 1,
           borderColor: "#E2E8F0",
           shadowColor: "#000",
@@ -79,9 +79,9 @@ export default function CustomerTabs() {
           shadowRadius: 20,
           shadowOffset: { width: 0, height: 8 },
           elevation: 8,
-          paddingHorizontal: 16,
-          paddingTop: 8,
-          paddingBottom: 8,
+          paddingHorizontal: 12,
+          paddingTop: 6,
+          paddingBottom: 6,
         },
       }}
     >
@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
   },
   activeDot: {
     position: "absolute",
-    bottom: -12,
+    bottom: -10,
     width: 4,
     height: 4,
     borderRadius: 2,
