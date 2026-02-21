@@ -17,10 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import MapView, { Marker, UrlTile } from 'react-native-maps';
-
-// FREE OpenStreetMap tiles - no API key required
-const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+import FreeMapView from '../../components/maps/FreeMapView';
 import { useNavigation } from '@react-navigation/native';
 import { API_URL } from '../../config/env';
 
@@ -632,35 +629,24 @@ export default function RestaurantDetail() {
                   editing && styles.mapContainerEditing,
                 ]}
               >
-                <MapView
+                <FreeMapView
                   ref={mapRef}
                   style={styles.map}
-                  mapType="none"
                   region={mapRegion}
                   onPress={handleMapPress}
                   scrollEnabled={editing}
                   zoomEnabled={editing}
-                  pitchEnabled={false}
-                  rotateEnabled={false}
-                >
-                  <UrlTile
-                    urlTemplate={OSM_TILE_URL}
-                    maximumZ={19}
-                    flipY={false}
-                    tileSize={256}
-                    zIndex={-1}
-                  />
-                  {formData.latitude && formData.longitude && (
-                    <Marker
-                      coordinate={{
-                        latitude: Number(formData.latitude),
-                        longitude: Number(formData.longitude),
-                      }}
-                      title="Restaurant Location"
-                      description={formData.address || 'Your restaurant'}
-                    />
-                  )}
-                </MapView>
+                  markers={formData.latitude && formData.longitude ? [{
+                    id: 'restaurant',
+                    coordinate: {
+                      latitude: Number(formData.latitude),
+                      longitude: Number(formData.longitude),
+                    },
+                    type: 'restaurant',
+                    emoji: '🏪',
+                    title: 'Restaurant Location',
+                  }] : []}
+                />
               </View>
 
               {/* Coordinate Display */}

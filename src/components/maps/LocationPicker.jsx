@@ -1,10 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import MapView, { Marker, UrlTile } from 'react-native-maps';
+import FreeMapView, { CustomerMarker } from './FreeMapView';
 import * as Location from 'expo-location';
-
-// FREE OpenStreetMap tiles - no API key required
-const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 export default function LocationPicker({ 
   onLocationSelect,
@@ -82,27 +79,19 @@ export default function LocationPicker({
       <Text style={styles.hint}>Tap on map to select location</Text>
       
       <View style={styles.mapContainer}>
-        <MapView
+        <FreeMapView
           ref={mapRef}
           style={styles.map}
-          mapType="none"
           region={region}
           onPress={handleMapPress}
-        >
-          <UrlTile
-            urlTemplate={OSM_TILE_URL}
-            maximumZ={19}
-            flipY={false}
-            tileSize={256}
-            zIndex={-1}
-          />
-          {selectedLocation && (
-            <Marker
-              coordinate={selectedLocation}
-              title="Selected Location"
-            />
-          )}
-        </MapView>
+          markers={selectedLocation ? [{
+            id: 'selected',
+            coordinate: selectedLocation,
+            type: 'customer',
+            emoji: '📍',
+            title: 'Selected Location'
+          }] : []}
+        />
       </View>
 
       {showCurrentLocationButton && (

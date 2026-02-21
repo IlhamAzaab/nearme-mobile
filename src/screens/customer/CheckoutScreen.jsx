@@ -13,7 +13,7 @@ import {
   Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import MapView, { Marker, UrlTile } from "react-native-maps";
+import FreeMapView from "../../components/maps/FreeMapView";
 import * as Location from "expo-location";
 import { API_BASE_URL } from "../../constants/api";
 
@@ -32,9 +32,8 @@ function OrderSuccessScreen({ order, cart, position, address, navigation, format
     <View style={successStyles.container}>
       {/* Map Background */}
       <View style={successStyles.mapContainer}>
-        <MapView
+        <FreeMapView
           style={successStyles.map}
-          mapType="none"
           region={{
             latitude: parseFloat(position?.latitude) || 7.8731,
             longitude: parseFloat(position?.longitude) || 80.7718,
@@ -43,32 +42,16 @@ function OrderSuccessScreen({ order, cart, position, address, navigation, format
           }}
           scrollEnabled={false}
           zoomEnabled={false}
-          rotateEnabled={false}
-          pitchEnabled={false}
-        >
-          {/* 🆓 FREE OpenStreetMap Tiles */}
-          <UrlTile
-            urlTemplate="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"
-            maximumZ={19}
-            flipY={false}
-            tileSize={256}
-            zIndex={-1}
-          />
-          <Marker 
-            coordinate={{
+          markers={[{
+            id: 'delivery',
+            coordinate: {
               latitude: parseFloat(position?.latitude) || 7.8731,
               longitude: parseFloat(position?.longitude) || 80.7718,
-            }}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <View style={successStyles.markerContainer}>
-              <View style={successStyles.markerPin}>
-                <View style={successStyles.markerPinInner} />
-              </View>
-              <View style={successStyles.markerShadow} />
-            </View>
-          </Marker>
-        </MapView>
+            },
+            type: 'delivery',
+            emoji: '📍',
+          }]}
+        />
 
         {/* Back Button */}
         <Pressable
@@ -880,10 +863,9 @@ export default function CheckoutScreen({ route, navigation }) {
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
         {/* ✅ Map */}
         <View style={[styles.mapWrap, isMapEditMode ? { height: 280 } : { height: 200 }]}>
-          <MapView
+          <FreeMapView
             ref={mapRef}
             style={{ flex: 1 }}
-            mapType="none"
             region={{
               latitude: position.latitude,
               longitude: position.longitude,
@@ -892,36 +874,19 @@ export default function CheckoutScreen({ route, navigation }) {
             }}
             scrollEnabled={isMapEditMode}
             zoomEnabled={isMapEditMode}
-            rotateEnabled={false}
-            pitchEnabled={false}
             showsUserLocation={true}
-            showsMyLocationButton={false}
             onPress={(e) => {
               if (!isMapEditMode) return;
               const { latitude, longitude } = e.nativeEvent.coordinate;
               setPosition({ latitude, longitude });
             }}
-          >
-            {/* 🆓 FREE Carto Tiles */}
-            <UrlTile
-              urlTemplate="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"
-              maximumZ={19}
-              flipY={false}
-              tileSize={256}
-              zIndex={-1}
-            />
-            <Marker 
-              coordinate={position}
-              anchor={{ x: 0.5, y: 1 }}
-            >
-              <View style={styles.markerContainer}>
-                <View style={styles.markerPin}>
-                  <View style={styles.markerPinInner} />
-                </View>
-                <View style={styles.markerShadow} />
-              </View>
-            </Marker>
-          </MapView>
+            markers={[{
+              id: 'position',
+              coordinate: position,
+              type: 'delivery',
+              emoji: '📍',
+            }]}
+          />
 
           {/* Find My Location Button */}
           <Pressable

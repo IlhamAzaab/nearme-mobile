@@ -21,7 +21,7 @@ import {
   Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import MapView, { Marker, UrlTile } from "react-native-maps";
+import FreeMapView from "../../components/maps/FreeMapView";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
 import supabase from "../../services/supabaseClient";
@@ -202,38 +202,19 @@ export default function OrderTrackingScreen({ route, navigation }) {
   return (
     <View style={styles.container}>
       {/* Full Screen Map Background */}
-      <MapView
+      <FreeMapView
         style={styles.map}
-        mapType="none"
         initialRegion={mapRegion}
         region={mapRegion}
         scrollEnabled={true}
         zoomEnabled={true}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-      >
-        {/* 🆓 FREE OpenStreetMap Tiles */}
-        <UrlTile
-          urlTemplate="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"
-          maximumZ={19}
-          flipY={false}
-          tileSize={256}
-          zIndex={-1}
-        />
-        {isValidCoordinate && (
-          <Marker
-            coordinate={deliveryPosition}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <View style={styles.markerContainer}>
-              <View style={styles.markerPin}>
-                <View style={styles.markerPinInner} />
-              </View>
-              <View style={styles.markerShadow} />
-            </View>
-          </Marker>
-        )}
-      </MapView>
+        markers={isValidCoordinate ? [{
+          id: 'delivery',
+          coordinate: deliveryPosition,
+          type: 'delivery',
+          emoji: '📍',
+        }] : []}
+      />
 
       {/* Floating Back Button */}
       <SafeAreaView style={styles.floatingHeader} edges={["top"]}>

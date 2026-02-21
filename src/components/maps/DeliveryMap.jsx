@@ -1,34 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from "react-native";
-import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
-
-// Custom Marker Components
-const DriverMarkerView = () => (
-  <View style={styles.markerContainer}>
-    <View style={[styles.markerPin, styles.driverPin]}>
-      <Text style={styles.markerEmoji}>🚗</Text>
-    </View>
-    <View style={styles.markerShadow} />
-  </View>
-);
-
-const RestaurantMarkerView = () => (
-  <View style={styles.markerContainer}>
-    <View style={[styles.markerPin, styles.restaurantPin]}>
-      <Text style={styles.markerEmoji}>🏪</Text>
-    </View>
-    <View style={styles.markerShadow} />
-  </View>
-);
-
-const CustomerMarkerView = () => (
-  <View style={styles.markerContainer}>
-    <View style={[styles.markerPin, styles.customerPin]}>
-      <Text style={styles.markerEmoji}>📍</Text>
-    </View>
-    <View style={styles.markerShadow} />
-  </View>
-);
+import FreeMapView from "./FreeMapView";
 
 export default function DeliveryMap({
   driverLocation,
@@ -51,10 +23,12 @@ export default function DeliveryMap({
         { latitude: targetLocation.latitude, longitude: targetLocation.longitude },
       ];
       
-      mapRef.current.fitToCoordinates(coordinates, {
-        edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
-        animated: true,
-      });
+      setTimeout(() => {
+        mapRef.current?.fitToCoordinates(coordinates, {
+          edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
+          animated: true,
+        });
+      }, 500);
     }
   }, [driverLocation?.latitude, driverLocation?.longitude, targetLocation?.latitude, targetLocation?.longitude]);
 
@@ -89,62 +63,50 @@ export default function DeliveryMap({
     longitudeDelta: 0.02,
   };
 
+  // Prepare markers
+  const markers = [
+    {
+      id: 'driver',
+      coordinate: {
+        latitude: driverLocation.latitude,
+        longitude: driverLocation.longitude,
+      },
+      type: 'driver',
+      emoji: '🚗',
+      title: 'Your Location',
+    },
+  ];
+
+  if (targetLocation) {
+    markers.push({
+      id: 'target',
+      coordinate: {
+        latitude: targetLocation.latitude,
+        longitude: targetLocation.longitude,
+      },
+      type: mode === 'pickup' ? 'restaurant' : 'customer',
+      emoji: mode === 'pickup' ? '🏪' : '📍',
+      title: targetName,
+    });
+  }
+
+  // Prepare polylines
+  const polylines = routeCoordinates.length > 1 ? [{
+    id: 'route',
+    coordinates: routeCoordinates,
+    strokeColor: mode === 'pickup' ? '#EF4444' : '#10B981',
+    strokeWidth: 4,
+  }] : [];
+
   return (
     <View style={styles.container}>
-      <MapView
+      <FreeMapView
         ref={mapRef}
         style={styles.map}
-        mapType="none"
         initialRegion={initialRegion}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        rotateEnabled={false}
-      >
-        {/* 🆓 FREE OpenStreetMap Tiles */}
-        <UrlTile
-          urlTemplate="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"
-          maximumZ={19}
-          flipY={false}
-          tileSize={256}
-          zIndex={-1}
-        />
-        {/* Driver Marker */}
-        <Marker
-          coordinate={{
-            latitude: driverLocation.latitude,
-            longitude: driverLocation.longitude,
-          }}
-          anchor={{ x: 0.5, y: 0.5 }}
-          title="Your Location"
-        >
-          <DriverMarkerView />
-        </Marker>
-
-        {/* Target Marker (Restaurant or Customer) */}
-        {targetLocation && (
-          <Marker
-            coordinate={{
-              latitude: targetLocation.latitude,
-              longitude: targetLocation.longitude,
-            }}
-            anchor={{ x: 0.5, y: 1 }}
-            title={targetName}
-          >
-            {mode === "pickup" ? <RestaurantMarkerView /> : <CustomerMarkerView />}
-          </Marker>
-        )}
-
-        {/* Route Polyline */}
-        {routeCoordinates.length > 1 && (
-          <Polyline
-            coordinates={routeCoordinates}
-            strokeColor={mode === "pickup" ? "#EF4444" : "#10B981"}
-            strokeWidth={4}
-            lineDashPattern={[0]}
-          />
-        )}
-      </MapView>
+        markers={markers}
+        polylines={polylines}
+      />
 
       {/* Mode Badge */}
       <View style={styles.modeBadge}>
@@ -189,44 +151,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 14,
     color: "#6B7280",
-  },
-
-  // Markers
-  markerContainer: {
-    alignItems: "center",
-  },
-  markerPin: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 6,
-    borderWidth: 3,
-    borderColor: "#fff",
-  },
-  driverPin: {
-    backgroundColor: "#3B82F6",
-  },
-  restaurantPin: {
-    backgroundColor: "#EF4444",
-  },
-  customerPin: {
-    backgroundColor: "#10B981",
-  },
-  markerEmoji: {
-    fontSize: 20,
-  },
-  markerShadow: {
-    width: 20,
-    height: 8,
-    backgroundColor: "rgba(0,0,0,0.15)",
-    borderRadius: 10,
-    marginTop: -4,
   },
 
   // Mode Badge

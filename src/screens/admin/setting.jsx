@@ -18,11 +18,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import MapView, { Marker, UrlTile } from 'react-native-maps';
+import FreeMapView from '../../components/maps/FreeMapView';
 import { useNavigation } from '@react-navigation/native';
-
-// FREE OpenStreetMap tiles - no API key required
-const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 import { API_URL } from '../../config/env';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -668,30 +665,21 @@ export default function Settings() {
           )}
 
           <View style={[styles.mapContainer, editingRestaurant && styles.mapContainerEditing]}>
-            <MapView
+            <FreeMapView
               ref={mapRef}
               style={styles.map}
-              mapType="none"
               region={mapRegion}
               onPress={handleMapPress}
               scrollEnabled={editingRestaurant}
               zoomEnabled={editingRestaurant}
-            >
-              <UrlTile
-                urlTemplate={OSM_TILE_URL}
-                maximumZ={19}
-                flipY={false}
-                tileSize={256}
-                zIndex={-1}
-              />
-              {mapPosition && (
-                <Marker
-                  coordinate={mapPosition}
-                  title="Restaurant Location"
-                  description={restaurantFormData.address}
-                />
-              )}
-            </MapView>
+              markers={mapPosition ? [{
+                id: 'restaurant',
+                coordinate: mapPosition,
+                type: 'restaurant',
+                emoji: '🏪',
+                title: 'Restaurant Location',
+              }] : []}
+            />
           </View>
         </View>
 

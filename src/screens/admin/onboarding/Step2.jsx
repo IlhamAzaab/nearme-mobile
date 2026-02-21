@@ -17,10 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import MapView, { Marker, UrlTile } from 'react-native-maps';
-
-// FREE OpenStreetMap tiles - no API key required
-const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+import FreeMapView from '../../../components/maps/FreeMapView';
 import { useNavigation } from '@react-navigation/native';
 import { API_URL } from '../../../config/env';
 
@@ -760,28 +757,19 @@ export default function Step2() {
               <Text style={styles.mapHint}>Tap on map to select location</Text>
 
               <View style={styles.mapContainer}>
-                <MapView
+                <FreeMapView
                   ref={mapRef}
                   style={styles.map}
-                  mapType="none"
                   region={mapRegion}
                   onPress={handleMapPress}
-                >
-                  <UrlTile
-                    urlTemplate={OSM_TILE_URL}
-                    maximumZ={19}
-                    flipY={false}
-                    tileSize={256}
-                    zIndex={-1}
-                  />
-                  {position && (
-                    <Marker
-                      coordinate={position}
-                      title="Restaurant Location"
-                      description={form.address || 'Selected location'}
-                    />
-                  )}
-                </MapView>
+                  markers={position ? [{
+                    id: 'restaurant',
+                    coordinate: position,
+                    type: 'restaurant',
+                    emoji: '🏪',
+                    title: 'Restaurant Location',
+                  }] : []}
+                />
               </View>
 
               <TouchableOpacity
