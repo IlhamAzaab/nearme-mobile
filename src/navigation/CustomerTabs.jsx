@@ -11,7 +11,7 @@ import ProfileScreen from "../screens/customer/ProfileScreen";
 const Tab = createBottomTabNavigator();
 
 function TabIcon({ label, focused, badge }) {
-  // Clean icon mapping matching the design
+  // Icon mapping matching the design
   const getIcon = () => {
     switch (label) {
       case "HOME":
@@ -29,14 +29,20 @@ function TabIcon({ label, focused, badge }) {
 
   return (
     <View style={styles.iconWrap}>
-      <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
-        {getIcon()}
-      </Text>
-      
-      <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
-        {label}
-      </Text>
+      <View style={styles.iconContent}>
+        <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
+          {getIcon()}
+        </Text>
+        
+        <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
+          {label}
+        </Text>
+      </View>
 
+      {/* Active indicator dot */}
+      {focused && <View style={styles.activeDot} />}
+
+      {/* Badge for cart */}
       {!!badge && badge > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{badge > 9 ? "9+" : badge}</Text>
@@ -56,9 +62,23 @@ export default function CustomerTabs() {
         headerShown: false,
         tabBarShowLabel: false,
         tabBarStyle: {
-          ...styles.tabBar,
-          height: 70 + insets.bottom,
-          paddingBottom: insets.bottom + 8,
+          position: "absolute",
+          bottom: 32 + insets.bottom,
+          left: "4%",
+          right: "4%",
+          height: 72,
+          backgroundColor: "#fff",
+          borderRadius: 32,
+          borderWidth: 1,
+          borderColor: "#F1F5F9",
+          shadowColor: "#000",
+          shadowOpacity: 0.1,
+          shadowRadius: 25,
+          shadowOffset: { width: 0, height: 10 },
+          elevation: 10,
+          paddingHorizontal: 24,
+          paddingVertical: 16,
+          paddingBottom: 16,
         },
       }}
     >
@@ -106,51 +126,50 @@ export default function CustomerTabs() {
 }
 
 const styles = StyleSheet.create({
-  tabBar: {
-    paddingTop: 12,
-    paddingBottom: 8,
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
-    backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: -2 },
-    elevation: 5,
-  },
   iconWrap: { 
-    width: 70, 
+    position: "relative",
     alignItems: "center", 
     justifyContent: "center",
-    gap: 4,
+    paddingHorizontal: 8,
+  },
+  iconContent: {
+    alignItems: "center",
+    gap: 6,
   },
   iconEmoji: { 
-    fontSize: 24, 
-    color: "#9CA3AF",
+    fontSize: 26, 
+    color: "#94A3B8",
   },
   iconEmojiActive: { 
     color: "#10b981",
   },
   iconLabel: {
-    marginTop: 2,
     fontSize: 10,
-    color: "#9CA3AF",
-    fontWeight: "600",
-    letterSpacing: 0.3,
+    color: "#94A3B8",
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
   },
   iconLabelActive: { 
     color: "#10b981", 
     fontWeight: "700",
   },
-
+  activeDot: {
+    position: "absolute",
+    bottom: -16,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#10b981",
+  },
   badge: {
     position: "absolute",
     top: -4,
-    right: 12,
-    minWidth: 20,
-    height: 20,
-    paddingHorizontal: 6,
-    borderRadius: 10,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
     backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
@@ -159,7 +178,7 @@ const styles = StyleSheet.create({
   },
   badgeText: { 
     color: "#fff", 
-    fontSize: 11, 
+    fontSize: 8, 
     fontWeight: "700",
   },
 });
