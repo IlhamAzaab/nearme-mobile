@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator, Alert, Dimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
 import { API_BASE_URL } from "../../constants/api";
 
 export default function FoodDetailScreen({ route, navigation }) {
@@ -153,171 +154,532 @@ export default function FoodDetailScreen({ route, navigation }) {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Back Button */}
+      {/* Sticky Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
+        <Pressable onPress={() => navigation.goBack()} style={styles.headerBtn}>
+          <Ionicons name="arrow-back" size={22} color="#0F172A" />
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{food.name}</Text>
-        <View style={{ width: 40 }} />
+        <Text style={styles.headerTitle}>Item Details</Text>
+        <Pressable style={styles.headerBtn}>
+          <Ionicons name="heart" size={22} color="#F43F5E" />
+        </Pressable>
       </View>
 
-      <ScrollView style={styles.page} contentContainerStyle={{ paddingBottom: 110 }}>
-        {/* Hero */}
-        <View style={styles.card}>
-        <View style={styles.hero}>
-          <Image
-            source={{
-              uri:
-                food.image_url ||
-                "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=900&q=80",
-            }}
-            style={styles.heroImg}
-          />
-          <View style={styles.heroBadge}>
-            <Text style={styles.heroBadgeText}>{restaurant?.restaurant_name || "Restaurant"}</Text>
+      <ScrollView 
+        style={styles.page} 
+        contentContainerStyle={{ paddingBottom: 200 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Hero Image */}
+        <View style={styles.heroWrap}>
+          <View style={styles.heroContainer}>
+            <Image
+              source={{
+                uri:
+                  food.image_url ||
+                  "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=900&q=80",
+              }}
+              style={styles.heroImg}
+            />
+            {/* Restaurant Badge */}
+            <View style={styles.restaurantBadge}>
+              <View style={styles.restaurantBadgeIcon}>
+                <Ionicons name="restaurant" size={12} color="#fff" />
+              </View>
+              <Text style={styles.restaurantBadgeText}>
+                {restaurant?.restaurant_name || "Restaurant"}
+              </Text>
+            </View>
           </View>
         </View>
 
-        <View style={{ padding: 14 }}>
-          <Text style={styles.title}>{food.name}</Text>
-          {!!food.description && <Text style={styles.desc}>{food.description}</Text>}
-        </View>
-      </View>
-
-      {/* Size */}
-      <View style={styles.cardPad}>
-        <Text style={styles.h3}>Choose Size</Text>
-
-        <Pressable
-          onPress={() => setSelectedSize("regular")}
-          style={[styles.sizeRow, selectedSize === "regular" && styles.sizeActive]}
-        >
-          <Text style={styles.sizeName}>{food.regular_size || "Regular"}</Text>
-          <Text style={styles.price}>
-            {food.offer_price ? formatPrice(food.offer_price) : formatPrice(food.regular_price)}
-          </Text>
-        </Pressable>
-
-        {!!food.extra_price && (
-          <Pressable
-            onPress={() => setSelectedSize("large")}
-            style={[styles.sizeRow, selectedSize === "large" && styles.sizeActive]}
-          >
-            <Text style={styles.sizeName}>{food.extra_size || "Large"}</Text>
-            <Text style={styles.price}>{formatPrice(food.extra_price)}</Text>
-          </Pressable>
-        )}
-      </View>
-
-      {/* Qty */}
-      <View style={styles.cardPad}>
-        <Text style={styles.h3}>Quantity</Text>
-
-        <View style={styles.qtyRow}>
-          <Pressable onPress={() => setQuantity(Math.max(1, quantity - 1))} style={styles.qtyBtn}>
-            <Text style={styles.qtyBtnText}>−</Text>
-          </Pressable>
-
-          <Text style={styles.qtyValue}>{quantity}</Text>
-
-          <Pressable onPress={() => setQuantity(quantity + 1)} style={[styles.qtyBtn, styles.qtyPlus]}>
-            <Text style={[styles.qtyBtnText, { color: "#fff" }]}>+</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      {/* Total + Actions */}
-      <View style={styles.cardPad}>
-        <View style={styles.totalRow}>
-          <Text style={styles.muted}>Total</Text>
-          <Text style={styles.total}>{formatPrice(totalPrice)}</Text>
+        {/* Product Info */}
+        <View style={styles.productInfo}>
+          <View style={styles.productTop}>
+            <View style={styles.productLeft}>
+              <Text style={styles.productName}>{food.name}</Text>
+              <View style={styles.ratingRow}>
+                <Ionicons name="star" size={14} color="#10b981" />
+                <Text style={styles.ratingText}>4.9</Text>
+                <Text style={styles.reviewText}>(120+ reviews)</Text>
+              </View>
+            </View>
+            <View style={styles.productRight}>
+              <Text style={styles.productPrice}>{formatPrice(unitPrice)}</Text>
+              <Text style={styles.priceLabel}>BASE PRICE</Text>
+            </View>
+          </View>
+          {!!food.description && (
+            <Text style={styles.productDesc}>{food.description}</Text>
+          )}
         </View>
 
-        <Pressable
-          disabled={addingToCart}
-          onPress={() => addToCart()}
-          style={[styles.primaryBtn, addingToCart && { opacity: 0.7 }]}
-        >
-          <Text style={styles.primaryText}>{addingToCart ? "Adding..." : "Add to Cart"}</Text>
-        </Pressable>
+        {/* Size Selection */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionLabel}>SELECT SIZE</Text>
+          <View style={styles.sizeContainer}>
+            <Pressable
+              onPress={() => setSelectedSize("regular")}
+              style={[
+                styles.sizeOption,
+                selectedSize === "regular" && styles.sizeOptionActive,
+              ]}
+            >
+              <Text style={[
+                styles.sizeOptionName,
+                selectedSize === "regular" && styles.sizeOptionNameActive,
+              ]}>
+                {food.regular_size || "Regular"}
+              </Text>
+              <Text style={[
+                styles.sizeOptionPrice,
+                selectedSize === "regular" && styles.sizeOptionPriceActive,
+              ]}>
+                {food.offer_price ? formatPrice(food.offer_price) : formatPrice(food.regular_price)}
+              </Text>
+              {selectedSize === "regular" && (
+                <View style={styles.sizeCheck}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                </View>
+              )}
+            </Pressable>
 
-        <Pressable
-          disabled={addingToCart}
-          onPress={() => addToCart({ goToCheckout: true })}
-          style={[styles.outlineBtn, addingToCart && { opacity: 0.7 }]}
-        >
-          <Text style={styles.outlineText}>{addingToCart ? "Processing..." : "Buy Now"}</Text>
-        </Pressable>
-      </View>
+            {!!food.extra_price && (
+              <Pressable
+                onPress={() => setSelectedSize("large")}
+                style={[
+                  styles.sizeOption,
+                  selectedSize === "large" && styles.sizeOptionActive,
+                ]}
+              >
+                <Text style={[
+                  styles.sizeOptionName,
+                  selectedSize === "large" && styles.sizeOptionNameActive,
+                ]}>
+                  {food.extra_size || "Large"}
+                </Text>
+                <Text style={[
+                  styles.sizeOptionPrice,
+                  selectedSize === "large" && styles.sizeOptionPriceActive,
+                ]}>
+                  {formatPrice(food.extra_price)}
+                </Text>
+                {selectedSize === "large" && (
+                  <View style={styles.sizeCheck}>
+                    <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                  </View>
+                )}
+              </Pressable>
+            )}
+          </View>
+        </View>
 
-        {/* Bottom tab navigation web la BottomNavbar; RN la ithu CustomerTabs bottom navigator la irukkum */}
+        {/* Quantity Stepper */}
+        <View style={styles.quantityContainer}>
+          <View style={styles.quantityInner}>
+            <Text style={styles.quantityLabel}>Quantity</Text>
+            <View style={styles.quantityStepper}>
+              <Pressable
+                onPress={() => setQuantity(Math.max(1, quantity - 1))}
+                style={styles.qtyBtnMinus}
+              >
+                <Ionicons name="remove" size={20} color="#0F172A" />
+              </Pressable>
+              <Text style={styles.qtyValue}>
+                {String(quantity).padStart(2, "0")}
+              </Text>
+              <Pressable
+                onPress={() => setQuantity(quantity + 1)}
+                style={styles.qtyBtnPlus}
+              >
+                <Ionicons name="add" size={20} color="#fff" />
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </ScrollView>
+
+      {/* Bottom Actions - Fixed */}
+      <View style={styles.bottomActions}>
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Total Price</Text>
+          <Text style={styles.totalValue}>{formatPrice(totalPrice)}</Text>
+        </View>
+        <View style={styles.btnRow}>
+          <Pressable
+            disabled={addingToCart}
+            onPress={() => addToCart({ goToCheckout: true })}
+            style={({ pressed }) => [
+              styles.buyNowBtn,
+              pressed && { opacity: 0.8 },
+              addingToCart && { opacity: 0.6 },
+            ]}
+          >
+            <Text style={styles.buyNowText}>
+              {addingToCart ? "Processing..." : "Buy Now"}
+            </Text>
+          </Pressable>
+          <Pressable
+            disabled={addingToCart}
+            onPress={() => addToCart()}
+            style={({ pressed }) => [
+              styles.addToCartBtn,
+              pressed && { opacity: 0.8 },
+              addingToCart && { opacity: 0.6 },
+            ]}
+          >
+            <Text style={styles.addToCartText}>
+              {addingToCart ? "Adding..." : "Add to Cart"}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F9FAFB" },
-  page: { flex: 1, backgroundColor: "#F9FAFB", padding: 12 },
+const { width } = Dimensions.get("window");
 
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#fff" },
+  page: { flex: 1, backgroundColor: "#fff" },
+
+  // Header
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEF2F7",
+    backgroundColor: "rgba(255,255,255,0.9)",
   },
-  backBtn: {
+  headerBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+  },
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0F172A",
+    letterSpacing: -0.3,
+  },
+
+  // Loading / Error
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 18, gap: 12 },
+  muted: { color: "#64748B", fontSize: 14, fontWeight: "500" },
+
+  // Hero Image
+  heroWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  heroContainer: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#F1F5F9",
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  heroImg: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  restaurantBadge: {
+    position: "absolute",
+    bottom: 16,
+    left: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  restaurantBadgeIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
   },
-  backText: { fontSize: 20, color: "#111827" },
-  headerTitle: { fontSize: 18, fontWeight: "900", color: "#111827", flex: 1, textAlign: "center" },
+  restaurantBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
 
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 18, gap: 10 },
-  muted: { color: "#6B7280" },
+  // Product Info
+  productInfo: {
+    paddingHorizontal: 20,
+    paddingTop: 24,
+  },
+  productTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  productLeft: {
+    flex: 1,
+    marginRight: 16,
+  },
+  productName: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.5,
+    lineHeight: 28,
+  },
+  ratingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    gap: 4,
+  },
+  ratingText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#10b981",
+  },
+  reviewText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#94A3B8",
+    marginLeft: 4,
+  },
+  productRight: {
+    alignItems: "flex-end",
+  },
+  productPrice: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#10b981",
+  },
+  priceLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 1,
+    marginTop: 2,
+  },
+  productDesc: {
+    marginTop: 12,
+    fontSize: 14,
+    color: "#64748B",
+    lineHeight: 20,
+    fontWeight: "400",
+  },
 
-  card: { backgroundColor: "#fff", borderRadius: 18, overflow: "hidden", marginBottom: 12, elevation: 2 },
-  cardPad: { backgroundColor: "#fff", borderRadius: 18, padding: 14, marginBottom: 12, elevation: 2 },
+  // Size Selection
+  sectionContainer: {
+    paddingHorizontal: 20,
+    marginTop: 32,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 2,
+  },
+  sizeContainer: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 16,
+  },
+  sizeOption: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#F1F5F9",
+    backgroundColor: "#fff",
+  },
+  sizeOptionActive: {
+    borderColor: "#10b981",
+    backgroundColor: "rgba(16,185,127,0.05)",
+  },
+  sizeOptionName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  sizeOptionNameActive: {
+    color: "#10b981",
+  },
+  sizeOptionPrice: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#94A3B8",
+  },
+  sizeOptionPriceActive: {
+    color: "#10b981",
+    fontWeight: "600",
+  },
+  sizeCheck: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+  },
 
-  hero: { height: 220, backgroundColor: "#D1FAE5" },
-  heroImg: { width: "100%", height: "100%" },
-  heroBadge: { position: "absolute", left: 12, bottom: 12, backgroundColor: "rgba(255,255,255,0.9)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
-  heroBadgeText: { color: "#10b981", fontWeight: "900" },
+  // Quantity
+  quantityContainer: {
+    paddingHorizontal: 20,
+    marginTop: 32,
+  },
+  quantityInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 16,
+    padding: 16,
+  },
+  quantityLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  quantityStepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 24,
+  },
+  qtyBtnMinus: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    shadowColor: "#000",
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  qtyBtnPlus: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#10b981",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#10b981",
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  qtyValue: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0F172A",
+    minWidth: 30,
+    textAlign: "center",
+  },
 
-  title: { fontSize: 22, fontWeight: "900", color: "#111827" },
-  desc: { marginTop: 6, color: "#6B7280" },
+  // Bottom Actions
+  bottomActions: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 100,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+  },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  totalLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#64748B",
+  },
+  totalValue: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  btnRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  buyNowBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  buyNowText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  addToCartBtn: {
+    flex: 2,
+    height: 52,
+    borderRadius: 999,
+    backgroundColor: "#10b981",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#10b981",
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  addToCartText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff",
+  },
 
-  h3: { fontWeight: "900", color: "#111827", marginBottom: 10 },
-
-  sizeRow: { flexDirection: "row", justifyContent: "space-between", padding: 12, borderRadius: 14, backgroundColor: "#F3F4F6", marginTop: 8 },
-  sizeActive: { borderWidth: 2, borderColor: "#10b981", backgroundColor: "#ECFDF5" },
-  sizeName: { fontWeight: "800", color: "#111827" },
-  price: { fontWeight: "900", color: "#10b981" },
-
-  qtyRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
-  qtyBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center" },
-  qtyPlus: { backgroundColor: "#10b981" },
-  qtyBtnText: { fontSize: 22, fontWeight: "900", color: "#111827" },
-  qtyValue: { fontSize: 22, fontWeight: "900", color: "#10b981", minWidth: 50, textAlign: "center" },
-
-  totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  total: { fontSize: 22, fontWeight: "900", color: "#10b981" },
-
-  primaryBtn: { height: 52, borderRadius: 14, backgroundColor: "#10b981", alignItems: "center", justifyContent: "center", marginTop: 6 },
-  primaryText: { color: "#fff", fontWeight: "900", fontSize: 16 },
-
-  outlineBtn: { height: 52, borderRadius: 14, borderWidth: 2, borderColor: "#10b981", alignItems: "center", justifyContent: "center", marginTop: 10 },
-  outlineText: { color: "#10b981", fontWeight: "900", fontSize: 16 },
-
-  errTitle: { fontSize: 22, fontWeight: "900", color: "#111827" },
+  // Error
+  errTitle: { fontSize: 22, fontWeight: "900", color: "#0F172A" },
   errText: { color: "#DC2626", textAlign: "center" },
+  primaryBtn: { 
+    height: 52, 
+    borderRadius: 999, 
+    backgroundColor: "#10b981", 
+    alignItems: "center", 
+    justifyContent: "center", 
+    marginTop: 12,
+    paddingHorizontal: 32,
+  },
+  primaryText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });
