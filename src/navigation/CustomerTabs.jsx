@@ -1,6 +1,7 @@
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 
 // Tab Screens
 import CartScreen from "../screens/customer/CartScreen";
@@ -11,28 +12,30 @@ import ProfileScreen from "../screens/customer/ProfileScreen";
 const Tab = createBottomTabNavigator();
 
 function TabIcon({ label, focused, badge }) {
-  // Icon mapping matching the design
-  const getIcon = () => {
+  // Modern icon mapping
+  const getIconName = () => {
     switch (label) {
       case "HOME":
-        return "🏠";
+        return focused ? "home" : "home-outline";
       case "ORDER":
-        return "📋";
+        return focused ? "receipt" : "receipt-outline";
       case "CART":
-        return "🛒";
+        return focused ? "cart" : "cart-outline";
       case "PROFILE":
-        return "👤";
+        return focused ? "person-circle" : "person-circle-outline";
       default:
-        return "⚫";
+        return "ellipse";
     }
   };
 
   return (
     <View style={styles.iconWrap}>
       <View style={styles.iconContent}>
-        <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
-          {getIcon()}
-        </Text>
+        <Ionicons 
+          name={getIconName()} 
+          size={24} 
+          color={focused ? "#10b981" : "#94A3B8"} 
+        />
         
         <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
           {label}
@@ -63,22 +66,22 @@ export default function CustomerTabs() {
         tabBarShowLabel: false,
         tabBarStyle: {
           position: "absolute",
-          bottom: 32 + insets.bottom,
-          left: "4%",
-          right: "4%",
-          height: 72,
+          bottom: 20 + insets.bottom,
+          left: 16,
+          right: 16,
+          height: 68,
           backgroundColor: "#fff",
-          borderRadius: 32,
+          borderRadius: 24,
           borderWidth: 1,
-          borderColor: "#F1F5F9",
+          borderColor: "#E2E8F0",
           shadowColor: "#000",
-          shadowOpacity: 0.1,
-          shadowRadius: 25,
-          shadowOffset: { width: 0, height: 10 },
-          elevation: 10,
-          paddingHorizontal: 24,
-          paddingVertical: 16,
-          paddingBottom: 16,
+          shadowOpacity: 0.08,
+          shadowRadius: 20,
+          shadowOffset: { width: 0, height: 8 },
+          elevation: 8,
+          paddingHorizontal: 16,
+          paddingTop: 8,
+          paddingBottom: 8,
         },
       }}
     >
@@ -130,25 +133,21 @@ const styles = StyleSheet.create({
     position: "relative",
     alignItems: "center", 
     justifyContent: "center",
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
+    flex: 1,
   },
   iconContent: {
     alignItems: "center",
-    gap: 6,
-  },
-  iconEmoji: { 
-    fontSize: 26, 
-    color: "#94A3B8",
-  },
-  iconEmojiActive: { 
-    color: "#10b981",
+    justifyContent: "center",
+    gap: 4,
   },
   iconLabel: {
-    fontSize: 10,
+    fontSize: 9,
     color: "#94A3B8",
-    fontWeight: "700",
-    letterSpacing: 1,
+    fontWeight: "600",
+    letterSpacing: 0.5,
     textTransform: "uppercase",
+    marginTop: 2,
   },
   iconLabelActive: { 
     color: "#10b981", 
@@ -156,7 +155,7 @@ const styles = StyleSheet.create({
   },
   activeDot: {
     position: "absolute",
-    bottom: -16,
+    bottom: -12,
     width: 4,
     height: 4,
     borderRadius: 2,
@@ -164,12 +163,12 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: "absolute",
-    top: -4,
-    right: 4,
-    minWidth: 16,
-    height: 16,
-    paddingHorizontal: 4,
-    borderRadius: 8,
+    top: -2,
+    right: 8,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
     backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
@@ -178,7 +177,7 @@ const styles = StyleSheet.create({
   },
   badgeText: { 
     color: "#fff", 
-    fontSize: 8, 
+    fontSize: 9, 
     fontWeight: "700",
   },
 });
