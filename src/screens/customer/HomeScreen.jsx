@@ -558,7 +558,7 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
 
-  content: { padding: 16, paddingBottom: 110 },
+  content: { padding: 16, paddingBottom: 95 },
 
   sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   sectionTitle: { fontSize: 19, fontWeight: "800", color: "#0F172A", letterSpacing: -0.5 },

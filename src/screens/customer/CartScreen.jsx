@@ -237,7 +237,7 @@ export default function CartScreen({ navigation }) {
       <SafeAreaView style={styles.container} edges={["top"]}>
         <CartHeader cartCount={cartCount} />
 
-        <ScrollView style={styles.page} contentContainerStyle={{ paddingBottom: 110 }}>
+        <ScrollView style={styles.page} contentContainerStyle={{ paddingBottom: 95 }}>
           {/* Back Button */}
           <Pressable onPress={() => setSelectedCartId(null)} style={styles.backRow}>
             <Text style={styles.backText}>{"<"}</Text>
