@@ -330,7 +330,6 @@ export default function HomeScreen({ navigation }) {
                       }}
                       style={styles.featureImg}
                     />
-                    <View style={styles.featureOverlay} />
                     
                     {/* Rating Badge - Top Right */}
                     {item.rating && (
@@ -353,18 +352,23 @@ export default function HomeScreen({ navigation }) {
                       </View>
                     )}
                     
-                    {/* Bottom Info */}
+                    {/* Bottom Info with Blur Background */}
                     <View style={styles.featureBottom}>
-                      <Text style={styles.featureName}>{item.restaurant_name}</Text>
+                      {/* Blur/Dark Overlay Background */}
+                      <View style={styles.featureBottomOverlay} />
                       
-                      {/* Opening/Closing Time */}
-                      {(item.opening_time || item.closing_time) && (
-                        <Text style={styles.restaurantTiming}>
-                          ⏰ {item.opening_time || '9:00 AM'} - {item.closing_time || '11:00 PM'}
-                        </Text>
-                      )}
-                      
-                      <View style={styles.metaRow}>
+                      {/* Content */}
+                      <View style={styles.featureBottomContent}>
+                        <Text style={styles.featureName}>{item.restaurant_name}</Text>
+                        
+                        {/* Opening/Closing Time */}
+                        {(item.opening_time || item.closing_time) && (
+                          <Text style={styles.restaurantTiming}>
+                            ⏰ {item.opening_time || '9:00 AM'} - {item.closing_time || '11:00 PM'}
+                          </Text>
+                        )}
+                        
+                        <View style={styles.metaRow}>
                         {item.cuisine && (
                           <Text style={styles.metaText}>{item.cuisine}</Text>
                         )}
@@ -385,6 +389,7 @@ export default function HomeScreen({ navigation }) {
                             <Text style={styles.metaText}>🚚 Rs. {item.delivery_fee}</Text>
                           </>
                         ) : null}
+                      </View>
                       </View>
                     </View>
                   </Pressable>
@@ -654,25 +659,42 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   featureImg: { width: "100%", height: "100%" },
-  featureOverlay: { 
-    ...StyleSheet.absoluteFillObject, 
-    backgroundColor: "transparent",
-    backgroundImage: "linear-gradient(to top, rgba(0,0,0,0.8), transparent)",
-  },
   featureBottom: { 
     position: "absolute", 
     left: 0, 
     right: 0, 
-    bottom: 0, 
-    padding: 20, 
+    bottom: 0,
+    overflow: "hidden",
   },
-  featureName: { color: "#fff", fontSize: 20, fontWeight: "800", marginBottom: 4, letterSpacing: -0.5 },
+  featureBottomOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    backdropFilter: "blur(10px)",
+  },
+  featureBottomContent: {
+    position: "relative",
+    padding: 16,
+    paddingBottom: 14,
+  },
+  featureName: { 
+    color: "#fff", 
+    fontSize: 18, 
+    fontWeight: "800", 
+    marginBottom: 4, 
+    letterSpacing: -0.3,
+    textShadowColor: "rgba(0, 0, 0, 0.3)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
   restaurantTiming: { 
-    color: "rgba(255,255,255,0.95)", 
-    fontSize: 13, 
+    color: "rgba(255,255,255,0.98)", 
+    fontSize: 12, 
     fontWeight: "700", 
     marginBottom: 6,
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
+    textShadowColor: "rgba(0, 0, 0, 0.3)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   metaRow: { 
     flexDirection: "row", 
@@ -681,11 +703,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   metaText: { 
-    color: "rgba(255,255,255,0.9)", 
-    fontSize: 12, 
+    color: "rgba(255,255,255,0.95)", 
+    fontSize: 11, 
     fontWeight: "600",
+    textShadowColor: "rgba(0, 0, 0, 0.3)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-  metaDot: { color: "rgba(255,255,255,0.6)", fontSize: 12, marginHorizontal: 2 },
+  metaDot: { 
+    color: "rgba(255,255,255,0.7)", 
+    fontSize: 11, 
+    marginHorizontal: 2,
+  },
   ratingBadge: {
     position: "absolute",
     top: 16,
