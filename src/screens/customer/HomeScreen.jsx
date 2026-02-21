@@ -306,7 +306,7 @@ export default function HomeScreen({ navigation }) {
                 keyExtractor={(item) => String(item.id)}
                 scrollEnabled={false}
                 ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
-                renderItem={({ item }) => (
+                renderItem={({ item, index }) => (
                   <Pressable
                     onPress={() => navigation.navigate("RestaurantFoods", { restaurantId: item.id })}
                     style={({ pressed }) => [styles.featureCard, pressed && { opacity: 0.92 }]}
@@ -322,6 +322,13 @@ export default function HomeScreen({ navigation }) {
                     />
                     <View style={styles.featureOverlay} />
                     
+                    {/* Rating Badge - Top Right */}
+                    {item.rating && (
+                      <View style={styles.ratingBadge}>
+                        <Text style={styles.ratingText}>⭐ {item.rating}</Text>
+                      </View>
+                    )}
+                    
                     {/* Closed Badge - Top Left */}
                     {item.is_open === false && (
                       <View style={styles.closedTag}>
@@ -329,29 +336,37 @@ export default function HomeScreen({ navigation }) {
                       </View>
                     )}
                     
-                    {/* Featured Badge - Top Right */}
-                    <View style={styles.featureTag}>
-                      <Text style={styles.featureTagText}>⭐ Featured</Text>
-                    </View>
+                    {/* Featured Badge - First item */}
+                    {index === 0 && item.is_open !== false && (
+                      <View style={styles.featureTag}>
+                        <Text style={styles.featureTagText}>⭐ Featured</Text>
+                      </View>
+                    )}
                     
-                    {/* Bottom Info with Logo */}
+                    {/* Bottom Info */}
                     <View style={styles.featureBottom}>
-                      <View style={styles.featureInfoRow}>
-                        <Image
-                          source={{
-                            uri:
-                              item.logo_url ||
-                              "https://images.unsplash.com/photo-1552566626-52f8b828add9?w=100",
-                          }}
-                          style={styles.featureLogo}
-                        />
-                        <View style={styles.featureTextWrap}>
-                          <Text style={styles.featureName}>{item.restaurant_name}</Text>
-                          <Text style={styles.featureMeta}>
-                            {item.cuisine || "Multi-cuisine"}
-                            {item.delivery_time ? ` • ${item.delivery_time}` : ""}
-                          </Text>
-                        </View>
+                      <Text style={styles.featureName}>{item.restaurant_name}</Text>
+                      <View style={styles.metaRow}>
+                        {item.cuisine && (
+                          <Text style={styles.metaText}>{item.cuisine}</Text>
+                        )}
+                        {item.delivery_time && (
+                          <>
+                            {item.cuisine && <Text style={styles.metaDot}>•</Text>}
+                            <Text style={styles.metaText}>⏱ {item.delivery_time}</Text>
+                          </>
+                        )}
+                        {item.delivery_fee === 0 ? (
+                          <>
+                            <Text style={styles.metaDot}>•</Text>
+                            <Text style={styles.metaText}>🚚 Free Delivery</Text>
+                          </>
+                        ) : item.delivery_fee > 0 ? (
+                          <>
+                            <Text style={styles.metaDot}>•</Text>
+                            <Text style={styles.metaText}>🚚 Rs. {item.delivery_fee}</Text>
+                          </>
+                        ) : null}
                       </View>
                     </View>
                   </Pressable>
@@ -566,19 +581,39 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   featureImg: { width: "100%", height: "100%" },
-  featureOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.4)" },
-  featureBottom: { position: "absolute", left: 0, right: 0, bottom: 0, padding: 14, backgroundColor: "rgba(0,0,0,0.3)" },
-  featureInfoRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  featureLogo: { 
-    width: 48, 
-    height: 48, 
-    borderRadius: 12, 
-    borderWidth: 2, 
-    borderColor: "#fff",
+  featureOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
+  featureBottom: { 
+    position: "absolute", 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    padding: 16, 
+    backgroundColor: "rgba(0,0,0,0.4)" 
   },
-  featureTextWrap: { flex: 1 },
-  featureName: { color: "#fff", fontSize: 18, fontWeight: "900" },
-  featureMeta: { color: "rgba(255,255,255,0.9)", marginTop: 4, fontSize: 13 },
+  featureName: { color: "#fff", fontSize: 20, fontWeight: "900", marginBottom: 6 },
+  metaRow: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    flexWrap: "wrap", 
+    gap: 4 
+  },
+  metaText: { color: "rgba(255,255,255,0.95)", fontSize: 12, fontWeight: "600" },
+  metaDot: { color: "rgba(255,255,255,0.7)", fontSize: 12, marginHorizontal: 4 },
+  ratingBadge: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  ratingText: { fontSize: 12, fontWeight: "900", color: "#111827" },
   featureTag: {
     position: "absolute",
     top: 12,
