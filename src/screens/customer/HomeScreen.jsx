@@ -198,11 +198,11 @@ export default function HomeScreen({ navigation }) {
           {/* Logo & Delivery Info */}
           <View style={styles.logoSection}>
             <View style={styles.logoBox}>
-              <Text style={styles.logoIcon}>🍽️</Text>
+              <Text style={styles.logoIcon}>N</Text>
             </View>
             <View style={styles.deliveryInfo}>
-              <Text style={styles.deliverLabel}>NEAR ME</Text>
-              <Text style={styles.deliverAddress}>Food Delivery</Text>
+              <Text style={styles.deliverLabel}></Text>
+              <Text style={styles.deliverAddress}></Text>
             </View>
           </View>
 
@@ -223,7 +223,7 @@ export default function HomeScreen({ navigation }) {
             onPress={() => navigation.navigate("Notifications")}
             style={({ pressed }) => [styles.bellBtn, pressed && { opacity: 0.85 }]}
           >
-            <Text style={styles.bellIcon}>🔔</Text>
+            <Text style={styles.bellIcon}></Text>
             {unreadCount > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
@@ -346,8 +346,8 @@ export default function HomeScreen({ navigation }) {
                       </View>
                     )}
                     
-                    {/* Featured Badge - First item */}
-                    {index === 0 && item.is_open !== false && (
+                    {/* Featured Badge - All restaurants */}
+                    {item.is_open !== false && (
                       <View style={styles.featureTag}>
                         <Text style={styles.featureTagText}>⭐ Featured</Text>
                       </View>
@@ -356,6 +356,14 @@ export default function HomeScreen({ navigation }) {
                     {/* Bottom Info */}
                     <View style={styles.featureBottom}>
                       <Text style={styles.featureName}>{item.restaurant_name}</Text>
+                      
+                      {/* Opening/Closing Time */}
+                      {(item.opening_time || item.closing_time) && (
+                        <Text style={styles.restaurantTiming}>
+                          ⏰ {item.opening_time || '9:00 AM'} - {item.closing_time || '11:00 PM'}
+                        </Text>
+                      )}
+                      
                       <View style={styles.metaRow}>
                         {item.cuisine && (
                           <Text style={styles.metaText}>{item.cuisine}</Text>
@@ -659,6 +667,13 @@ const styles = StyleSheet.create({
     padding: 20, 
   },
   featureName: { color: "#fff", fontSize: 20, fontWeight: "800", marginBottom: 4, letterSpacing: -0.5 },
+  restaurantTiming: { 
+    color: "rgba(255,255,255,0.95)", 
+    fontSize: 13, 
+    fontWeight: "700", 
+    marginBottom: 6,
+    letterSpacing: 0.2,
+  },
   metaRow: { 
     flexDirection: "row", 
     alignItems: "center", 
