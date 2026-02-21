@@ -7,16 +7,20 @@ import {
   Image,
   Pressable,
   ActivityIndicator,
+  TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
+import { fuzzySearchFoods } from "../../utils/fuzzySearch";
 
 export default function RestaurantFoodsScreen({ route, navigation }) {
   const { restaurantId } = route.params;
   const [restaurant, setRestaurant] = useState(null);
-  const [foods, setFoods] = useState([]);
+  const [allFoods, setAllFoods] = useState([]); // All foods from API
+  const [foods, setFoods] = useState([]); // Filtered/displayed foods
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     fetchRestaurantFoods();
@@ -34,13 +38,31 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
       // Fetch foods
       const foodsRes = await fetch(`${API_BASE_URL}/public/restaurants/${restaurantId}/foods`);
       const foodsData = await foodsRes.json().catch(() => ({}));
-      setFoods(foodsData.foods || []);
+      const fetchedFoods = foodsData.foods || [];
+      setAllFoods(fetchedFoods);
+      setFoods(fetchedFoods); // Initially show all
     } catch (error) {
       console.log("Error fetching restaurant foods:", error);
     } finally {
       setLoading(false);
     }
   };
+
+  // Fuzzy search filter when search query changes
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (searchQuery.trim()) {
+        // Apply fuzzy search
+        const filtered = fuzzySearchFoods(allFoods, searchQuery);
+        setFoods(filtered);
+      } else {
+        // Show all foods when search is empty
+        setFoods(allFoods);
+      }
+    }, 300);
+
+    return () => clearTimeout(t);
+  }, [searchQuery, allFoods]);
 
   const handleFoodPress = (food) => {
     navigation.navigate("FoodDetail", {
@@ -68,6 +90,23 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
           {restaurant?.restaurant_name || "Restaurant"}
         </Text>
         <View style={{ width: 40 }} />
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <Text style={styles.searchIcon}>🔍</Text>
+        <TextInput
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search for food items..."
+          placeholderTextColor="#9CA3AF"
+          style={styles.searchInput}
+        />
+        {searchQuery.length > 0 && (
+          <Pressable onPress={() => setSearchQuery("")} style={styles.clearBtn}>
+            <Text style={styles.clearText}>✕</Text>
+          </Pressable>
+        )}
       </View>
 
       {/* Foods List */}
@@ -123,6 +162,39 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderBottomWidth: 1,
     borderBottomColor: "#EEF2F7",
+  },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    height: 44,
+  },
+  searchIcon: {
+    fontSize: 14,
+    opacity: 0.6,
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: "#111827",
+    fontSize: 14,
+  },
+  clearBtn: {
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  clearText: {
+    fontSize: 12,
+    color: "#9CA3AF",
   },
   backBtn: {
     width: 40,

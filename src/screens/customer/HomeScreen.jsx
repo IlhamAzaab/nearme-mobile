@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
+import { fuzzySearchRestaurants, fuzzySearchFoods } from "../../utils/fuzzySearch";
 
 // ✅ simple emoji category icons (web svg -> RN easiest)
 const CategoryIcon = ({ type }) => {
@@ -28,6 +29,11 @@ const CategoryIcon = ({ type }) => {
 };
 
 export default function HomeScreen({ navigation }) {
+  // Full data from API (not filtered)
+  const [allRestaurants, setAllRestaurants] = useState([]);
+  const [allFoodsData, setAllFoodsData] = useState([]);
+  
+  // Filtered/displayed data
   const [restaurants, setRestaurants] = useState([]);
   const [allFoods, setAllFoods] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -97,45 +103,79 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const fetchRestaurants = async (search = "") => {
+  // Fetch all restaurants (no search filter, we'll do fuzzy search client-side)
+  const fetchRestaurants = async () => {
     try {
       setLoading(true);
-      const url = `${API_BASE_URL}/public/restaurants${search ? `?search=${encodeURIComponent(search)}` : ""}`;
+      const url = `${API_BASE_URL}/public/restaurants`;
       const res = await fetch(url);
       const data = await res.json().catch(() => ({}));
-      setRestaurants(data.restaurants || []);
+      const fetchedRestaurants = data.restaurants || [];
+      setAllRestaurants(fetchedRestaurants);
+      setRestaurants(fetchedRestaurants); // Initially show all
     } catch (err) {
       console.log("restaurants error:", err?.message);
+      setAllRestaurants([]);
       setRestaurants([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchAllFoods = async (search = "") => {
+  // Fetch all foods (no search filter, we'll do fuzzy search client-side)
+  const fetchAllFoods = async () => {
     try {
       setLoading(true);
-      const url = `${API_BASE_URL}/public/foods${search ? `?search=${encodeURIComponent(search)}` : ""}`;
+      const url = `${API_BASE_URL}/public/foods`;
       const res = await fetch(url);
       const data = await res.json().catch(() => ({}));
-      setAllFoods(data.foods || []);
+      const fetchedFoods = data.foods || [];
+      setAllFoodsData(fetchedFoods);
+      setAllFoods(fetchedFoods); // Initially show all
     } catch (err) {
       console.log("foods error:", err?.message);
+      setAllFoodsData([]);
       setAllFoods([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // 🔍 search debounce + tab switch
+  // 🔍 Initial data fetch on mount and tab switch
+  useEffect(() => {
+    if (activeTab === "food") {
+      if (allFoodsData.length === 0) fetchAllFoods();
+    } else {
+      if (allRestaurants.length === 0) fetchRestaurants();
+    }
+  }, [activeTab]);
+
+  // 🔍 Fuzzy search filter when search query changes
   useEffect(() => {
     const t = setTimeout(() => {
-      if (activeTab === "food") fetchAllFoods(searchQuery);
-      else fetchRestaurants(searchQuery);
+      if (activeTab === "food") {
+        if (searchQuery.trim()) {
+          // Apply fuzzy search
+          const filtered = fuzzySearchFoods(allFoodsData, searchQuery);
+          setAllFoods(filtered);
+        } else {
+          // Show all foods when search is empty
+          setAllFoods(allFoodsData);
+        }
+      } else {
+        if (searchQuery.trim()) {
+          // Apply fuzzy search
+          const filtered = fuzzySearchRestaurants(allRestaurants, searchQuery);
+          setRestaurants(filtered);
+        } else {
+          // Show all restaurants when search is empty
+          setRestaurants(allRestaurants);
+        }
+      }
     }, 300);
 
     return () => clearTimeout(t);
-  }, [searchQuery, activeTab]);
+  }, [searchQuery, activeTab, allRestaurants, allFoodsData]);
 
   const onSelectCategory = (category) => {
     setSelectedCategory(category.id);
