@@ -11,17 +11,17 @@ import ProfileScreen from "../screens/customer/ProfileScreen";
 const Tab = createBottomTabNavigator();
 
 function TabIcon({ label, focused, badge }) {
-  // Modern icon mapping
+  // Clean icon mapping matching the design
   const getIcon = () => {
     switch (label) {
-      case "Home":
-        return focused ? "🏡" : "🏠";
-      case "Orders":
-        return focused ? "📋" : "📄";
-      case "Cart":
-        return focused ? "🛍️" : "🛒";
-      case "Profile":
-        return focused ? "👨" : "👤";
+      case "HOME":
+        return "🏠";
+      case "ORDER":
+        return "📋";
+      case "CART":
+        return "🛒";
+      case "PROFILE":
+        return "👤";
       default:
         return "⚫";
     }
@@ -29,12 +29,10 @@ function TabIcon({ label, focused, badge }) {
 
   return (
     <View style={styles.iconWrap}>
-      <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
-        <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
-          {getIcon()}
-        </Text>
-      </View>
-
+      <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
+        {getIcon()}
+      </Text>
+      
       <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
         {label}
       </Text>
@@ -59,8 +57,8 @@ export default function CustomerTabs() {
         tabBarShowLabel: false,
         tabBarStyle: {
           ...styles.tabBar,
-          height: 60 + insets.bottom,
-          paddingBottom: insets.bottom,
+          height: 70 + insets.bottom,
+          paddingBottom: insets.bottom + 8,
         },
       }}
     >
@@ -69,7 +67,7 @@ export default function CustomerTabs() {
         component={HomeScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Home" focused={focused} />
+            <TabIcon label="HOME" focused={focused} />
           ),
         }}
       />
@@ -79,7 +77,7 @@ export default function CustomerTabs() {
         component={OrdersScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Orders" focused={focused} />
+            <TabIcon label="ORDER" focused={focused} />
           ),
         }}
       />
@@ -89,7 +87,7 @@ export default function CustomerTabs() {
         component={CartScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Cart" focused={focused} />
+            <TabIcon label="CART" focused={focused} badge={3} />
           ),
         }}
       />
@@ -99,7 +97,7 @@ export default function CustomerTabs() {
         component={ProfileScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Profile" focused={focused} />
+            <TabIcon label="PROFILE" focused={focused} />
           ),
         }}
       />
@@ -109,51 +107,59 @@ export default function CustomerTabs() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    paddingTop: 8,
+    paddingTop: 12,
+    paddingBottom: 8,
     borderTopWidth: 1,
-    borderTopColor: "#EEF2F7",
+    borderTopColor: "#E5E7EB",
     backgroundColor: "#fff",
     shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: -4 },
-    elevation: 8,
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: -2 },
+    elevation: 5,
   },
-  iconWrap: { width: 70, alignItems: "center", justifyContent: "center" },
-  iconContainer: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    alignItems: "center",
+  iconWrap: { 
+    width: 70, 
+    alignItems: "center", 
     justifyContent: "center",
-    backgroundColor: "transparent",
+    gap: 4,
   },
-  iconContainerActive: {
-    backgroundColor: "#ECFDF5",
+  iconEmoji: { 
+    fontSize: 24, 
+    color: "#9CA3AF",
   },
-  iconEmoji: { fontSize: 22, opacity: 0.6 },
-  iconEmojiActive: { opacity: 1 },
+  iconEmojiActive: { 
+    color: "#10b981",
+  },
   iconLabel: {
     marginTop: 2,
-    fontSize: 11,
+    fontSize: 10,
     color: "#9CA3AF",
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  iconLabelActive: { 
+    color: "#10b981", 
     fontWeight: "700",
   },
-  iconLabelActive: { color: "#10b981", fontWeight: "800" },
 
   badge: {
     position: "absolute",
-    top: -2,
-    right: 8,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 5,
-    borderRadius: 999,
+    top: -4,
+    right: 12,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    borderRadius: 10,
     backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
     borderColor: "#fff",
   },
-  badgeText: { color: "#fff", fontSize: 10, fontWeight: "900" },
+  badgeText: { 
+    color: "#fff", 
+    fontSize: 11, 
+    fontWeight: "700",
+  },
 });

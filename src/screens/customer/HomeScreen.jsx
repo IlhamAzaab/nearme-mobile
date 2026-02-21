@@ -16,16 +16,22 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
 import { fuzzySearchRestaurants, fuzzySearchFoods } from "../../utils/fuzzySearch";
 
-// ✅ simple emoji category icons (web svg -> RN easiest)
+// ✅ Circular category images
 const CategoryIcon = ({ type }) => {
-  const map = {
-    kothu: "🥘",
-    friedrice: "🍚",
-    biryani: "🍛",
-    parotta: "🫓",
-    shorteats: "🥟",
+  const imageMap = {
+    kothu: "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=200&h=200&fit=crop",
+    friedrice: "https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=200&h=200&fit=crop",
+    biryani: "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=200&h=200&fit=crop",
+    parotta: "https://images.unsplash.com/photo-1627308595126-613c7d5e6c3a?w=200&h=200&fit=crop",
+    shorteats: "https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?w=200&h=200&fit=crop",
   };
-  return <Text style={styles.catEmoji}>{map[type] || "🍛"}</Text>;
+  return (
+    <Image 
+      source={{ uri: imageMap[type] || imageMap.biryani }} 
+      style={styles.catImage}
+      resizeMode="cover"
+    />
+  );
 };
 
 export default function HomeScreen({ navigation }) {
@@ -562,28 +568,35 @@ const styles = StyleSheet.create({
   },
   catCardIdle: {},
   catIconBox: {
-    width: 64,
-    height: 64,
-    borderRadius: 999,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F8FAFC",
-    borderWidth: 1,
+    backgroundColor: "#fff",
+    borderWidth: 2,
     borderColor: "#E2E8F0",
-    padding: 12,
     overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   catIconBoxActive: {
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: "#10b981",
     shadowColor: "#10b981",
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    elevation: 6,
   },
-  catEmoji: { fontSize: 28 },
-  catText: { fontSize: 12, fontWeight: "800", color: "#64748B" },
+  catImage: { 
+    width: 72, 
+    height: 72, 
+  },
+  catText: { fontSize: 13, fontWeight: "700", color: "#64748B" },
   catTextActive: { color: "#10b981" },
 
   toggleRow: { 
