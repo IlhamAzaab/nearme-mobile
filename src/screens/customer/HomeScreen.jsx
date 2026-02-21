@@ -186,12 +186,18 @@ export default function HomeScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.page} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      {/* Header */}
+      {/* Header - Glass Morphism */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          {/* Logo */}
-          <View style={styles.logoBox}>
-            <Text style={styles.logoText}>N</Text>
+          {/* Logo & Delivery Info */}
+          <View style={styles.logoSection}>
+            <View style={styles.logoBox}>
+              <Text style={styles.logoIcon}>🍽️</Text>
+            </View>
+            <View style={styles.deliveryInfo}>
+              <Text style={styles.deliverLabel}>NEAR ME</Text>
+              <Text style={styles.deliverAddress}>Food Delivery</Text>
+            </View>
           </View>
 
           {/* Search */}
@@ -200,7 +206,7 @@ export default function HomeScreen({ navigation }) {
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Search restaurants or dishes"
+              placeholder="Search..."
               placeholderTextColor="#9CA3AF"
               style={styles.searchInput}
             />
@@ -211,9 +217,7 @@ export default function HomeScreen({ navigation }) {
             onPress={() => navigation.navigate("Notifications")}
             style={({ pressed }) => [styles.bellBtn, pressed && { opacity: 0.85 }]}
           >
-            <View style={styles.bellIconWrap}>
-              <Text style={styles.bellIcon}>🔔</Text>
-            </View>
+            <Text style={styles.bellIcon}>🔔</Text>
             {unreadCount > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
@@ -241,14 +245,14 @@ export default function HomeScreen({ navigation }) {
                 onPress={() => onSelectCategory(c)}
                 style={({ pressed }) => [
                   styles.catCard,
-                  active ? styles.catCardActive : styles.catCardIdle,
-                  pressed && { opacity: 0.9 },
+                  active && styles.catCardActive,
+                  pressed && { opacity: 0.7 },
                 ]}
               >
-                <View style={styles.catIconBox}>
+                <View style={[styles.catIconBox, active && styles.catIconBoxActive]}>
                   <CategoryIcon type={c.type} />
                 </View>
-                <Text style={[styles.catText, active ? { color: "#fff" } : { color: "#10b981" }]}>
+                <Text style={[styles.catText, active && styles.catTextActive]}>
                   {c.name}
                 </Text>
               </Pressable>
@@ -262,12 +266,12 @@ export default function HomeScreen({ navigation }) {
             onPress={() => setActiveTab("restaurant")}
             style={({ pressed }) => [
               styles.toggleBtn,
-              activeTab === "restaurant" ? styles.toggleActive : styles.toggleIdle,
-              pressed && { opacity: 0.9 },
+              activeTab === "restaurant" && styles.toggleActive,
+              pressed && { opacity: 0.8 },
             ]}
           >
             <Text style={activeTab === "restaurant" ? styles.toggleTextActive : styles.toggleTextIdle}>
-              🍽️ Restaurants
+              Restaurants
             </Text>
           </Pressable>
 
@@ -275,12 +279,12 @@ export default function HomeScreen({ navigation }) {
             onPress={() => setActiveTab("food")}
             style={({ pressed }) => [
               styles.toggleBtn,
-              activeTab === "food" ? styles.toggleActive : styles.toggleIdle,
-              pressed && { opacity: 0.9 },
+              activeTab === "food" && styles.toggleActive,
+              pressed && { opacity: 0.8 },
             ]}
           >
             <Text style={activeTab === "food" ? styles.toggleTextActive : styles.toggleTextIdle}>
-              🍕 Food Items
+              Food Items
             </Text>
           </Pressable>
         </View>
@@ -457,58 +461,59 @@ function EmptyState() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#F9FAFB" },
+  page: { flex: 1, backgroundColor: "#FFFFFF" },
 
   header: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#EEF2F7",
+    borderBottomColor: "#F1F5F9",
   },
-  headerTop: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerTop: { flexDirection: "row", alignItems: "center", gap: 12 },
 
+  logoSection: { flexDirection: "row", alignItems: "center", gap: 10, flexShrink: 0 },
   logoBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: "#10b981",
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    backgroundColor: "#10b981/10",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#10b981",
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    backgroundColor: "rgba(16, 185, 129, 0.1)",
   },
-  logoText: { color: "#fff", fontWeight: "900", fontSize: 18 },
+  logoIcon: { fontSize: 20 },
+  deliveryInfo: { flexShrink: 0 },
+  deliverLabel: { 
+    fontSize: 9, 
+    fontWeight: "800", 
+    letterSpacing: 1.5, 
+    color: "#94A3B8",
+    textTransform: "uppercase"
+  },
+  deliverAddress: { fontSize: 13, fontWeight: "700", color: "#1E293B" },
 
   bellBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: "#F3F4F6",
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  bellIconWrap: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
+    borderColor: "#F1F5F9",
+    flexShrink: 0,
   },
   bellIcon: { fontSize: 20 },
   badge: {
     position: "absolute",
-    top: -4,
-    right: -4,
-    minWidth: 20,
-    height: 20,
-    paddingHorizontal: 6,
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
     borderRadius: 999,
     backgroundColor: "#EF4444",
     alignItems: "center",
@@ -516,130 +521,187 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#fff",
   },
-  badgeText: { color: "#fff", fontWeight: "900", fontSize: 10 },
+  badgeText: { color: "#fff", fontWeight: "900", fontSize: 9 },
 
   searchWrap: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F3F4F6",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    height: 44,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    backgroundColor: "rgba(16, 185, 129, 0.05)",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    height: 42,
+    borderWidth: 2,
+    borderColor: "rgba(16, 185, 129, 0.1)",
   },
-  searchIcon: { fontSize: 14, opacity: 0.6, marginRight: 8 },
-  searchInput: { flex: 1, color: "#111827", fontSize: 14 },
+  searchIcon: { fontSize: 18, marginRight: 8 },
+  searchInput: { 
+    flex: 1, 
+    color: "#1E293B", 
+    fontSize: 13, 
+    fontWeight: "600",
+    paddingVertical: 0,
+  },
 
-  content: { padding: 14 },
+  content: { padding: 16 },
 
-  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sectionTitle: { fontSize: 16, fontWeight: "900", color: "#111827" },
-  sectionLink: { color: "#10b981", fontWeight: "800" },
+  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  sectionTitle: { fontSize: 19, fontWeight: "800", color: "#0F172A", letterSpacing: -0.5 },
+  sectionLink: { color: "#10b981", fontWeight: "800", fontSize: 13 },
 
-  catRow: { gap: 12, paddingVertical: 12 },
+  catRow: { gap: 16, paddingVertical: 8, marginBottom: 8 },
   catCard: {
-    width: 96,
-    borderRadius: 18,
-    paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: 8,
+    flexShrink: 0,
   },
-  catCardActive: { backgroundColor: "#10b981" },
-  catCardIdle: { backgroundColor: "#ECFDF5" },
+  catCardActive: { 
+    transform: [{ scale: 1.05 }],
+  },
+  catCardIdle: {},
   catIconBox: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
+    width: 64,
+    height: 64,
+    borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.85)",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 12,
+    overflow: "hidden",
   },
-  catEmoji: { fontSize: 22 },
-  catText: { fontSize: 13, fontWeight: "800" },
+  catIconBoxActive: {
+    borderWidth: 2,
+    borderColor: "#10b981",
+    shadowColor: "#10b981",
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  catEmoji: { fontSize: 28 },
+  catText: { fontSize: 12, fontWeight: "800", color: "#64748B" },
+  catTextActive: { color: "#10b981" },
 
-  toggleRow: { flexDirection: "row", gap: 10, marginTop: 6, marginBottom: 12 },
-  toggleBtn: { flex: 1, height: 44, borderRadius: 999, alignItems: "center", justifyContent: "center" },
-  toggleActive: { backgroundColor: "#10b981" },
-  toggleIdle: { backgroundColor: "#fff", borderWidth: 2, borderColor: "#10b981" },
-  toggleTextActive: { color: "#fff", fontWeight: "900" },
-  toggleTextIdle: { color: "#10b981", fontWeight: "900" },
+  toggleRow: { 
+    flexDirection: "row", 
+    gap: 0, 
+    marginTop: 8, 
+    marginBottom: 16,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 999,
+    padding: 6,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  toggleBtn: { 
+    flex: 1, 
+    height: 44, 
+    borderRadius: 999, 
+    alignItems: "center", 
+    justifyContent: "center",
+  },
+  toggleActive: { 
+    backgroundColor: "#10b981",
+    shadowColor: "#10b981",
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  toggleIdle: { 
+    backgroundColor: "transparent",
+  },
+  toggleTextActive: { color: "#fff", fontWeight: "900", fontSize: 13 },
+  toggleTextIdle: { color: "#64748B", fontWeight: "800", fontSize: 13 },
 
-  loadingBox: { alignItems: "center", justifyContent: "center", paddingVertical: 40, gap: 10 },
-  loadingText: { color: "#6B7280", fontWeight: "700" },
+  loadingBox: { alignItems: "center", justifyContent: "center", paddingVertical: 60, gap: 12 },
+  loadingText: { color: "#64748B", fontWeight: "600", fontSize: 13 },
 
   featureCard: { 
-    borderRadius: 22, 
+    borderRadius: 16, 
     overflow: "hidden", 
     height: 200,
     shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+    backgroundColor: "#fff",
   },
   featureImg: { width: "100%", height: "100%" },
-  featureOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
+  featureOverlay: { 
+    ...StyleSheet.absoluteFillObject, 
+    backgroundColor: "transparent",
+    backgroundImage: "linear-gradient(to top, rgba(0,0,0,0.8), transparent)",
+  },
   featureBottom: { 
     position: "absolute", 
     left: 0, 
     right: 0, 
     bottom: 0, 
-    padding: 16, 
-    backgroundColor: "rgba(0,0,0,0.4)" 
+    padding: 20, 
   },
-  featureName: { color: "#fff", fontSize: 20, fontWeight: "900", marginBottom: 6 },
+  featureName: { color: "#fff", fontSize: 20, fontWeight: "800", marginBottom: 4, letterSpacing: -0.5 },
   metaRow: { 
     flexDirection: "row", 
     alignItems: "center", 
     flexWrap: "wrap", 
-    gap: 4 
+    gap: 8,
   },
-  metaText: { color: "rgba(255,255,255,0.95)", fontSize: 12, fontWeight: "600" },
-  metaDot: { color: "rgba(255,255,255,0.7)", fontSize: 12, marginHorizontal: 4 },
+  metaText: { 
+    color: "rgba(255,255,255,0.9)", 
+    fontSize: 12, 
+    fontWeight: "600",
+  },
+  metaDot: { color: "rgba(255,255,255,0.6)", fontSize: 12, marginHorizontal: 2 },
   ratingBadge: {
     position: "absolute",
-    top: 12,
-    right: 12,
+    top: 16,
+    right: 16,
     backgroundColor: "rgba(255,255,255,0.95)",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    backdropFilter: "blur(10px)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 999,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
     shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
-  ratingText: { fontSize: 12, fontWeight: "900", color: "#111827" },
+  ratingText: { fontSize: 12, fontWeight: "900", color: "#0F172A" },
   featureTag: {
     position: "absolute",
-    top: 12,
-    right: 12,
+    top: 16,
+    left: 16,
     backgroundColor: "#10b981",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    shadowColor: "#10b981",
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
   featureTagText: { color: "#fff", fontWeight: "900", fontSize: 12 },
   closedTag: {
     position: "absolute",
-    top: 12,
-    left: 12,
+    top: 16,
+    left: 16,
     backgroundColor: "#EF4444",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    shadowColor: "#EF4444",
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
@@ -666,40 +728,45 @@ const styles = StyleSheet.create({
   foodCard: {
     flex: 1,
     backgroundColor: "#fff",
-    borderRadius: 18,
+    borderRadius: 16,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
     elevation: 2,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
   },
-  foodImg: { width: "100%", height: 120 },
-  foodBody: { padding: 10 },
-  foodTitle: { fontWeight: "900", color: "#111827" },
-  foodSub: { color: "#6B7280", marginTop: 2, fontSize: 12 },
-  foodRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
-  foodPrice: { color: "#10b981", fontWeight: "900" },
-  foodTime: { color: "#9CA3AF", fontSize: 11 },
+  foodImg: { width: "100%", height: 140 },
+  foodBody: { padding: 12 },
+  foodTitle: { fontWeight: "800", color: "#0F172A", fontSize: 14, letterSpacing: -0.3 },
+  foodSub: { color: "#10b981", marginTop: 4, fontSize: 12, fontWeight: "600" },
+  foodRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 },
+  foodPrice: { color: "#0F172A", fontWeight: "900", fontSize: 15 },
+  foodTime: { color: "#94A3B8", fontSize: 11, fontWeight: "600" },
 
-  emptyBox: { alignItems: "center", paddingVertical: 40, gap: 6 },
-  emptyEmoji: { fontSize: 44 },
-  emptyTitle: { fontWeight: "900", color: "#374151", fontSize: 16 },
-  emptySub: { color: "#6B7280", textAlign: "center" },
+  emptyBox: { alignItems: "center", paddingVertical: 60, gap: 8 },
+  emptyEmoji: { fontSize: 56, opacity: 0.3 },
+  emptyTitle: { fontWeight: "800", color: "#334155", fontSize: 17, letterSpacing: -0.3 },
+  emptySub: { color: "#64748B", textAlign: "center", fontSize: 14, fontWeight: "500" },
 
   fabCart: {
     position: "absolute",
     right: 16,
-    bottom: 18,
+    bottom: 24,
     backgroundColor: "#10b981",
     borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     shadowColor: "#10b981",
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
-  fabText: { color: "#fff", fontWeight: "900" },
+  fabText: { color: "#fff", fontWeight: "900", fontSize: 14, letterSpacing: 0.5 },
 });
