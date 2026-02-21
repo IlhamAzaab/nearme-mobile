@@ -389,6 +389,7 @@ export default function HomeScreen({ navigation }) {
               <EmptyState />
             ) : (
               <FlatList
+                key="foodList"
                 data={allFoods}
                 keyExtractor={(item) => String(item.id)}
                 numColumns={2}
