@@ -319,56 +319,54 @@ export default function HomeScreen({ navigation }) {
                 renderItem={({ item, index }) => (
                   <Pressable
                     onPress={() => navigation.navigate("RestaurantFoods", { restaurantId: item.id })}
-                    style={({ pressed }) => [styles.featureCard, pressed && { opacity: 0.92 }]}
+                    style={({ pressed }) => [styles.restaurantCard, pressed && { opacity: 0.92 }]}
                   >
-                    <Image
-                      source={{
-                        uri:
-                          item.cover_image ||
-                          item.logo_url ||
-                          "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800",
-                      }}
-                      style={styles.featureImg}
-                    />
-                    
-                    {/* Rating Badge - Top Right */}
-                    {item.rating && (
-                      <View style={styles.ratingBadge}>
-                        <Text style={styles.ratingText}>⭐ {item.rating}</Text>
-                      </View>
-                    )}
-                    
-                    {/* Closed Badge - Top Left */}
-                    {item.is_open === false && (
-                      <View style={styles.closedTag}>
-                        <Text style={styles.closedTagText}>Closed</Text>
-                      </View>
-                    )}
-                    
-                    {/* Featured Badge - All restaurants */}
-                    {item.is_open !== false && (
-                      <View style={styles.featureTag}>
-                        <Text style={styles.featureTagText}>⭐ Featured</Text>
-                      </View>
-                    )}
-                    
-                    {/* Bottom Info with Blur Background */}
-                    <View style={styles.featureBottom}>
-                      {/* Blur/Dark Overlay Background */}
-                      <View style={styles.featureBottomOverlay} />
+                    {/* Image Container */}
+                    <View style={styles.restaurantImageContainer}>
+                      <Image
+                        source={{
+                          uri:
+                            item.cover_image ||
+                            item.logo_url ||
+                            "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800",
+                        }}
+                        style={styles.restaurantImage}
+                      />
                       
-                      {/* Content */}
-                      <View style={styles.featureBottomContent}>
-                        <Text style={styles.featureName}>{item.restaurant_name}</Text>
-                        
-                        {/* Opening/Closing Time */}
-                        {(item.opening_time || item.closing_time) && (
-                          <Text style={styles.restaurantTiming}>
-                            ⏰ {item.opening_time || '9:00 AM'} - {item.closing_time || '11:00 PM'}
-                          </Text>
-                        )}
-                        
-                        <View style={styles.metaRow}>
+                      {/* Rating Badge - Top Right */}
+                      {item.rating && (
+                        <View style={styles.ratingBadge}>
+                          <Text style={styles.ratingText}>⭐ {item.rating}</Text>
+                        </View>
+                      )}
+                      
+                      {/* Closed Badge - Top Left */}
+                      {item.is_open === false && (
+                        <View style={styles.closedTag}>
+                          <Text style={styles.closedTagText}>Closed</Text>
+                        </View>
+                      )}
+                      
+                      {/* Featured Badge - All restaurants */}
+                      {item.is_open !== false && (
+                        <View style={styles.featureTag}>
+                          <Text style={styles.featureTagText}>⭐ Featured</Text>
+                        </View>
+                      )}
+                    </View>
+                    
+                    {/* Info Section Below Image */}
+                    <View style={styles.restaurantInfo}>
+                      <Text style={styles.restaurantName} numberOfLines={1}>{item.restaurant_name}</Text>
+                      
+                      {/* Opening/Closing Time */}
+                      {(item.opening_time || item.closing_time) && (
+                        <Text style={styles.restaurantTiming}>
+                          ⏰ {item.opening_time || '9:00 AM'} - {item.closing_time || '11:00 PM'}
+                        </Text>
+                      )}
+                      
+                      <View style={styles.metaRow}>
                         {item.cuisine && (
                           <Text style={styles.metaText}>{item.cuisine}</Text>
                         )}
@@ -389,7 +387,6 @@ export default function HomeScreen({ navigation }) {
                             <Text style={styles.metaText}>🚚 Rs. {item.delivery_fee}</Text>
                           </>
                         ) : null}
-                      </View>
                       </View>
                     </View>
                   </Pressable>
@@ -647,10 +644,9 @@ const styles = StyleSheet.create({
   loadingBox: { alignItems: "center", justifyContent: "center", paddingVertical: 60, gap: 12 },
   loadingText: { color: "#64748B", fontWeight: "600", fontSize: 13 },
 
-  featureCard: { 
+  restaurantCard: { 
     borderRadius: 16, 
     overflow: "hidden", 
-    height: 200,
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowRadius: 16,
@@ -658,60 +654,48 @@ const styles = StyleSheet.create({
     elevation: 3,
     backgroundColor: "#fff",
   },
-  featureImg: { width: "100%", height: "100%" },
-  featureBottom: { 
-    position: "absolute", 
-    left: 0, 
-    right: 0, 
-    bottom: 0,
+  restaurantImageContainer: {
+    position: "relative",
+    width: "100%",
+    height: 180,
+    borderRadius: 16,
     overflow: "hidden",
   },
-  featureBottomOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.75)",
-    backdropFilter: "blur(10px)",
+  restaurantImage: { 
+    width: "100%", 
+    height: "100%",
   },
-  featureBottomContent: {
-    position: "relative",
-    padding: 16,
-    paddingBottom: 14,
+  restaurantInfo: {
+    padding: 12,
+    paddingTop: 10,
   },
-  featureName: { 
-    color: "#fff", 
-    fontSize: 18, 
+  restaurantName: { 
+    color: "#0F172A", 
+    fontSize: 17, 
     fontWeight: "800", 
     marginBottom: 4, 
     letterSpacing: -0.3,
-    textShadowColor: "rgba(0, 0, 0, 0.3)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
   },
   restaurantTiming: { 
-    color: "rgba(255,255,255,0.98)", 
+    color: "#64748B", 
     fontSize: 12, 
-    fontWeight: "700", 
+    fontWeight: "600", 
     marginBottom: 6,
-    letterSpacing: 0.3,
-    textShadowColor: "rgba(0, 0, 0, 0.3)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    letterSpacing: 0.2,
   },
   metaRow: { 
     flexDirection: "row", 
     alignItems: "center", 
     flexWrap: "wrap", 
-    gap: 8,
+    gap: 6,
   },
   metaText: { 
-    color: "rgba(255,255,255,0.95)", 
+    color: "#64748B", 
     fontSize: 11, 
     fontWeight: "600",
-    textShadowColor: "rgba(0, 0, 0, 0.3)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   metaDot: { 
-    color: "rgba(255,255,255,0.7)", 
+    color: "#94A3B8", 
     fontSize: 11, 
     marginHorizontal: 2,
   },
