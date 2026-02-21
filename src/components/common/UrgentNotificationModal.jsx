@@ -181,6 +181,18 @@ export default function UrgentNotificationModal({
           <Text style={styles.title}>{title || "Urgent Notification"}</Text>
           <Text style={styles.body}>{body || ""}</Text>
 
+          {/* Date and Time - only for orders */}
+          {isNewOrder && (data?.orderDate || data?.orderTime) && (
+            <View style={styles.dateTimeContainer}>
+              <View style={styles.dateTimeRow}>
+                <Text style={styles.dateTimeIcon}>📅</Text>
+                <Text style={styles.dateTimeText}>
+                  {data.orderDate} at {data.orderTime}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {/* Food items list */}
           {isNewOrder && data?.itemsSummary ? (
             <View style={styles.itemsContainer}>
@@ -391,6 +403,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#f59e0b",
+  },
+  // ── Date and Time ──────────────────────────────────────────────
+  dateTimeContainer: {
+    width: "100%",
+    backgroundColor: "#eff6ff",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+  },
+  dateTimeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dateTimeIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  dateTimeText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1e40af",
   },
   // ── Reason input ──────────────────────────────────────────────
   reasonBox: {

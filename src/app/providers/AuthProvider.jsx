@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../../config/env';
+import orderTrackingService from '../../services/orderTrackingService';
 import pushNotificationService from '../../services/pushNotificationService';
 
 const AuthContext = createContext(null);
@@ -145,6 +146,9 @@ export function AuthProvider({ children }) {
       await pushNotificationService.unregisterToken(token);
       pushNotificationService.cleanup();
     }
+    
+    // Clear displayed orders tracking
+    await orderTrackingService.clearAll();
     
     await AsyncStorage.removeItem('token');
     await AsyncStorage.removeItem('role');

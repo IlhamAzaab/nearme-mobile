@@ -57,10 +57,9 @@ export default function Orders() {
   };
 
   const getDeliveryStatus = (order) => {
+    // Always rely on deliveries.status as the ONLY source of truth
     const dels = normalizeDeliveries(order?.deliveries);
-    return (
-      dels[0]?.status || order?.delivery_status || order?.status || "placed"
-    );
+    return dels[0]?.status || "placed";
   };
 
   const getDriver = (order) => {
@@ -334,7 +333,7 @@ export default function Orders() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            status: "rejected",
+            status: "failed",
             reason: rejectReason.trim(),
           }),
         },
@@ -344,6 +343,26 @@ export default function Orders() {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.message || "Failed to reject order");
       }
+
+      // Optimistically update the UI immediately - update deliveries table only
+      setOrders((prevOrders) => {
+        const newOrders = prevOrders.map((order) => {
+          if (order.id === orderId) {
+            const dels = normalizeDeliveries(order.deliveries);
+            return {
+              ...order,
+              deliveries: dels.map((d) => ({
+                ...d,
+                status: "failed",
+                rejection_reason: rejectReason.trim(),
+              })),
+            };
+          }
+          return order;
+        });
+        setCounts(computeCounts(newOrders));
+        return newOrders;
+      });
 
       Alert.alert("Success", "Order rejected");
       fetchOrders();
@@ -434,7 +453,7 @@ export default function Orders() {
           icon: "✅",
         };
       case "cancelled":
-      case "rejected":
+      case "failed":
         return {
           label: status === "cancelled" ? "Cancelled" : "Rejected",
           bg: "#fee2e2",
@@ -651,25 +670,6 @@ export default function Orders() {
 
       {/* Main Content */}
       <View style={styles.mainContent}>
-        {/* New Order Notification */}
-        {newOrderNotification && (
-          <View style={styles.notificationBanner}>
-            <View style={styles.notificationContent}>
-              <Text style={styles.notificationIcon}>🔔</Text>
-              <View>
-                <Text style={styles.notificationText}>
-                  {newOrderNotification.message}
-                </Text>
-                <Text style={styles.notificationTime}>
-                  {newOrderNotification.timestamp.toLocaleTimeString()}
-                </Text>
-              </View>
-            </View>
-            <TouchableOpacity onPress={() => setNewOrderNotification(null)}>
-              <Text style={styles.notificationClose}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
         {/* Filter Tabs */}
         <ScrollView
@@ -906,7 +906,11 @@ export default function Orders() {
                             ? "Waiting for driver"
                             : deliveryStatus === "delivered"
                               ? "Order completed"
-                              : "In progress"}
+                              : deliveryStatus === "failed"
+                                ? `Rejected: ${normalizeDeliveries(order.deliveries)[0]?.rejection_reason || "No reason provided"}`
+                                : deliveryStatus === "cancelled"
+                                  ? "Order cancelled"
+                                  : "In progress"}
                         </Text>
                         <TouchableOpacity
                           style={styles.viewDetailsButton}
@@ -1360,10 +1364,10 @@ const styles = StyleSheet.create({
 
   // Section Title
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: "bold",
     color: "#1f2937",
-    marginBottom: 12,
+    marginBottom: 10,
   },
 
   // Orders List

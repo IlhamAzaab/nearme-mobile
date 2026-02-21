@@ -1,11 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NavigationContainer } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, StatusBar } from "react-native";
+import { Alert, AppState, StatusBar } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import UrgentNotificationModal from "../components/common/UrgentNotificationModal";
 import { API_URL } from "../config/env";
 import RootNavigator from "../navigation/RootNavigator";
+import orderTrackingService from "../services/orderTrackingService";
 import pushNotificationService from "../services/pushNotificationService";
 import { AuthProvider } from "./providers/AuthProvider";
 import { NotificationProvider } from "./providers/NotificationProvider";
@@ -21,6 +22,11 @@ export default function App() {
   const handleAcceptUrgent = useCallback(async (data) => {
     await pushNotificationService.stopAlarm();
     setUrgentNotification(null);
+
+    // Mark order as handled (remove from displayed tracking)
+    if (data?.orderId) {
+      await orderTrackingService.markAsHandled(data.orderId);
+    }
 
     const token = await AsyncStorage.getItem("token");
     if (!token) return;
@@ -87,6 +93,11 @@ export default function App() {
     await pushNotificationService.stopAlarm();
     setUrgentNotification(null);
 
+    // Mark order as handled (remove from displayed tracking)
+    if (data?.orderId) {
+      await orderTrackingService.markAsHandled(data.orderId);
+    }
+
     if (data?.type === "new_order" && data?.orderId) {
       const token = await AsyncStorage.getItem("token");
       if (token) {
@@ -134,12 +145,29 @@ export default function App() {
 
   // Initialize push notifications when app starts (if user is logged in)
   useEffect(() => {
+    // Initialize order tracking service
+    orderTrackingService.initialize();
+
     // Register urgent notification callback
-    pushNotificationService.onUrgentNotification((notification) => {
+    pushNotificationService.onUrgentNotification(async (notification) => {
       console.log(
         "[App] Urgent notification received:",
         notification.data?.type,
       );
+      
+      // Check if this order has already been displayed
+      if (notification.data?.orderId) {
+        const alreadyDisplayed = await orderTrackingService.hasBeenDisplayed(
+          notification.data.orderId
+        );
+        if (alreadyDisplayed) {
+          console.log(`[App] Order ${notification.data.orderId} already displayed, skipping`);
+          return;
+        }
+        // Mark as displayed
+        await orderTrackingService.markAsDisplayed(notification.data.orderId);
+      }
+      
       setUrgentNotification(notification);
     });
 
@@ -171,15 +199,28 @@ export default function App() {
         if (response.ok) {
           const data = await response.json();
           const orders = data.orders || [];
-          // Find first pending order (status = 'placed' at delivery level)
-          const pendingOrder = orders.find((order) => {
+          // Find first pending order (status = 'placed' at delivery level) that hasn't been displayed
+          let pendingOrder = null;
+          for (const order of orders) {
             const delivery = Array.isArray(order.deliveries)
               ? order.deliveries[0]
               : order.deliveries;
-            return delivery?.status === "placed";
-          });
+            if (delivery?.status === "placed") {
+              // Check if already displayed
+              const alreadyDisplayed = await orderTrackingService.hasBeenDisplayed(
+                String(order.id)
+              );
+              if (!alreadyDisplayed) {
+                pendingOrder = order;
+                break;
+              }
+            }
+          }
 
           if (pendingOrder) {
+            // Mark as displayed
+            await orderTrackingService.markAsDisplayed(String(pendingOrder.id));
+            
             // Show modal for the first pending order
             const items = pendingOrder.order_items || [];
             const itemsSummary = items
@@ -190,8 +231,21 @@ export default function App() {
               })
               .join(", ");
 
+            // Format date and time
+            const orderDate = new Date(pendingOrder.placed_at || pendingOrder.created_at);
+            const formattedDate = orderDate.toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric'
+            });
+            const formattedTime = orderDate.toLocaleTimeString('en-US', {
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true
+            });
+
             setUrgentNotification({
-              title: "🔔 Pending Order",
+              title: "🔔 New Order Received",
               body: `Order #${pendingOrder.order_number || pendingOrder.id?.slice(-6)} · Rs. ${parseFloat(pendingOrder.subtotal || 0).toFixed(2)} · ${items.length} item(s)`,
               data: {
                 type: "new_order",
@@ -199,10 +253,12 @@ export default function App() {
                 orderNumber: pendingOrder.order_number,
                 itemsSummary,
                 itemsCount: String(items.length),
+                orderDate: formattedDate,
+                orderTime: formattedTime,
               },
             });
             pushNotificationService.startAlarm(
-              "🔔 Pending Order",
+              "🔔 New Order",
               `Order #${pendingOrder.order_number}`,
               { type: "new_order" },
             );
@@ -216,8 +272,22 @@ export default function App() {
     // Small delay to ensure navigation is ready
     const timer = setTimeout(initPushOnStart, 1500);
 
+    // Listen for app state changes (foreground/background)
+    const appStateSubscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active') {
+        // App came to foreground - check for pending orders
+        const token = await AsyncStorage.getItem("token");
+        const role = await AsyncStorage.getItem("role");
+        if (token && role === "admin") {
+          console.log("[App] App became active, checking for pending orders...");
+          checkPendingOrders(token);
+        }
+      }
+    });
+
     return () => {
       clearTimeout(timer);
+      appStateSubscription?.remove();
       pushNotificationService.cleanup();
     };
   }, []);
