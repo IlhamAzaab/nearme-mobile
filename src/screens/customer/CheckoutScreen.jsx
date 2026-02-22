@@ -15,6 +15,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import FreeMapView from "../../components/maps/FreeMapView";
 import * as Location from "expo-location";
+import { Ionicons } from "@expo/vector-icons";
 import { API_BASE_URL } from "../../constants/api";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -888,6 +889,14 @@ export default function CheckoutScreen({ route, navigation }) {
             }]}
           />
 
+          {/* Back Button - Top Left */}
+          <Pressable
+            onPress={() => navigation.goBack()}
+            style={styles.backBtn}
+          >
+            <Ionicons name="arrow-back" size={22} color="#111827" />
+          </Pressable>
+
           {/* Find My Location Button */}
           <Pressable
             disabled={fetchingLocation}
@@ -929,15 +938,20 @@ export default function CheckoutScreen({ route, navigation }) {
           </Pressable>
         </View>
 
-        {/* ✅ Address card */}
+        {/* ✅ Delivery Info - Address, Phone, ETA in one block */}
         <View style={styles.card}>
+          {/* Address Row */}
           <View style={styles.rowBetween}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Delivery Address</Text>
-              <Text style={styles.value}>{address || "Add delivery address"}</Text>
-              {!!city && <Text style={styles.muted}>{city}</Text>}
+            <View style={{ flexDirection: "row", alignItems: "center", flex: 1, gap: 10 }}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="location-outline" size={18} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Delivery Address</Text>
+                <Text style={styles.value} numberOfLines={2}>{address || "Add delivery address"}</Text>
+                {!!city && <Text style={styles.muted}>{city}</Text>}
+              </View>
             </View>
-
             <Pressable
               onPress={() => {
                 setEditAddress(address);
@@ -949,20 +963,34 @@ export default function CheckoutScreen({ route, navigation }) {
               <Text style={{ fontSize: 16 }}>✏️</Text>
             </Pressable>
           </View>
-        </View>
 
-        {/* ✅ Phone */}
-        <View style={styles.card}>
-          <Text style={styles.label}>Phone Number</Text>
-          <Text style={styles.value}>{phone || "No phone number"}</Text>
-        </View>
+          <View style={styles.infoDivider} />
 
-        {/* ✅ Estimated */}
-        <View style={styles.card}>
-          <Text style={styles.label}>Estimated Delivery</Text>
-          <Text style={styles.value}>
-            {routeLoading ? "Calculating..." : routeInfo ? `~${Math.ceil(routeInfo.duration) + 15} mins` : "—"}
-          </Text>
+          {/* Phone Row */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={styles.infoIcon}>
+              <Ionicons name="call-outline" size={18} color="#10B981" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Phone Number</Text>
+              <Text style={styles.value}>{phone || "No phone number"}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoDivider} />
+
+          {/* Estimated Delivery Row */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={styles.infoIcon}>
+              <Ionicons name="time-outline" size={18} color="#10B981" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Estimated Delivery</Text>
+              <Text style={styles.value}>
+                {routeLoading ? "Calculating..." : routeInfo ? `~${Math.ceil(routeInfo.duration) + 15} mins` : "—"}
+              </Text>
+            </View>
+          </View>
         </View>
 
         {/* ✅ Price summary */}
@@ -1156,6 +1184,23 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 13,
   },
+  backBtn: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    zIndex: 10,
+  },
   mapBtn: {
     position: "absolute",
     right: 12,
@@ -1195,6 +1240,19 @@ const styles = StyleSheet.create({
     backgroundColor: GREEN_SOFT,
     alignItems: "center",
     justifyContent: "center",
+  },
+  infoIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#F0FDF4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  infoDivider: {
+    height: 1,
+    backgroundColor: "#F1F5F9",
+    marginVertical: 12,
   },
 
   warn: {
