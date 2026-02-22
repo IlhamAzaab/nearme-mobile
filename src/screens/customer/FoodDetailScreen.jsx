@@ -305,6 +305,12 @@ export default function FoodDetailScreen({ route, navigation }) {
                 {food.regular_size || "Regular"}
               </Text>
               <Text style={[
+                styles.sizePortionText,
+                selectedSize === "regular" && styles.sizePortionTextActive,
+              ]}>
+                2 Portions
+              </Text>
+              <Text style={[
                 styles.sizeOptionPrice,
                 selectedSize === "regular" && styles.sizeOptionPriceActive,
               ]}>
@@ -330,6 +336,12 @@ export default function FoodDetailScreen({ route, navigation }) {
                   selectedSize === "large" && styles.sizeOptionNameActive,
                 ]}>
                   {food.extra_size || "Large"}
+                </Text>
+                <Text style={[
+                  styles.sizePortionText,
+                  selectedSize === "large" && styles.sizePortionTextActive,
+                ]}>
+                  3-4 Portions
                 </Text>
                 <Text style={[
                   styles.sizeOptionPrice,
@@ -374,10 +386,6 @@ export default function FoodDetailScreen({ route, navigation }) {
 
       {/* Bottom Actions - Fixed */}
       <View style={styles.bottomActions}>
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Total Price</Text>
-          <Text style={styles.totalValue}>{formatPrice(totalPrice)}</Text>
-        </View>
         <View style={styles.btnRow}>
           <Pressable
             disabled={addingToCart}
@@ -401,8 +409,9 @@ export default function FoodDetailScreen({ route, navigation }) {
               addingToCart && { opacity: 0.6 },
             ]}
           >
+            <Ionicons name="cart" size={18} color="#fff" style={{ marginRight: 6 }} />
             <Text style={styles.addToCartText}>
-              {addingToCart ? "Adding..." : "Add to Cart"}
+              {addingToCart ? "Adding..." : `Add to Cart • ${formatPrice(totalPrice)}`}
             </Text>
           </Pressable>
         </View>
@@ -626,6 +635,16 @@ const styles = StyleSheet.create({
     color: "#059669",
     fontWeight: "800",
   },
+  sizePortionText: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#94A3B8",
+    marginTop: -2,
+  },
+  sizePortionTextActive: {
+    color: "#059669",
+    fontWeight: "600",
+  },
   sizeCheck: {
     position: "absolute",
     top: 8,
@@ -697,28 +716,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "rgba(255,255,255,0.95)",
+    backgroundColor: "rgba(255,255,255,0.97)",
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 100,
     borderTopWidth: 1,
     borderTopColor: "#F1F5F9",
-  },
-  totalRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  totalLabel: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#64748B",
-  },
-  totalValue: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#0F172A",
   },
   btnRow: {
     flexDirection: "row",
@@ -744,6 +747,7 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 999,
     backgroundColor: "#10b981",
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#10b981",
