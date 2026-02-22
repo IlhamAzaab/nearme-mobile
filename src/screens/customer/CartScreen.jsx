@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   Image,
   Alert,
   FlatList,
@@ -12,12 +11,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
 import { API_BASE_URL } from "../../constants/api";
 
-const ORANGE = "#FF7A00";
-const GREEN = "#10B981";
-const TEXT = "#111827";
-const MUTED = "#6B7280";
+const PRIMARY = "#10b981";
+const TEXT_DARK = "#0F172A";
+const MUTED = "#64748B";
+const BORDER = "#F1F5F9";
+const BG = "#F8FAFC";
 
 
 export default function CartScreen({ navigation }) {
@@ -185,8 +186,10 @@ export default function CartScreen({ navigation }) {
       <SafeAreaView style={styles.container} edges={["top"]}>
         <CartHeader cartCount={cartCount} />
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={ORANGE} />
-          <Text style={styles.muted}>Loading your cart...</Text>
+          <View style={styles.loadingIcon}>
+            <Ionicons name="cart" size={32} color={PRIMARY} />
+          </View>
+          <Text style={styles.loadingText}>Loading your cart...</Text>
         </View>
       </SafeAreaView>
     );
@@ -200,6 +203,9 @@ export default function CartScreen({ navigation }) {
       <SafeAreaView style={styles.container} edges={["top"]}>
         <CartHeader cartCount={cartCount} />
         <View style={styles.center}>
+          <View style={styles.errorIcon}>
+            <Ionicons name="alert-circle" size={40} color="#EF4444" />
+          </View>
           <Text style={styles.errTitle}>Oops!</Text>
           <Text style={styles.errText}>{error}</Text>
           <Pressable onPress={fetchCarts} style={styles.primaryBtn}>
@@ -218,11 +224,17 @@ export default function CartScreen({ navigation }) {
       <SafeAreaView style={styles.container} edges={["top"]}>
         <CartHeader cartCount={0} />
         <View style={styles.center}>
-          <Text style={{ fontSize: 48 }}>🛒</Text>
+          <View style={styles.emptyIconWrap}>
+            <Ionicons name="cart-outline" size={56} color="#CBD5E1" />
+          </View>
           <Text style={styles.emptyTitle}>Your Cart is Empty</Text>
-          <Text style={styles.muted}>Add items from restaurants</Text>
-          <Pressable onPress={() => navigation.navigate("MainTabs", { screen: "Home" })} style={styles.primaryBtn}>
-            <Text style={styles.primaryBtnText}>Go to Home</Text>
+          <Text style={styles.emptySubtitle}>Add items from restaurants to get started</Text>
+          <Pressable
+            onPress={() => navigation.navigate("MainTabs", { screen: "Home" })}
+            style={styles.primaryBtn}
+          >
+            <Ionicons name="home" size={16} color="#fff" style={{ marginRight: 6 }} />
+            <Text style={styles.primaryBtnText}>Browse Restaurants</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -230,56 +242,48 @@ export default function CartScreen({ navigation }) {
   }
 
   // ============================================================================
-  // SELECTED CART DETAIL VIEW (Image 2)
+  // SELECTED CART DETAIL VIEW
   // ============================================================================
   if (selectedCart) {
+    const itemCount = selectedCart?.item_count || selectedCart?.items?.length || 0;
+
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
         <CartHeader cartCount={cartCount} />
 
         <ScrollView style={styles.page} contentContainerStyle={{ paddingBottom: 95 }}>
-          {/* Back Button */}
+          {/* Back Link */}
           <Pressable onPress={() => setSelectedCartId(null)} style={styles.backRow}>
-            <Text style={styles.backText}>{"<"}</Text>
+            <Ionicons name="arrow-back" size={16} color={PRIMARY} />
             <Text style={styles.backLabel}>Back to restaurants</Text>
           </Pressable>
 
-          {/* Restaurant Header Card (Orange) */}
-          <View style={styles.restaurantHeader}>
-            <View style={styles.restaurantHeaderRow}>
-              {selectedCart?.restaurant?.logo_url ? (
-                <Image
-                  source={{ uri: selectedCart.restaurant.logo_url }}
-                  style={styles.restaurantLogo}
-                />
-              ) : (
-                <View style={styles.restaurantLogoFallback}>
-                  <Text style={styles.restaurantLogoText}>
-                    {(selectedCart?.restaurant?.restaurant_name || "R").charAt(0)}
-                  </Text>
-                </View>
-              )}
-
-              <View style={styles.restaurantInfo}>
-                <Text style={styles.restaurantName} numberOfLines={1}>
-                  {selectedCart?.restaurant?.restaurant_name}
-                </Text>
-                <Text style={styles.restaurantMeta}>
-                  {selectedCart?.restaurant?.city || ""} • {selectedCart?.item_count || 0} item
-                </Text>
-              </View>
-
-              <View style={styles.totalBox}>
-                <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>{formatPrice(selectedCart.cart_total)}</Text>
-              </View>
+          {/* Restaurant Summary Card (Green) */}
+          <View style={styles.summaryCard}>
+            <View>
+              <Text style={styles.summaryName} numberOfLines={1}>
+                {selectedCart?.restaurant?.restaurant_name}
+              </Text>
+              <Text style={styles.summaryMeta}>
+                {selectedCart?.restaurant?.city || "Restaurant"} • {itemCount} item{itemCount !== 1 ? "s" : ""}
+              </Text>
+            </View>
+            <View style={styles.summaryRight}>
+              <Text style={styles.summarySubLabel}>Subtotal</Text>
+              <Text style={styles.summaryTotal}>{formatPrice(selectedCart.cart_total)}</Text>
             </View>
           </View>
 
-          {/* Items List */}
-          <View style={styles.itemsCard}>
-            {(selectedCart.items || []).map((item) => (
-              <View key={item.id} style={styles.itemRow}>
+          {/* Food Items */}
+          <View style={styles.itemsList}>
+            {(selectedCart.items || []).map((item, idx) => (
+              <View
+                key={item.id}
+                style={[
+                  styles.itemRow,
+                  idx < (selectedCart.items || []).length - 1 && styles.itemRowBorder,
+                ]}
+              >
                 <Image
                   source={{
                     uri:
@@ -288,92 +292,99 @@ export default function CartScreen({ navigation }) {
                   }}
                   style={styles.itemImage}
                 />
-
                 <View style={styles.itemDetails}>
-                  <Text style={styles.itemName} numberOfLines={1}>
-                    {item.food_name}
-                  </Text>
-                  <View style={styles.sizeTag}>
-                    <Text style={styles.sizeTagText}>
-                      {String(item.size || "Regular").charAt(0).toUpperCase() +
-                        String(item.size || "Regular").slice(1)}
-                    </Text>
+                  <View style={styles.itemTopRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.itemName} numberOfLines={1}>{item.food_name}</Text>
+                      <View style={styles.sizeTag}>
+                        <Text style={styles.sizeTagText}>
+                          {String(item.size || "Regular").charAt(0).toUpperCase() +
+                            String(item.size || "Regular").slice(1)}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.itemPrice}>{formatPrice(item.unit_price)}</Text>
                   </View>
-                  <Text style={styles.itemPrice}>{formatPrice(item.unit_price)}</Text>
+
+                  {/* Quantity + Delete */}
+                  <View style={styles.itemBottomRow}>
+                    <View style={styles.qtyPill}>
+                      <Pressable
+                        onPress={() => updateQuantity(item.id, (item.quantity || 1) - 1)}
+                        disabled={updatingItem === item.id || (item.quantity || 1) <= 1}
+                        style={[styles.qtyBtn, (item.quantity || 1) <= 1 && { opacity: 0.3 }]}
+                      >
+                        <Ionicons name="remove" size={16} color="#94A3B8" />
+                      </Pressable>
+                      <Text style={styles.qtyValue}>{item.quantity}</Text>
+                      <Pressable
+                        onPress={() => updateQuantity(item.id, (item.quantity || 0) + 1)}
+                        disabled={updatingItem === item.id}
+                        style={styles.qtyBtnPlus}
+                      >
+                        <Ionicons name="add" size={16} color="#fff" />
+                      </Pressable>
+                    </View>
+                    <Pressable onPress={() => removeItem(item.id)} style={styles.deleteBtn}>
+                      <Ionicons name="trash-outline" size={18} color="#CBD5E1" />
+                    </Pressable>
+                  </View>
                 </View>
-
-                {/* Quantity Controls */}
-                <View style={styles.qtyContainer}>
-                  <Pressable
-                    onPress={() => updateQuantity(item.id, (item.quantity || 1) - 1)}
-                    disabled={updatingItem === item.id || (item.quantity || 1) <= 1}
-                    style={[styles.qtyBtn, (item.quantity || 1) <= 1 && styles.qtyBtnDisabled]}
-                  >
-                    <Text style={styles.qtyBtnText}>−</Text>
-                  </Pressable>
-
-                  <Text style={styles.qtyValue}>{item.quantity}</Text>
-
-                  <Pressable
-                    onPress={() => updateQuantity(item.id, (item.quantity || 0) + 1)}
-                    disabled={updatingItem === item.id}
-                    style={[styles.qtyBtn, styles.qtyBtnPlus]}
-                  >
-                    <Text style={[styles.qtyBtnText, { color: "#fff" }]}>+</Text>
-                  </Pressable>
-                </View>
-
-                {/* Delete Button */}
-                <Pressable onPress={() => removeItem(item.id)} style={styles.deleteBtn}>
-                  <Text style={styles.deleteBtnText}>🗑️</Text>
-                </Pressable>
               </View>
             ))}
           </View>
 
-          {/* Cart Total Section */}
-          <View style={styles.totalSection}>
-            <View style={styles.totalRow}>
-              <Text style={styles.totalItemsText}>
-                Total Items: {selectedCart?.item_count || selectedCart?.items?.length || 0}
-              </Text>
-              <View style={styles.totalRight}>
-                <Text style={styles.cartTotalLabel}>Cart Total</Text>
-                <Text style={styles.cartTotalValue}>{formatPrice(selectedCart.cart_total)}</Text>
-              </View>
+          {/* Pricing Summary */}
+          <View style={styles.pricingSection}>
+            <View style={styles.pricingRow}>
+              <Text style={styles.pricingLabel}>Subtotal</Text>
+              <Text style={styles.pricingValue}>{formatPrice(selectedCart.cart_total)}</Text>
+            </View>
+            <View style={styles.pricingRow}>
+              <Text style={styles.pricingLabel}>Delivery Fee</Text>
+              <Text style={[styles.pricingValue, { color: PRIMARY, fontWeight: "700" }]}>Free</Text>
+            </View>
+            <View style={styles.pricingDivider} />
+            <View style={styles.pricingRow}>
+              <Text style={styles.pricingTotalLabel}>Total Amount</Text>
+              <Text style={styles.pricingTotalValue}>{formatPrice(selectedCart.cart_total)}</Text>
             </View>
           </View>
 
           {/* Action Buttons */}
-          <View style={styles.actionButtons}>
+          <View style={styles.actionSection}>
+            <Pressable
+              onPress={() => goCheckout(selectedCart.id)}
+              style={({ pressed }) => [styles.checkoutBtn, pressed && { opacity: 0.9 }]}
+            >
+              <Text style={styles.checkoutBtnText}>
+                Checkout • {formatPrice(selectedCart.cart_total)}
+              </Text>
+            </Pressable>
+
             <Pressable
               onPress={() =>
                 navigation.navigate("RestaurantFoods", {
                   restaurantId: selectedCart.restaurant_id,
                 })
               }
-              style={styles.outlineBtn}
+              style={({ pressed }) => [styles.addMoreBtn, pressed && { opacity: 0.8 }]}
             >
-              <Text style={styles.outlineBtnText}>Add More Items</Text>
+              <Text style={styles.addMoreBtnText}>Add More Items</Text>
             </Pressable>
 
-            <Pressable onPress={() => goCheckout(selectedCart.id)} style={styles.checkoutBtn}>
-              <Text style={styles.checkoutBtnText}>Checkout</Text>
-              <Text style={styles.checkoutArrow}>{">"}</Text>
+            <Pressable onPress={() => removeCart(selectedCart.id)} style={styles.clearCartLink}>
+              <Ionicons name="trash-outline" size={14} color="#EF4444" style={{ marginRight: 4 }} />
+              <Text style={styles.clearCartText}>Clear this cart</Text>
             </Pressable>
           </View>
-
-          {/* Clear Cart Link */}
-          <Pressable onPress={() => removeCart(selectedCart.id)} style={styles.clearCartLink}>
-            <Text style={styles.clearCartText}>Clear this cart</Text>
-          </Pressable>
         </ScrollView>
       </SafeAreaView>
     );
   }
 
   // ============================================================================
-  // ACTIVE RESTAURANTS LIST (Image 1)
+  // ACTIVE RESTAURANTS LIST
   // ============================================================================
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -387,52 +398,65 @@ export default function CartScreen({ navigation }) {
           keyExtractor={(it) => String(it.id)}
           contentContainerStyle={{ paddingBottom: 18 }}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-          renderItem={({ item }) => (
-            <View style={styles.restaurantCard}>
-              <View style={styles.restaurantCardRow}>
-                {item?.restaurant?.logo_url ? (
-                  <Image
-                    source={{ uri: item.restaurant.logo_url }}
-                    style={styles.restaurantCardLogo}
-                  />
-                ) : (
-                  <View style={styles.restaurantCardLogoFallback}>
-                    <Text style={styles.restaurantLogoText}>
-                      {(item?.restaurant?.restaurant_name || "R").charAt(0)}
-                    </Text>
-                  </View>
-                )}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => {
+            const count = item?.item_count || item?.items?.length || 0;
+            return (
+              <View style={styles.restaurantCard}>
+                <View style={styles.restaurantCardRow}>
+                  {/* Round Logo */}
+                  {item?.restaurant?.logo_url ? (
+                    <Image
+                      source={{ uri: item.restaurant.logo_url }}
+                      style={styles.restaurantAvatar}
+                    />
+                  ) : (
+                    <View style={styles.restaurantAvatarFallback}>
+                      <Text style={styles.restaurantAvatarText}>
+                        {(item?.restaurant?.restaurant_name || "R").charAt(0)}
+                      </Text>
+                    </View>
+                  )}
 
-                <View style={styles.restaurantCardInfo}>
-                  <View style={styles.restaurantNameRow}>
+                  {/* Info */}
+                  <View style={styles.restaurantCardInfo}>
                     <Text style={styles.restaurantCardName} numberOfLines={1}>
                       {item?.restaurant?.restaurant_name}
                     </Text>
-                    <Text style={styles.verifiedBadge}>✓</Text>
+                    <View style={styles.locationRow}>
+                      <Ionicons name="location-sharp" size={12} color="#94A3B8" />
+                      <Text style={styles.restaurantCardCity}>
+                        {item?.restaurant?.city || "Location"}
+                      </Text>
+                    </View>
+                    <Text style={styles.restaurantCardMeta}>
+                      {count} item{count !== 1 ? "s" : ""} in basket
+                    </Text>
                   </View>
-                  <Text style={styles.restaurantCardCity}>
-                    {item?.restaurant?.city || "Location"}
-                  </Text>
-                  <Text style={styles.restaurantCardMeta}>
-                    {item?.item_count || 0} item • {formatPrice(item.cart_total)}
-                  </Text>
+
+                  {/* View Button */}
+                  <Pressable
+                    onPress={() => setSelectedCartId(item.id)}
+                    style={({ pressed }) => [
+                      styles.viewBtn,
+                      pressed && { backgroundColor: PRIMARY },
+                    ]}
+                  >
+                    {({ pressed }) => (
+                      <>
+                        <Text style={[styles.viewBtnText, pressed && { color: "#fff" }]}>View</Text>
+                        <Ionicons
+                          name="chevron-forward"
+                          size={14}
+                          color={pressed ? "#fff" : PRIMARY}
+                        />
+                      </>
+                    )}
+                  </Pressable>
                 </View>
               </View>
-
-              <View style={styles.restaurantCardActions}>
-                <Pressable
-                  onPress={() => setSelectedCartId(item.id)}
-                  style={styles.viewItemsBtn}
-                >
-                  <Text style={styles.viewItemsBtnText}>View items</Text>
-                </Pressable>
-
-                <Pressable onPress={() => removeCart(item.id)} style={styles.clearBtn}>
-                  <Text style={styles.clearBtnText}>Clear</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
+            );
+          }}
         />
       </View>
     </SafeAreaView>
@@ -445,20 +469,19 @@ export default function CartScreen({ navigation }) {
 function CartHeader({ cartCount }) {
   return (
     <View style={styles.header}>
-      <View style={styles.headerLogoBox}>
-        <Text style={styles.headerLogoText}>N</Text>
-      </View>
-
-      <View style={styles.headerTextBox}>
+      <View style={styles.headerLeft}>
+        <View style={styles.headerIconBox}>
+          <Ionicons name="bag-handle" size={20} color="#fff" />
+        </View>
         <Text style={styles.headerTitle}>Shopping Cart</Text>
-        <Text style={styles.headerSubtitle}>Review your items and proceed to checkout</Text>
       </View>
-
-      <View style={styles.headerCartIcon}>
-        <Text style={styles.cartIconText}>🛒</Text>
+      <View style={styles.headerCartWrap}>
+        <View style={styles.headerCartBtn}>
+          <Ionicons name="cart" size={22} color="#64748B" />
+        </View>
         {cartCount > 0 && (
-          <View style={styles.cartBadge}>
-            <Text style={styles.cartBadgeText}>{cartCount}</Text>
+          <View style={styles.headerBadge}>
+            <Text style={styles.headerBadgeText}>{cartCount}</Text>
           </View>
         )}
       </View>
@@ -470,453 +493,321 @@ function CartHeader({ cartCount }) {
 // STYLES
 // ============================================================================
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
-  page: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 18,
-    gap: 10,
-  },
+  container: { flex: 1, backgroundColor: "#fff" },
+  page: { flex: 1, paddingHorizontal: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 10 },
 
   // Header
   header: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#fff",
+    backgroundColor: "rgba(255,255,255,0.9)",
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
+    borderBottomColor: BORDER,
   },
-  headerLogoBox: {
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerIconBox: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: ORANGE,
+    backgroundColor: PRIMARY,
     alignItems: "center",
     justifyContent: "center",
   },
-  headerLogoText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "900",
+  headerTitle: { fontSize: 18, fontWeight: "800", color: TEXT_DARK, letterSpacing: -0.3 },
+  headerCartWrap: { position: "relative" },
+  headerCartBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: BG,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  headerTextBox: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: TEXT,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: MUTED,
-  },
-  headerCartIcon: {
-    position: "relative",
-    padding: 8,
-  },
-  cartIconText: {
-    fontSize: 24,
-  },
-  cartBadge: {
+  headerBadge: {
     position: "absolute",
-    top: 2,
-    right: 2,
-    backgroundColor: ORANGE,
+    top: -2,
+    right: -2,
+    width: 20,
+    height: 20,
     borderRadius: 10,
-    minWidth: 18,
-    height: 18,
+    backgroundColor: PRIMARY,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#fff",
   },
-  cartBadgeText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "700",
-  },
+  headerBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
 
   // Section Title
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: TEXT,
-    marginVertical: 16,
+    fontSize: 17,
+    fontWeight: "800",
+    color: TEXT_DARK,
+    marginTop: 20,
+    marginBottom: 14,
+    letterSpacing: -0.3,
   },
 
-  // Error & Empty States
-  muted: { color: MUTED },
-  errTitle: { fontSize: 22, fontWeight: "900", color: TEXT },
-  errText: { color: "#DC2626", textAlign: "center" },
-  emptyTitle: { fontSize: 18, fontWeight: "900", color: TEXT },
+  // Loading
+  loadingIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(16,185,129,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  loadingText: { color: MUTED, fontSize: 14, fontWeight: "500" },
+
+  // Error
+  errorIcon: { marginBottom: 4 },
+  errTitle: { fontSize: 20, fontWeight: "800", color: TEXT_DARK },
+  errText: { color: "#EF4444", textAlign: "center", fontSize: 14 },
+
+  // Empty
+  emptyIconWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: BG,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  emptyTitle: { fontSize: 18, fontWeight: "800", color: TEXT_DARK },
+  emptySubtitle: { color: "#94A3B8", fontSize: 14, fontWeight: "500" },
 
   // Primary Button
   primaryBtn: {
-    height: 50,
-    paddingHorizontal: 24,
-    borderRadius: 25,
-    backgroundColor: ORANGE,
+    height: 48,
+    paddingHorizontal: 28,
+    borderRadius: 999,
+    backgroundColor: PRIMARY,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 12,
+    marginTop: 16,
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
-  primaryBtnText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 15,
-  },
+  primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 
-  // Restaurant Card (List View)
+  // Restaurant Card (List)
   restaurantCard: {
+    flexDirection: "column",
     backgroundColor: "#fff",
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-    elevation: 2,
+    borderColor: BORDER,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
-  restaurantCardRow: {
-    flexDirection: "row",
-    alignItems: "center",
+  restaurantCardRow: { flexDirection: "row", alignItems: "center" },
+  restaurantAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: BG,
   },
-  restaurantCardLogo: {
-    width: 50,
-    height: 50,
-    borderRadius: 12,
-  },
-  restaurantCardLogoFallback: {
-    width: 50,
-    height: 50,
-    borderRadius: 12,
-    backgroundColor: "#1F2937",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  restaurantCardInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  restaurantNameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  restaurantCardName: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: TEXT,
-  },
-  verifiedBadge: {
-    marginLeft: 4,
-    fontSize: 12,
-    color: GREEN,
-    fontWeight: "700",
-  },
-  restaurantCardCity: {
-    fontSize: 13,
-    color: MUTED,
-    marginTop: 2,
-  },
-  restaurantCardMeta: {
-    fontSize: 13,
-    color: ORANGE,
-    fontWeight: "600",
-    marginTop: 2,
-  },
-  restaurantCardActions: {
-    flexDirection: "row",
-    marginTop: 14,
-    gap: 10,
-  },
-  viewItemsBtn: {
-    flex: 1,
-    height: 42,
-    backgroundColor: ORANGE,
-    borderRadius: 25,
+  restaurantAvatarFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: TEXT_DARK,
     alignItems: "center",
     justifyContent: "center",
   },
-  viewItemsBtnText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 14,
-  },
-  clearBtn: {
-    paddingHorizontal: 24,
-    height: 42,
-    borderRadius: 25,
-    borderWidth: 2,
-    borderColor: ORANGE,
+  restaurantAvatarText: { color: "#fff", fontSize: 20, fontWeight: "800" },
+  restaurantCardInfo: { flex: 1, marginLeft: 12 },
+  restaurantCardName: { fontSize: 15, fontWeight: "700", color: TEXT_DARK },
+  locationRow: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 },
+  restaurantCardCity: { fontSize: 13, color: "#94A3B8", fontWeight: "500" },
+  restaurantCardMeta: { fontSize: 12, fontWeight: "700", color: PRIMARY, marginTop: 3 },
+  viewBtn: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 2,
+    backgroundColor: "rgba(16,185,129,0.1)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
   },
-  clearBtnText: {
-    color: ORANGE,
-    fontWeight: "700",
-    fontSize: 14,
-  },
+  viewBtnText: { fontSize: 12, fontWeight: "700", color: PRIMARY },
 
   // Back Row
   backRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
+    gap: 4,
+    paddingVertical: 14,
   },
-  backText: {
-    color: ORANGE,
-    fontSize: 18,
-    fontWeight: "700",
-    marginRight: 8,
-  },
-  backLabel: {
-    color: ORANGE,
-    fontSize: 14,
-    fontWeight: "600",
-  },
+  backLabel: { color: PRIMARY, fontSize: 13, fontWeight: "700" },
 
-  // Restaurant Header (Orange)
-  restaurantHeader: {
-    backgroundColor: ORANGE,
+  // Summary Card (Green)
+  summaryCard: {
+    backgroundColor: PRIMARY,
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-  },
-  restaurantHeaderRow: {
+    padding: 20,
+    marginBottom: 20,
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
   },
-  restaurantLogo: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "#fff",
-  },
-  restaurantLogoFallback: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-    backgroundColor: "#1F2937",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#fff",
-  },
-  restaurantLogoText: {
-    color: "#fff",
-    fontSize: 20,
+  summaryName: { fontSize: 18, fontWeight: "800", color: "#fff" },
+  summaryMeta: { fontSize: 13, color: "rgba(255,255,255,0.75)", marginTop: 2 },
+  summaryRight: { alignItems: "flex-end" },
+  summarySubLabel: {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.7)",
     fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 1,
   },
-  restaurantInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  restaurantName: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#fff",
-  },
-  restaurantMeta: {
-    fontSize: 13,
-    color: "rgba(255,255,255,0.8)",
-    marginTop: 2,
-  },
-  totalBox: {
-    alignItems: "flex-end",
-  },
-  totalLabel: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.8)",
-  },
-  totalValue: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#fff",
-  },
+  summaryTotal: { fontSize: 22, fontWeight: "800", color: "#fff", marginTop: 2 },
 
-  // Items Card
-  itemsCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    marginBottom: 16,
-  },
-  itemRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-  },
+  // Items List
+  itemsList: { marginBottom: 4 },
+  itemRow: { flexDirection: "row", paddingVertical: 16 },
+  itemRowBorder: { borderBottomWidth: 1, borderBottomColor: BORDER },
   itemImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 12,
-    backgroundColor: "#F3F4F6",
+    width: 76,
+    height: 76,
+    borderRadius: 16,
+    backgroundColor: BG,
   },
-  itemDetails: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  itemName: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: TEXT,
-  },
+  itemDetails: { flex: 1, marginLeft: 14 },
+  itemTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  itemName: { fontSize: 15, fontWeight: "700", color: TEXT_DARK },
   sizeTag: {
-    backgroundColor: ORANGE,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 12,
+    backgroundColor: BG,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
     alignSelf: "flex-start",
     marginTop: 4,
   },
   sizeTagText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  itemPrice: {
-    fontSize: 14,
+    color: "#64748B",
+    fontSize: 10,
     fontWeight: "700",
-    color: ORANGE,
-    marginTop: 4,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
-
-  // Quantity Controls
-  qtyContainer: {
+  itemPrice: { fontSize: 15, fontWeight: "700", color: TEXT_DARK },
+  itemBottomRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginRight: 8,
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+
+  // Quantity Pill
+  qtyPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#fff",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: BORDER,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
   },
   qtyBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#F3F4F6",
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
   },
-  qtyBtnDisabled: {
-    opacity: 0.4,
-  },
   qtyBtnPlus: {
-    backgroundColor: GREEN,
-  },
-  qtyBtnText: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: TEXT,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: PRIMARY,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
   },
   qtyValue: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: TEXT,
-    minWidth: 30,
+    fontSize: 14,
+    fontWeight: "800",
+    color: TEXT_DARK,
+    minWidth: 16,
     textAlign: "center",
   },
+  deleteBtn: { padding: 6 },
 
-  // Delete Button
-  deleteBtn: {
-    padding: 8,
-  },
-  deleteBtnText: {
-    fontSize: 18,
-  },
-
-  // Total Section
-  totalSection: {
-    paddingVertical: 12,
+  // Pricing Summary
+  pricingSection: {
     borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
-    marginBottom: 16,
+    borderTopColor: "#E2E8F0",
+    paddingTop: 16,
+    marginTop: 8,
+    gap: 10,
+    marginBottom: 8,
   },
-  totalRow: {
+  pricingRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  totalItemsText: {
-    fontSize: 14,
-    color: MUTED,
-  },
-  totalRight: {
-    alignItems: "flex-end",
-  },
-  cartTotalLabel: {
-    fontSize: 12,
-    color: MUTED,
-  },
-  cartTotalValue: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: ORANGE,
-  },
+  pricingLabel: { fontSize: 13, color: "#94A3B8", fontWeight: "500" },
+  pricingValue: { fontSize: 14, fontWeight: "600", color: "#64748B" },
+  pricingDivider: { height: 1, backgroundColor: BORDER, marginVertical: 4 },
+  pricingTotalLabel: { fontSize: 15, fontWeight: "800", color: TEXT_DARK },
+  pricingTotalValue: { fontSize: 18, fontWeight: "800", color: TEXT_DARK },
 
-  // Action Buttons
-  actionButtons: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 16,
-  },
-  outlineBtn: {
-    flex: 1,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: ORANGE,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  outlineBtnText: {
-    color: ORANGE,
-    fontWeight: "700",
-    fontSize: 14,
-  },
+  // Action Section
+  actionSection: { marginTop: 20, gap: 12, paddingBottom: 8 },
   checkoutBtn: {
-    flex: 1,
-    height: 48,
-    backgroundColor: ORANGE,
-    borderRadius: 24,
+    height: 54,
+    borderRadius: 999,
+    backgroundColor: PRIMARY,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.25,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  checkoutBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  addMoreBtn: {
+    height: 52,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: PRIMARY,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addMoreBtnText: { color: PRIMARY, fontWeight: "700", fontSize: 15 },
+  clearCartLink: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    paddingVertical: 8,
   },
-  checkoutBtnText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 15,
-  },
-  checkoutArrow: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 16,
-  },
-
-  // Clear Cart Link
-  clearCartLink: {
-    alignItems: "center",
-    paddingVertical: 12,
-  },
-  clearCartText: {
-    color: "#DC2626",
-    fontWeight: "600",
-    fontSize: 14,
-  },
+  clearCartText: { color: "#EF4444", fontWeight: "600", fontSize: 13 },
 });
