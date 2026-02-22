@@ -1,9 +1,89 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator, Alert, Dimensions } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Image, Pressable, Alert, Dimensions, Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { API_BASE_URL } from "../../constants/api";
+
+/* ── Skeleton shimmer block ── */
+function SkeletonBlock({ width: w, height: h, borderRadius: br = 12, style }) {
+  const shimmer = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmer, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(shimmer, { toValue: 0, duration: 900, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  const opacity = shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.55] });
+  return (
+    <Animated.View
+      style={[
+        { width: w, height: h, borderRadius: br, backgroundColor: "#CBD5E1", opacity },
+        style,
+      ]}
+    />
+  );
+}
+
+function FoodDetailSkeleton({ onClose }) {
+  return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      {/* header */}
+      <View style={styles.header}>
+        <Pressable onPress={onClose} style={styles.closeBtn}>
+          <Ionicons name="close" size={22} color="#0F172A" />
+        </Pressable>
+        <SkeletonBlock width={100} height={16} borderRadius={8} />
+        <View style={{ width: 40 }} />
+      </View>
+      <ScrollView style={styles.page} showsVerticalScrollIndicator={false}>
+        {/* hero */}
+        <View style={styles.heroWrap}>
+          <SkeletonBlock width="100%" height={260} borderRadius={16} />
+        </View>
+        {/* title + price */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 24, gap: 10 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+            <View style={{ gap: 8, flex: 1 }}>
+              <SkeletonBlock width="75%" height={22} borderRadius={8} />
+              <SkeletonBlock width="40%" height={14} borderRadius={6} />
+            </View>
+            <View style={{ alignItems: "flex-end", gap: 6 }}>
+              <SkeletonBlock width={90} height={22} borderRadius={8} />
+              <SkeletonBlock width={60} height={10} borderRadius={4} />
+            </View>
+          </View>
+          <SkeletonBlock width="90%" height={14} borderRadius={6} style={{ marginTop: 6 }} />
+        </View>
+        {/* sizes */}
+        <View style={{ paddingHorizontal: 20, marginTop: 32, gap: 14 }}>
+          <SkeletonBlock width={100} height={12} borderRadius={6} />
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <SkeletonBlock width="48%" height={64} borderRadius={16} />
+            <SkeletonBlock width="48%" height={64} borderRadius={16} />
+          </View>
+        </View>
+        {/* qty */}
+        <View style={{ paddingHorizontal: 20, marginTop: 32 }}>
+          <SkeletonBlock width="100%" height={56} borderRadius={16} />
+        </View>
+      </ScrollView>
+      {/* bottom */}
+      <View style={[styles.bottomActions, { gap: 14 }]}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <SkeletonBlock width={80} height={14} borderRadius={6} />
+          <SkeletonBlock width={100} height={22} borderRadius={8} />
+        </View>
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <SkeletonBlock width="30%" height={52} borderRadius={999} />
+          <SkeletonBlock width="65%" height={52} borderRadius={999} />
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+}
 
 export default function FoodDetailScreen({ route, navigation }) {
   // react-router useParams -> RN route.params
@@ -126,14 +206,7 @@ export default function FoodDetailScreen({ route, navigation }) {
   };
 
   if (loading) {
-    return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#10b981" />
-          <Text style={styles.muted}>Loading delicious details...</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return <FoodDetailSkeleton onClose={() => navigation.goBack()} />;
   }
 
   if (error) {
@@ -156,8 +229,8 @@ export default function FoodDetailScreen({ route, navigation }) {
     <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Sticky Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.headerBtn}>
-          <Ionicons name="arrow-back" size={22} color="#0F172A" />
+        <Pressable onPress={() => navigation.goBack()} style={styles.closeBtn}>
+          <Ionicons name="close" size={22} color="#0F172A" />
         </Pressable>
         <Text style={styles.headerTitle}>Item Details</Text>
         <Pressable style={styles.headerBtn}>
@@ -353,6 +426,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: "rgba(255,255,255,0.9)",
   },
+  closeBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
   headerBtn: {
     width: 40,
     height: 40,
@@ -518,24 +601,30 @@ const styles = StyleSheet.create({
   },
   sizeOptionActive: {
     borderColor: "#10b981",
-    backgroundColor: "rgba(16,185,127,0.05)",
+    backgroundColor: "#ECFDF5",
+    shadowColor: "#10b981",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   sizeOptionName: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#0F172A",
+    color: "#64748B",
   },
   sizeOptionNameActive: {
-    color: "#10b981",
+    color: "#059669",
+    fontWeight: "800",
   },
   sizeOptionPrice: {
-    fontSize: 12,
-    fontWeight: "500",
+    fontSize: 13,
+    fontWeight: "600",
     color: "#94A3B8",
   },
   sizeOptionPriceActive: {
-    color: "#10b981",
-    fontWeight: "600",
+    color: "#059669",
+    fontWeight: "800",
   },
   sizeCheck: {
     position: "absolute",
