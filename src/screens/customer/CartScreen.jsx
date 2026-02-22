@@ -12,7 +12,32 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import { API_BASE_URL } from "../../constants/api";
+
+/* ── Distance & delivery fee helpers ── */
+async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.code === "Ok" && data.routes?.length) {
+      const r = data.routes[0];
+      return { success: true, distance: r.distance / 1000, duration: r.duration / 60 };
+    }
+    return { success: false };
+  } catch { return { success: false }; }
+}
+
+function calculateDeliveryFee(distanceKm) {
+  if (distanceKm === null || distanceKm === undefined) return null;
+  if (distanceKm <= 1) return 50;
+  if (distanceKm <= 2) return 80;
+  if (distanceKm <= 2.5) return 87;
+  const extraMeters = (distanceKm - 2.5) * 1000;
+  const extra100mUnits = Math.ceil(extraMeters / 100);
+  return 87 + extra100mUnits * 2.3;
+}
 
 const PRIMARY = "#10b981";
 const TEXT_DARK = "#0F172A";
@@ -27,6 +52,7 @@ export default function CartScreen({ navigation }) {
   const [error, setError] = useState("");
   const [updatingItem, setUpdatingItem] = useState(null);
   const [selectedCartId, setSelectedCartId] = useState(null);
+  const [deliveryInfo, setDeliveryInfo] = useState({ distanceKm: null, fee: null, loading: false });
 
   const selectedCart = useMemo(
     () => carts.find((c) => c.id === selectedCartId) || null,
@@ -178,13 +204,48 @@ export default function CartScreen({ navigation }) {
     navigation.navigate("Checkout", { cartId });
   };
 
+  // ── Calculate delivery distance when a cart is selected ──
+  useEffect(() => {
+    if (!selectedCart?.restaurant?.latitude || !selectedCart?.restaurant?.longitude) {
+      setDeliveryInfo({ distanceKm: null, fee: null, loading: false });
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setDeliveryInfo((p) => ({ ...p, loading: true }));
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          setDeliveryInfo({ distanceKm: null, fee: null, loading: false });
+          return;
+        }
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const result = await calculateRouteDistance(
+          loc.coords.latitude, loc.coords.longitude,
+          parseFloat(selectedCart.restaurant.latitude),
+          parseFloat(selectedCart.restaurant.longitude)
+        );
+        if (cancelled) return;
+        if (result.success) {
+          const fee = calculateDeliveryFee(result.distance);
+          setDeliveryInfo({ distanceKm: result.distance, fee, loading: false });
+        } else {
+          setDeliveryInfo({ distanceKm: null, fee: null, loading: false });
+        }
+      } catch {
+        if (!cancelled) setDeliveryInfo({ distanceKm: null, fee: null, loading: false });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedCart?.id, selectedCart?.restaurant?.latitude, selectedCart?.restaurant?.longitude]);
+
   // ============================================================================
   // LOADING STATE
   // ============================================================================
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
-        <CartHeader cartCount={cartCount} />
+        <CartHeader cartCount={cartCount} onClose={() => navigation.navigate("MainTabs", { screen: "Home" })} />
         <View style={styles.center}>
           <View style={styles.loadingIcon}>
             <Ionicons name="cart" size={32} color={PRIMARY} />
@@ -201,7 +262,7 @@ export default function CartScreen({ navigation }) {
   if (error) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
-        <CartHeader cartCount={cartCount} />
+        <CartHeader cartCount={cartCount} onClose={() => navigation.navigate("MainTabs", { screen: "Home" })} />
         <View style={styles.center}>
           <View style={styles.errorIcon}>
             <Ionicons name="alert-circle" size={40} color="#EF4444" />
@@ -222,7 +283,7 @@ export default function CartScreen({ navigation }) {
   if (!carts?.length) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
-        <CartHeader cartCount={0} />
+        <CartHeader cartCount={0} onClose={() => navigation.navigate("MainTabs", { screen: "Home" })} />
         <View style={styles.center}>
           <View style={styles.emptyIconWrap}>
             <Ionicons name="cart-outline" size={56} color="#CBD5E1" />
@@ -249,7 +310,7 @@ export default function CartScreen({ navigation }) {
 
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
-        <CartHeader cartCount={cartCount} />
+        <CartHeader cartCount={cartCount} onClose={() => navigation.navigate("MainTabs", { screen: "Home" })} />
 
         <ScrollView style={styles.page} contentContainerStyle={{ paddingBottom: 95 }}>
           {/* Back Link */}
@@ -260,17 +321,13 @@ export default function CartScreen({ navigation }) {
 
           {/* Restaurant Summary Card (Green) */}
           <View style={styles.summaryCard}>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.summaryName} numberOfLines={1}>
                 {selectedCart?.restaurant?.restaurant_name}
               </Text>
               <Text style={styles.summaryMeta}>
                 {selectedCart?.restaurant?.city || "Restaurant"} • {itemCount} item{itemCount !== 1 ? "s" : ""}
               </Text>
-            </View>
-            <View style={styles.summaryRight}>
-              <Text style={styles.summarySubLabel}>Subtotal</Text>
-              <Text style={styles.summaryTotal}>{formatPrice(selectedCart.cart_total)}</Text>
             </View>
           </View>
 
@@ -341,13 +398,25 @@ export default function CartScreen({ navigation }) {
               <Text style={styles.pricingValue}>{formatPrice(selectedCart.cart_total)}</Text>
             </View>
             <View style={styles.pricingRow}>
-              <Text style={styles.pricingLabel}>Delivery Fee</Text>
-              <Text style={[styles.pricingValue, { color: PRIMARY, fontWeight: "700" }]}>Free</Text>
+              <Text style={styles.pricingLabel}>
+                Delivery Fee{deliveryInfo.distanceKm != null ? ` (${deliveryInfo.distanceKm.toFixed(1)} km)` : ""}
+              </Text>
+              {deliveryInfo.loading ? (
+                <Text style={[styles.pricingValue, { color: "#94A3B8" }]}>Calculating...</Text>
+              ) : deliveryInfo.fee != null ? (
+                <Text style={[styles.pricingValue, { color: PRIMARY, fontWeight: "700" }]}>
+                  {formatPrice(deliveryInfo.fee)}
+                </Text>
+              ) : (
+                <Text style={[styles.pricingValue, { color: "#94A3B8" }]}>--</Text>
+              )}
             </View>
             <View style={styles.pricingDivider} />
             <View style={styles.pricingRow}>
               <Text style={styles.pricingTotalLabel}>Total Amount</Text>
-              <Text style={styles.pricingTotalValue}>{formatPrice(selectedCart.cart_total)}</Text>
+              <Text style={styles.pricingTotalValue}>
+                {formatPrice((Number(selectedCart.cart_total) || 0) + (deliveryInfo.fee || 0))}
+              </Text>
             </View>
           </View>
 
@@ -358,7 +427,7 @@ export default function CartScreen({ navigation }) {
               style={({ pressed }) => [styles.checkoutBtn, pressed && { opacity: 0.9 }]}
             >
               <Text style={styles.checkoutBtnText}>
-                Checkout • {formatPrice(selectedCart.cart_total)}
+                Checkout • {formatPrice((Number(selectedCart.cart_total) || 0) + (deliveryInfo.fee || 0))}
               </Text>
             </Pressable>
 
@@ -388,7 +457,7 @@ export default function CartScreen({ navigation }) {
   // ============================================================================
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <CartHeader cartCount={cartCount} />
+      <CartHeader cartCount={cartCount} onClose={() => navigation.navigate("MainTabs", { screen: "Home" })} />
 
       <View style={styles.page}>
         <Text style={styles.sectionTitle}>Active Restaurants</Text>
@@ -466,10 +535,15 @@ export default function CartScreen({ navigation }) {
 // ============================================================================
 // CART HEADER COMPONENT
 // ============================================================================
-function CartHeader({ cartCount }) {
+function CartHeader({ cartCount, onClose }) {
   return (
     <View style={styles.header}>
       <View style={styles.headerLeft}>
+        {onClose && (
+          <Pressable onPress={onClose} style={styles.closeBtn}>
+            <Ionicons name="close" size={22} color="#0F172A" />
+          </Pressable>
+        )}
         <View style={styles.headerIconBox}>
           <Ionicons name="bag-handle" size={20} color="#fff" />
         </View>
@@ -508,7 +582,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
   },
-  headerLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  closeBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
   headerIconBox: {
     width: 40,
     height: 40,
