@@ -1,7 +1,11 @@
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
+import React, { useState, useCallback } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { API_BASE_URL } from "../constants/api";
 
 // Tab Screens
 import CartScreen from "../screens/customer/CartScreen";
@@ -57,6 +61,31 @@ function TabIcon({ label, focused, badge }) {
 
 export default function CustomerTabs() {
   const insets = useSafeAreaInsets();
+  const [cartBadge, setCartBadge] = useState(0);
+
+  // Fetch real cart count silently whenever any tab is focused
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        try {
+          const token = await AsyncStorage.getItem("token");
+          if (!token || token === "null") return;
+          const res = await fetch(`${API_BASE_URL}/cart`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            const carts = data.carts || [];
+            const count = carts.reduce(
+              (sum, cart) => sum + (cart.items || []).reduce((s, it) => s + (it.quantity || 0), 0),
+              0
+            );
+            setCartBadge(count);
+          }
+        } catch {}
+      })();
+    }, [])
+  );
 
   return (
     <Tab.Navigator
@@ -110,7 +139,7 @@ export default function CustomerTabs() {
         component={CartScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="CART" focused={focused} badge={3} />
+            <TabIcon label="CART" focused={focused} badge={cartBadge} />
           ),
         }}
       />

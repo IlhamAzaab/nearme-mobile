@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
@@ -69,13 +70,18 @@ export default function CartScreen({ navigation }) {
     fetchCarts();
   }, []);
 
-  // Refetch when screen focuses (silent — no loading spinner)
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", () => {
-      fetchCarts(false);
-    });
-    return unsubscribe;
-  }, [navigation]);
+  // Refetch when screen focuses: spinner on first visit, silent on subsequent
+  const isFirstLoad = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (isFirstLoad.current) {
+        isFirstLoad.current = false;
+        // Already fetched by the useEffect above
+      } else {
+        fetchCarts(false);
+      }
+    }, [])
+  );
 
   const fetchCarts = async (showLoading = true) => {
     try {
