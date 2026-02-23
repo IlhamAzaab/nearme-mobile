@@ -69,17 +69,17 @@ export default function CartScreen({ navigation }) {
     fetchCarts();
   }, []);
 
-  // Refetch when screen focuses
+  // Refetch when screen focuses (silent — no loading spinner)
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () => {
-      fetchCarts();
+      fetchCarts(false);
     });
     return unsubscribe;
   }, [navigation]);
 
-  const fetchCarts = async () => {
+  const fetchCarts = async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       setError("");
 
       const token = await AsyncStorage.getItem("token");
@@ -547,7 +547,6 @@ function CartHeader({ cartCount, onClose }) {
         <View style={styles.headerIconBox}>
           <Ionicons name="bag-handle" size={20} color="#fff" />
         </View>
-        <Text style={styles.headerTitle}>Shopping Cart</Text>
       </View>
       <View style={styles.headerCartWrap}>
         <View style={styles.headerCartBtn}>
