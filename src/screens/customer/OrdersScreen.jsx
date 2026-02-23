@@ -157,7 +157,6 @@ export default function OrdersScreen({ navigation }) {
 
   const activeOrders = orders.filter((o) => ACTIVE_STATUSES.includes(o.status));
   const pastOrders = orders.filter((o) => PAST_STATUSES.includes(o.status));
-  const displayOrders = activeTab === "active" ? activeOrders : pastOrders;
 
   // ─── Active Order Card ──────────────────────────────────────────────────
   const renderActiveCard = (order) => {
@@ -378,22 +377,62 @@ export default function OrdersScreen({ navigation }) {
           <ActivityIndicator size="large" color={PRIMARY} />
           <Text style={styles.loadingText}>Loading orders...</Text>
         </View>
-      ) : (
+      ) : activeTab === "active" ? (
+        /* ── Active Tab: Both ongoing + recent history ── */
         <FlatList
-          data={displayOrders}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) =>
-            activeTab === "active" ? renderActiveCard(item) : renderPastCard(item)
-          }
+          data={[1]} // single item, we render both sections manually
+          keyExtractor={() => "all"}
+          renderItem={() => (
+            <View>
+              {/* ── Ongoing Delivery ── */}
+              {activeOrders.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>ONGOING DELIVERY</Text>
+                  {activeOrders.map((order) => renderActiveCard(order))}
+                </>
+              )}
+
+              {/* ── Recent History ── */}
+              {pastOrders.length > 0 && (
+                <>
+                  <Text style={[styles.sectionLabel, activeOrders.length > 0 && { marginTop: 20 }]}>
+                    RECENT HISTORY
+                  </Text>
+                  {pastOrders.map((order) => renderPastCard(order))}
+                </>
+              )}
+
+              {/* Empty state - no orders at all */}
+              {activeOrders.length === 0 && pastOrders.length === 0 && renderEmpty()}
+            </View>
+          )}
           contentContainerStyle={[
             styles.listContent,
-            displayOrders.length === 0 && { flex: 1 },
+            activeOrders.length === 0 && pastOrders.length === 0 && { flex: 1 },
+          ]}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => fetchOrders(true)}
+              tintColor={PRIMARY}
+              colors={[PRIMARY]}
+            />
+          }
+          showsVerticalScrollIndicator={false}
+        />
+      ) : (
+        /* ── Past Orders Tab: Only past orders ── */
+        <FlatList
+          data={pastOrders}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={({ item }) => renderPastCard(item)}
+          contentContainerStyle={[
+            styles.listContent,
+            pastOrders.length === 0 && { flex: 1 },
           ]}
           ListHeaderComponent={
-            displayOrders.length > 0 ? (
-              <Text style={styles.sectionLabel}>
-                {activeTab === "active" ? "ONGOING DELIVERY" : "RECENT HISTORY"}
-              </Text>
+            pastOrders.length > 0 ? (
+              <Text style={styles.sectionLabel}>RECENT HISTORY</Text>
             ) : null
           }
           ListEmptyComponent={renderEmpty}
