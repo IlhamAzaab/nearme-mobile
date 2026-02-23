@@ -12,6 +12,7 @@ import {
   Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
@@ -94,17 +95,18 @@ export default function OrdersScreen({ navigation }) {
     }
   }, []);
 
-  useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
-
-  // Refetch silently when screen gains focus (e.g. after placing order)
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", () => {
-      fetchOrders("silent");
-    });
-    return unsubscribe;
-  }, [navigation, fetchOrders]);
+  // Fetch on every focus: spinner on first visit, silent on subsequent
+  const isFirstLoad = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (isFirstLoad.current) {
+        isFirstLoad.current = false;
+        fetchOrders("initial");
+      } else {
+        fetchOrders("silent");
+      }
+    }, [fetchOrders])
+  );
 
   // ─── Supabase Realtime ───────────────────────────────────────────────────
   useEffect(() => {
@@ -128,7 +130,7 @@ export default function OrdersScreen({ navigation }) {
         .on(
           "postgres_changes",
           { event: "INSERT", schema: "public", table: "orders" },
-          () => fetchOrders()
+          () => fetchOrders("silent")
         )
         .subscribe();
 
