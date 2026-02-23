@@ -796,7 +796,9 @@ export default function CheckoutScreen({ route, navigation }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to place order");
 
-      setOrderSuccess(data.order);
+      // Navigate directly to OrderTracking screen
+      const placedOrder = data.order;
+      navigation.replace("OrderTracking", { orderId: placedOrder.id });
     } catch (e) {
       setError(e.message || "Place order failed");
     } finally {
