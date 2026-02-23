@@ -64,10 +64,11 @@ export default function OrdersScreen({ navigation }) {
   }, [pulseAnim]);
 
   // ─── Fetch Orders ────────────────────────────────────────────────────────
-  const fetchOrders = useCallback(async (showRefresh = false) => {
+  const fetchOrders = useCallback(async (mode = "initial") => {
+    // mode: "initial" (spinner), "refresh" (pull-to-refresh), "silent" (background)
     try {
-      if (showRefresh) setRefreshing(true);
-      else setLoading(true);
+      if (mode === "refresh") setRefreshing(true);
+      else if (mode === "initial") setLoading(true);
 
       const token = await AsyncStorage.getItem("token");
       if (!token || token === "null") {
@@ -96,6 +97,14 @@ export default function OrdersScreen({ navigation }) {
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  // Refetch silently when screen gains focus (e.g. after placing order)
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("focus", () => {
+      fetchOrders("silent");
+    });
+    return unsubscribe;
+  }, [navigation, fetchOrders]);
 
   // ─── Supabase Realtime ───────────────────────────────────────────────────
   useEffect(() => {
@@ -342,7 +351,7 @@ export default function OrdersScreen({ navigation }) {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Orders</Text>
         <Pressable
-          onPress={() => fetchOrders(true)}
+          onPress={() => fetchOrders("refresh")}
           style={({ pressed }) => [styles.headerBtn, pressed && { backgroundColor: "#E2E8F0" }]}
         >
           <Ionicons name="refresh-outline" size={20} color={TEXT_MUTED} />
@@ -413,7 +422,7 @@ export default function OrdersScreen({ navigation }) {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => fetchOrders(true)}
+              onRefresh={() => fetchOrders("refresh")}
               tintColor={PRIMARY}
               colors={[PRIMARY]}
             />
@@ -439,7 +448,7 @@ export default function OrdersScreen({ navigation }) {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => fetchOrders(true)}
+              onRefresh={() => fetchOrders("refresh")}
               tintColor={PRIMARY}
               colors={[PRIMARY]}
             />
