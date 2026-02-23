@@ -18,6 +18,8 @@ import FreeMapView from "../../components/maps/FreeMapView";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
 import { API_BASE_URL } from "../../constants/api";
+import { useOrders } from "../../context/OrderContext";
+import pushNotificationService from "../../services/pushNotificationService";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -502,6 +504,7 @@ async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
 export default function CheckoutScreen({ route, navigation }) {
   const { cartId } = route.params || {};
   const mapRef = useRef(null);
+  const { addNewOrder } = useOrders();
 
   // Cart + profile
   const [cart, setCart] = useState(null);
@@ -830,6 +833,23 @@ export default function CheckoutScreen({ route, navigation }) {
 
       // Wait for completion animation, then navigate
       const placedOrder = data.order;
+
+      // Add to centralized order state for real-time sync
+      if (placedOrder) {
+        addNewOrder(placedOrder);
+      }
+
+      // Send local push notification
+      try {
+        await pushNotificationService.scheduleLocalNotification(
+          "Order Placed Successfully 🎉",
+          `Your order from ${placedOrder?.restaurant_name || "the restaurant"} has been placed! Track it in Active Orders.`,
+          { type: "order_placed", orderId: placedOrder?.id, screen: "Orders" }
+        );
+      } catch (notifErr) {
+        console.log("Notification send error:", notifErr);
+      }
+
       setTimeout(() => {
         navigation.replace("OrderTracking", { orderId: placedOrder.id });
       }, 900);

@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../constants/api";
+import { useOrders } from "../context/OrderContext";
 
 // Tab Screens
 import CartScreen from "../screens/customer/CartScreen";
@@ -15,7 +16,7 @@ import ProfileScreen from "../screens/customer/ProfileScreen";
 
 const Tab = createBottomTabNavigator();
 
-function TabIcon({ label, focused, badge }) {
+function TabIcon({ label, focused, badge, showDot }) {
   // Modern icon mapping
   const getIconName = () => {
     switch (label) {
@@ -55,6 +56,11 @@ function TabIcon({ label, focused, badge }) {
           <Text style={styles.badgeText}>{badge > 9 ? "9+" : badge}</Text>
         </View>
       )}
+
+      {/* Green dot for new orders */}
+      {!!showDot && (
+        <View style={styles.greenDot} />
+      )}
     </View>
   );
 }
@@ -62,6 +68,7 @@ function TabIcon({ label, focused, badge }) {
 export default function CustomerTabs() {
   const insets = useSafeAreaInsets();
   const [cartBadge, setCartBadge] = useState(0);
+  const { hasNewOrder } = useOrders();
 
   // Fetch real cart count silently whenever any tab is focused
   useFocusEffect(
@@ -129,7 +136,7 @@ export default function CustomerTabs() {
         component={OrdersScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="ORDER" focused={focused} />
+            <TabIcon label="ORDER" focused={focused} showDot={hasNewOrder} />
           ),
         }}
       />
@@ -208,5 +215,16 @@ const styles = StyleSheet.create({
     color: "#fff", 
     fontSize: 9, 
     fontWeight: "700",
+  },
+  greenDot: {
+    position: "absolute",
+    top: -2,
+    right: 8,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#10b981",
+    borderWidth: 2,
+    borderColor: "#fff",
   },
 });

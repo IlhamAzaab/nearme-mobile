@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -14,9 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { API_BASE_URL } from "../../constants/api";
-import supabase from "../../services/supabaseClient";
+import { useOrders, ACTIVE_STATUSES, PAST_STATUSES } from "../../context/OrderContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -29,7 +27,6 @@ const BORDER = "#F1F5F9";
 const BG = "#FFFFFF";
 
 const STATUS_CONFIG = {
-  // Uppercase (actual API values)
   PLACED: { color: "#FEF3C7", textColor: "#D97706", label: "Order Placed", icon: "time-outline" },
   DRIVER_ACCEPTED: { color: "#DBEAFE", textColor: "#2563EB", label: "Driver Accepted", icon: "checkmark-circle-outline" },
   RECEIVED: { color: "#F3E8FF", textColor: "#9333EA", label: "Preparing", icon: "restaurant-outline" },
@@ -38,7 +35,6 @@ const STATUS_CONFIG = {
   DELIVERED: { color: "#D1FAE5", textColor: "#059669", label: "Delivered", icon: "checkmark-done-outline" },
   CANCELLED: { color: "#FEE2E2", textColor: "#DC2626", label: "Cancelled", icon: "close-circle-outline" },
   REJECTED: { color: "#FEE2E2", textColor: "#DC2626", label: "Rejected", icon: "close-circle-outline" },
-  // Lowercase fallbacks (just in case)
   placed: { color: "#FEF3C7", textColor: "#D97706", label: "Order Placed", icon: "time-outline" },
   driver_accepted: { color: "#DBEAFE", textColor: "#2563EB", label: "Driver Accepted", icon: "checkmark-circle-outline" },
   accepted: { color: "#DBEAFE", textColor: "#2563EB", label: "Accepted", icon: "checkmark-circle-outline" },
@@ -52,23 +48,72 @@ const STATUS_CONFIG = {
   rejected: { color: "#FEE2E2", textColor: "#DC2626", label: "Rejected", icon: "close-circle-outline" },
 };
 
-const ACTIVE_STATUSES = [
-  "placed", "accepted", "preparing", "ready", "picked_up", "on_the_way",
-  "PLACED", "DRIVER_ACCEPTED", "RECEIVED", "PICKED_UP", "ON_THE_WAY",
-];
-const PAST_STATUSES = [
-  "delivered", "cancelled", "rejected",
-  "DELIVERED", "CANCELLED", "REJECTED",
-];
+// ─── Animated Order Card Wrapper ─────────────────────────────────────────────
+function AnimatedOrderCard({ children, isNew, delay = 0 }) {
+  const fadeAnim = useRef(new Animated.Value(isNew ? 0 : 1)).current;
+  const slideAnim = useRef(new Animated.Value(isNew ? 30 : 0)).current;
+  const scaleAnim = useRef(new Animated.Value(isNew ? 0.95 : 1)).current;
+
+  useEffect(() => {
+    if (isNew) {
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 350,
+          delay,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 350,
+          delay,
+          useNativeDriver: true,
+        }),
+        Animated.sequence([
+          Animated.timing(scaleAnim, {
+            toValue: 1.03,
+            duration: 250,
+            delay,
+            useNativeDriver: true,
+          }),
+          Animated.timing(scaleAnim, {
+            toValue: 1,
+            duration: 150,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]).start();
+    }
+  }, [isNew]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: fadeAnim,
+        transform: [{ translateY: slideAnim }, { scale: scaleAnim }],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function OrdersScreen({ navigation }) {
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState("active"); // "active" | "past"
+  const {
+    orders,
+    loading,
+    refreshing,
+    newOrderIds,
+    hasNewOrder,
+    fetchOrders,
+    markOrdersSeen,
+  } = useOrders();
+
+  const [activeTab, setActiveTab] = useState("active");
   const [isLoggedIn, setIsLoggedIn] = useState(true);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const flatListRef = useRef(null);
 
   // Pulse animation for active orders
   useEffect(() => {
@@ -82,37 +127,6 @@ export default function OrdersScreen({ navigation }) {
     return () => pulse.stop();
   }, [pulseAnim]);
 
-  // ─── Fetch Orders ────────────────────────────────────────────────────────
-  const fetchOrders = useCallback(async (mode = "initial") => {
-    // mode: "initial" (spinner), "refresh" (pull-to-refresh), "silent" (background)
-    try {
-      if (mode === "refresh") setRefreshing(true);
-      else if (mode === "initial") setLoading(true);
-
-      const token = await AsyncStorage.getItem("token");
-      if (!token || token === "null") {
-        setIsLoggedIn(false);
-        return;
-      }
-      setIsLoggedIn(true);
-
-      const res = await fetch(`${API_BASE_URL}/orders`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
-
-      if (res.ok) {
-        const list = data.orders || data || [];
-        setOrders(Array.isArray(list) ? list : []);
-      }
-    } catch (e) {
-      console.log("Fetch orders error:", e);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
   // Fetch on every focus: spinner on first visit, silent on subsequent
   const isFirstLoad = useRef(true);
   useFocusEffect(
@@ -123,43 +137,20 @@ export default function OrdersScreen({ navigation }) {
       } else {
         fetchOrders("silent");
       }
-    }, [fetchOrders])
+      // Mark orders as seen when user views this screen
+      markOrdersSeen();
+    }, [fetchOrders, markOrdersSeen])
   );
 
-  // ─── Supabase Realtime ───────────────────────────────────────────────────
+  // Auto-switch to Active tab & scroll to top when new order arrives
   useEffect(() => {
-    if (!supabase) return;
-
-    const setupRealtime = async () => {
-      const userId = await AsyncStorage.getItem("userId");
-      if (!userId) return;
-
-      const channel = supabase
-        .channel(`customer-orders-${userId}`)
-        .on(
-          "postgres_changes",
-          { event: "UPDATE", schema: "public", table: "orders" },
-          (payload) => {
-            setOrders((prev) =>
-              prev.map((o) => (o.id === payload.new.id ? { ...o, ...payload.new } : o))
-            );
-          }
-        )
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "orders" },
-          () => fetchOrders("silent")
-        )
-        .subscribe();
-
-      return () => supabase.removeChannel(channel);
-    };
-
-    const cleanup = setupRealtime();
-    return () => {
-      cleanup.then?.((fn) => fn?.());
-    };
-  }, [fetchOrders]);
+    if (hasNewOrder) {
+      setActiveTab("active");
+      setTimeout(() => {
+        flatListRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+      }, 200);
+    }
+  }, [hasNewOrder]);
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
   const formatPrice = (p) => {
@@ -184,126 +175,142 @@ export default function OrdersScreen({ navigation }) {
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
-  const activeOrders = orders.filter((o) => ACTIVE_STATUSES.includes(o.status));
-  const pastOrders = orders.filter((o) => PAST_STATUSES.includes(o.status));
+  const activeOrders = useMemo(
+    () => orders.filter((o) => ACTIVE_STATUSES.includes(o.status)),
+    [orders]
+  );
+  const pastOrders = useMemo(
+    () => orders.filter((o) => PAST_STATUSES.includes(o.status)),
+    [orders]
+  );
 
   // ─── Active Order Card ──────────────────────────────────────────────────
-  const renderActiveCard = (order) => {
-    const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.placed;
+  const renderActiveCard = (order, index) => {
+    const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.PLACED;
     const itemCount = order.order_items?.length || order.items_count || 0;
+    const isNew = newOrderIds.has(order.id);
 
     return (
-      <Pressable
-        key={order.id}
-        onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
-        style={({ pressed }) => [styles.activeCard, pressed && { opacity: 0.95, transform: [{ scale: 0.98 }] }]}
-      >
-        <View style={styles.activeCardInner}>
-          {/* Restaurant Logo */}
-          {order.restaurant_logo_url ? (
-            <Image source={{ uri: order.restaurant_logo_url }} style={styles.activeLogo} />
-          ) : (
-            <View style={[styles.activeLogo, styles.logoFallback]}>
-              <Text style={styles.logoFallbackText}>
-                {(order.restaurant_name || "R").charAt(0)}
-              </Text>
-            </View>
-          )}
-
-          <View style={{ flex: 1, minWidth: 0 }}>
-            {/* Name + Price */}
-            <View style={styles.cardRow}>
-              <Text style={styles.restaurantName} numberOfLines={1}>
-                {order.restaurant_name || "Restaurant"}
-              </Text>
-              <Text style={styles.priceActive}>{formatPrice(order.total_amount)}</Text>
-            </View>
-
-            {/* Date & Items */}
-            <Text style={styles.cardMeta}>
-              {formatDate(order.created_at)} • {itemCount} Item{itemCount !== 1 ? "s" : ""}
-            </Text>
-
-            {/* Status Badge with pulse */}
-            <View style={styles.statusRow}>
-              <Animated.View style={[styles.pulseDot, { opacity: pulseAnim }]} />
-              <View style={[styles.statusBadge, { backgroundColor: `${cfg.textColor}15` }]}>
-                <Text style={[styles.statusText, { color: cfg.textColor }]}>{cfg.label}</Text>
+      <AnimatedOrderCard key={order.id} isNew={isNew} delay={index * 80}>
+        <Pressable
+          onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
+          style={({ pressed }) => [
+            styles.activeCard,
+            isNew && styles.activeCardNew,
+            pressed && { opacity: 0.95, transform: [{ scale: 0.98 }] },
+          ]}
+        >
+          <View style={styles.activeCardInner}>
+            {/* Restaurant Logo */}
+            {order.restaurant_logo_url ? (
+              <Image source={{ uri: order.restaurant_logo_url }} style={styles.activeLogo} />
+            ) : (
+              <View style={[styles.activeLogo, styles.logoFallback]}>
+                <Text style={styles.logoFallbackText}>
+                  {(order.restaurant_name || "R").charAt(0)}
+                </Text>
               </View>
-            </View>
+            )}
 
-            {/* Track Order Button */}
-            <Pressable
-              onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
-              style={({ pressed }) => [styles.trackBtn, pressed && { opacity: 0.85 }]}
-            >
-              <Ionicons name="navigate-outline" size={16} color="#fff" />
-              <Text style={styles.trackBtnText}>Track Order</Text>
-            </Pressable>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              {/* Name + Price + NEW Badge */}
+              <View style={styles.cardRow}>
+                <View style={{ flexDirection: "row", alignItems: "center", flex: 1, gap: 6 }}>
+                  <Text style={styles.restaurantName} numberOfLines={1}>
+                    {order.restaurant_name || "Restaurant"}
+                  </Text>
+                  {isNew && (
+                    <View style={styles.newBadge}>
+                      <Text style={styles.newBadgeText}>NEW</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.priceActive}>{formatPrice(order.total_amount)}</Text>
+              </View>
+
+              {/* Date & Items */}
+              <Text style={styles.cardMeta}>
+                {formatDate(order.created_at)} • {itemCount} Item{itemCount !== 1 ? "s" : ""}
+              </Text>
+
+              {/* Status Badge with pulse */}
+              <View style={styles.statusRow}>
+                <Animated.View style={[styles.pulseDot, { opacity: pulseAnim }]} />
+                <View style={[styles.statusBadge, { backgroundColor: `${cfg.textColor}15` }]}>
+                  <Text style={[styles.statusText, { color: cfg.textColor }]}>{cfg.label}</Text>
+                </View>
+              </View>
+
+              {/* Track Order Button */}
+              <Pressable
+                onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
+                style={({ pressed }) => [styles.trackBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Ionicons name="navigate-outline" size={16} color="#fff" />
+                <Text style={styles.trackBtnText}>Track Order</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      </AnimatedOrderCard>
     );
   };
 
   // ─── Past Order Card ─────────────────────────────────────────────────────
-  const renderPastCard = (order) => {
+  const renderPastCard = (order, index) => {
     const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.delivered;
     const itemCount = order.order_items?.length || order.items_count || 0;
+    const isNew = newOrderIds.has(order.id);
 
     return (
-      <Pressable
-        key={order.id}
-        onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
-        style={({ pressed }) => [styles.pastCard, pressed && { opacity: 0.95 }]}
-      >
-        <View style={styles.pastCardInner}>
-          {/* Logo */}
-          {order.restaurant_logo_url ? (
-            <Image source={{ uri: order.restaurant_logo_url }} style={styles.pastLogo} />
-          ) : (
-            <View style={[styles.pastLogo, styles.logoFallback]}>
-              <Text style={styles.logoFallbackText}>
-                {(order.restaurant_name || "R").charAt(0)}
-              </Text>
-            </View>
-          )}
-
-          <View style={{ flex: 1, minWidth: 0 }}>
-            {/* Name + Price */}
-            <View style={styles.cardRow}>
-              <Text style={styles.restaurantName} numberOfLines={1}>
-                {order.restaurant_name || "Restaurant"}
-              </Text>
-              <Text style={styles.pricePast}>{formatPrice(order.total_amount)}</Text>
-            </View>
-
-            {/* Date & Items */}
-            <Text style={styles.cardMeta}>
-              {formatDate(order.created_at)} • {itemCount} Item{itemCount !== 1 ? "s" : ""}
-            </Text>
-
-            {/* Status + Reorder */}
-            <View style={[styles.cardRow, { marginTop: 10 }]}>
-              <View style={[styles.pastBadge, { backgroundColor: cfg.color }]}>
-                <Text style={[styles.pastBadgeText, { color: cfg.textColor }]}>{cfg.label}</Text>
+      <AnimatedOrderCard key={order.id} isNew={isNew} delay={(index || 0) * 60}>
+        <Pressable
+          onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
+          style={({ pressed }) => [styles.pastCard, pressed && { opacity: 0.95 }]}
+        >
+          <View style={styles.pastCardInner}>
+            {order.restaurant_logo_url ? (
+              <Image source={{ uri: order.restaurant_logo_url }} style={styles.pastLogo} />
+            ) : (
+              <View style={[styles.pastLogo, styles.logoFallback]}>
+                <Text style={styles.logoFallbackText}>
+                  {(order.restaurant_name || "R").charAt(0)}
+                </Text>
               </View>
-              <Pressable
-                onPress={() => {
-                  // Navigate to restaurant to reorder
-                  if (order.restaurant_id) {
-                    navigation.navigate("RestaurantFoods", { restaurantId: order.restaurant_id });
-                  }
-                }}
-                style={styles.reorderBtn}
-              >
-                <Ionicons name="refresh-outline" size={14} color={PRIMARY} />
-                <Text style={styles.reorderText}>Reorder</Text>
-              </Pressable>
+            )}
+
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={styles.cardRow}>
+                <Text style={styles.restaurantName} numberOfLines={1}>
+                  {order.restaurant_name || "Restaurant"}
+                </Text>
+                <Text style={styles.pricePast}>{formatPrice(order.total_amount)}</Text>
+              </View>
+
+              <Text style={styles.cardMeta}>
+                {formatDate(order.created_at)} • {itemCount} Item{itemCount !== 1 ? "s" : ""}
+              </Text>
+
+              <View style={[styles.cardRow, { marginTop: 10 }]}>
+                <View style={[styles.pastBadge, { backgroundColor: cfg.color }]}>
+                  <Text style={[styles.pastBadgeText, { color: cfg.textColor }]}>{cfg.label}</Text>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    if (order.restaurant_id) {
+                      navigation.navigate("RestaurantFoods", { restaurantId: order.restaurant_id });
+                    }
+                  }}
+                  style={styles.reorderBtn}
+                >
+                  <Ionicons name="refresh-outline" size={14} color={PRIMARY} />
+                  <Text style={styles.reorderText}>Reorder</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      </AnimatedOrderCard>
     );
   };
 
@@ -409,6 +416,7 @@ export default function OrdersScreen({ navigation }) {
       ) : activeTab === "active" ? (
         /* ── Active Tab: Both ongoing + recent history ── */
         <FlatList
+          ref={flatListRef}
           data={[1]} // single item, we render both sections manually
           keyExtractor={() => "all"}
           renderItem={() => (
@@ -417,7 +425,7 @@ export default function OrdersScreen({ navigation }) {
               {activeOrders.length > 0 && (
                 <>
                   <Text style={styles.sectionLabel}>ONGOING DELIVERY</Text>
-                  {activeOrders.map((order) => renderActiveCard(order))}
+                  {activeOrders.map((order, idx) => renderActiveCard(order, idx))}
                 </>
               )}
 
@@ -427,7 +435,7 @@ export default function OrdersScreen({ navigation }) {
                   <Text style={[styles.sectionLabel, activeOrders.length > 0 && { marginTop: 20 }]}>
                     RECENT HISTORY
                   </Text>
-                  {pastOrders.map((order) => renderPastCard(order))}
+                  {pastOrders.map((order, idx) => renderPastCard(order, idx))}
                 </>
               )}
 
@@ -454,7 +462,7 @@ export default function OrdersScreen({ navigation }) {
         <FlatList
           data={pastOrders}
           keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => renderPastCard(item)}
+          renderItem={({ item, index }) => renderPastCard(item, index)}
           contentContainerStyle={[
             styles.listContent,
             pastOrders.length === 0 && { flex: 1 },
@@ -581,6 +589,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 14,
   },
+  activeCardNew: {
+    borderColor: PRIMARY,
+    borderWidth: 1.5,
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.12,
+  },
   activeLogo: {
     width: 56,
     height: 56,
@@ -599,6 +613,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: BORDER,
   },
+
+  // NEW badge
+  newBadge: {
+    backgroundColor: PRIMARY,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  newBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+
   pastCardInner: {
     flexDirection: "row",
     gap: 14,

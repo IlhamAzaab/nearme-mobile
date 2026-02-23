@@ -11,6 +11,7 @@ import pushNotificationService from "../services/pushNotificationService";
 import { AuthProvider } from "./providers/AuthProvider";
 import { NotificationProvider } from "./providers/NotificationProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
+import { OrderProvider } from "../context/OrderContext";
 
 export default function App() {
   const navigationRef = useRef(null);
@@ -302,19 +303,21 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <NotificationProvider>
-            <NavigationContainer ref={navigationRef}>
-              <RootNavigator />
-              {/* Urgent notification modal - renders above everything */}
-              <UrgentNotificationModal
-                visible={!!urgentNotification}
-                title={urgentNotification?.title}
-                body={urgentNotification?.body}
-                data={urgentNotification?.data}
-                onAccept={handleAcceptUrgent}
-                onReject={handleRejectUrgent}
-                onDismiss={handleDismissUrgent}
-              />
-            </NavigationContainer>
+            <OrderProvider>
+              <NavigationContainer ref={navigationRef}>
+                <RootNavigator />
+                {/* Urgent notification modal - renders above everything */}
+                <UrgentNotificationModal
+                  visible={!!urgentNotification}
+                  title={urgentNotification?.title}
+                  body={urgentNotification?.body}
+                  data={urgentNotification?.data}
+                  onAccept={handleAcceptUrgent}
+                  onReject={handleRejectUrgent}
+                  onDismiss={handleDismissUrgent}
+                />
+              </NavigationContainer>
+            </OrderProvider>
           </NotificationProvider>
         </AuthProvider>
       </ThemeProvider>
