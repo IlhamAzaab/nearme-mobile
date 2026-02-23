@@ -11,6 +11,7 @@ import {
   Modal,
   Image,
   Dimensions,
+  Animated,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import FreeMapView from "../../components/maps/FreeMapView";
@@ -536,6 +537,9 @@ export default function CheckoutScreen({ route, navigation }) {
   // Order
   const [placing, setPlacing] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(null);
+  const [showPlacingOverlay, setShowPlacingOverlay] = useState(false);
+  const placingProgress = useRef(new Animated.Value(0)).current;
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
 
   const MINIMUM_SUBTOTAL = 300;
   const PRIORITY_FEE = 49;
@@ -773,6 +777,26 @@ export default function CheckoutScreen({ route, navigation }) {
       setPlacing(true);
       setError("");
 
+      // Show overlay and start progress animation
+      setShowPlacingOverlay(true);
+      placingProgress.setValue(0);
+      overlayOpacity.setValue(0);
+
+      // Fade in overlay
+      Animated.timing(overlayOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+
+      // Animate progress to 70% while API call is in progress
+      const progressAnim = Animated.timing(placingProgress, {
+        toValue: 0.7,
+        duration: 2500,
+        useNativeDriver: false,
+      });
+      progressAnim.start();
+
       const token = await AsyncStorage.getItem("token");
 
       const res = await fetch(`${API_BASE_URL}/orders/place`, {
@@ -796,10 +820,23 @@ export default function CheckoutScreen({ route, navigation }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to place order");
 
-      // Navigate directly to OrderTracking screen
+      // Stop partial animation and complete to 100%
+      progressAnim.stop();
+      Animated.timing(placingProgress, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: false,
+      }).start();
+
+      // Wait for completion animation, then navigate
       const placedOrder = data.order;
-      navigation.replace("OrderTracking", { orderId: placedOrder.id });
+      setTimeout(() => {
+        navigation.replace("OrderTracking", { orderId: placedOrder.id });
+      }, 900);
     } catch (e) {
+      // Hide overlay on error
+      setShowPlacingOverlay(false);
+      placingProgress.setValue(0);
       setError(e.message || "Place order failed");
     } finally {
       setPlacing(false);
@@ -1095,6 +1132,61 @@ export default function CheckoutScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* ✅ Placing Order Overlay */}
+      {showPlacingOverlay && (
+        <Animated.View style={[styles.placingOverlay, { opacity: overlayOpacity }]}>
+          <View style={styles.placingCard}>
+            {/* Checkmark icon */}
+            <Animated.View
+              style={[
+                styles.placingIconCircle,
+                {
+                  transform: [{
+                    scale: placingProgress.interpolate({
+                      inputRange: [0, 0.5, 1],
+                      outputRange: [0.8, 1, 1.1],
+                    }),
+                  }],
+                },
+              ]}
+            >
+              <Ionicons
+                name="bag-check-outline"
+                size={36}
+                color="#fff"
+              />
+            </Animated.View>
+
+            {/* Title */}
+            <Text style={styles.placingTitle}>Placing your order</Text>
+            <Text style={styles.placingSubtitle}>Please wait a moment...</Text>
+
+            {/* Progress bar */}
+            <View style={styles.placingBarTrack}>
+              <Animated.View
+                style={[
+                  styles.placingBarFill,
+                  {
+                    width: placingProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ["0%", "100%"],
+                    }),
+                  },
+                ]}
+              />
+            </View>
+
+            {/* Percentage text */}
+            <Animated.Text style={styles.placingPercent}>
+              {placingProgress.interpolate({
+                inputRange: [0, 1],
+                outputRange: ["0%", "100%"],
+              })}
+            </Animated.Text>
+          </View>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -1364,5 +1456,69 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     backgroundColor: "#fff",
+  },
+
+  // Placing Order Overlay
+  placingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 999,
+  },
+  placingCard: {
+    width: 280,
+    backgroundColor: "#fff",
+    borderRadius: 28,
+    padding: 32,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  placingIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#10B981",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 20,
+    shadowColor: "#10B981",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  placingTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: TEXT,
+    marginBottom: 4,
+  },
+  placingSubtitle: {
+    fontSize: 13,
+    color: MUTED,
+    marginBottom: 24,
+  },
+  placingBarTrack: {
+    width: "100%",
+    height: 8,
+    backgroundColor: "#E5E7EB",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  placingBarFill: {
+    height: "100%",
+    backgroundColor: "#10B981",
+    borderRadius: 4,
+  },
+  placingPercent: {
+    marginTop: 10,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#10B981",
   },
 });
