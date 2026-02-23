@@ -1,14 +1,3 @@
-/**
- * Customer Orders Screen
- *
- * Features:
- * - View all customer orders
- * - Real-time order status updates via Supabase Realtime
- * - Toast notifications when order status changes
- * - Order details with timeline
- * - Pull to refresh
- */
-
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
@@ -18,99 +7,86 @@ import {
   Pressable,
   ActivityIndicator,
   RefreshControl,
-  Modal,
-  ScrollView,
   Image,
   Animated,
   Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
 import supabase from "../../services/supabaseClient";
 
-const { width } = Dimensions.get("window");
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// Status configuration
+// ─── Constants ───────────────────────────────────────────────────────────────
+const PRIMARY = "#10B981";
+const PRIMARY_SOFT = "#F0FDF4";
+const TEXT_DARK = "#0F172A";
+const TEXT_MUTED = "#64748B";
+const BORDER = "#F1F5F9";
+const BG = "#FFFFFF";
+
 const STATUS_CONFIG = {
-  placed: { color: "#FEF3C7", textColor: "#D97706", icon: "🕐", label: "Placed" },
-  accepted: { color: "#DBEAFE", textColor: "#2563EB", icon: "✅", label: "Accepted" },
-  preparing: { color: "#F3E8FF", textColor: "#9333EA", icon: "👨‍🍳", label: "Preparing" },
-  ready: { color: "#E0E7FF", textColor: "#4F46E5", icon: "📦", label: "Ready" },
-  picked_up: { color: "#CFFAFE", textColor: "#0891B2", icon: "🚗", label: "Picked Up" },
-  on_the_way: { color: "#CFFAFE", textColor: "#0891B2", icon: "🛵", label: "On the Way" },
-  delivered: { color: "#D1FAE5", textColor: "#059669", icon: "🎉", label: "Delivered" },
-  cancelled: { color: "#FEE2E2", textColor: "#DC2626", icon: "❌", label: "Cancelled" },
-  rejected: { color: "#FEE2E2", textColor: "#DC2626", icon: "❌", label: "Rejected" },
+  placed: { color: "#FEF3C7", textColor: "#D97706", label: "Order Placed", icon: "time-outline" },
+  accepted: { color: "#DBEAFE", textColor: "#2563EB", label: "Accepted", icon: "checkmark-circle-outline" },
+  preparing: { color: "#F3E8FF", textColor: "#9333EA", label: "Preparing", icon: "restaurant-outline" },
+  ready: { color: "#E0E7FF", textColor: "#4F46E5", label: "Ready", icon: "cube-outline" },
+  picked_up: { color: "#CFFAFE", textColor: "#0891B2", label: "Picked Up", icon: "car-outline" },
+  on_the_way: { color: "#CFFAFE", textColor: "#0891B2", label: "On the Way", icon: "bicycle-outline" },
+  delivered: { color: "#D1FAE5", textColor: "#059669", label: "Delivered", icon: "checkmark-done-outline" },
+  cancelled: { color: "#FEE2E2", textColor: "#DC2626", label: "Cancelled", icon: "close-circle-outline" },
+  rejected: { color: "#FEE2E2", textColor: "#DC2626", label: "Rejected", icon: "close-circle-outline" },
 };
 
-const STATUS_STEPS = [
-  { key: "placed", label: "Placed", icon: "🕐" },
-  { key: "accepted", label: "Accepted", icon: "✅" },
-  { key: "preparing", label: "Preparing", icon: "👨‍🍳" },
-  { key: "ready", label: "Ready", icon: "📦" },
-  { key: "picked_up", label: "Picked Up", icon: "🚗" },
-  { key: "on_the_way", label: "On the Way", icon: "🛵" },
-  { key: "delivered", label: "Delivered", icon: "🎉" },
-];
+const ACTIVE_STATUSES = ["placed", "accepted", "preparing", "ready", "picked_up", "on_the_way"];
+const PAST_STATUSES = ["delivered", "cancelled", "rejected"];
 
+// ─── Component ───────────────────────────────────────────────────────────────
 export default function OrdersScreen({ navigation }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [notifications, setNotifications] = useState([]);
-  const [customerId, setCustomerId] = useState(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [activeTab, setActiveTab] = useState("active"); // "active" | "past"
+  const [isLoggedIn, setIsLoggedIn] = useState(true);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  // Animation refs for notifications
-  const notificationAnims = useRef({});
-
-  // ============================================================================
-  // AUTH CHECK
-  // ============================================================================
-
+  // Pulse animation for active orders
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const token = await AsyncStorage.getItem("token");
-        const role = await AsyncStorage.getItem("role");
-        const userId = await AsyncStorage.getItem("userId");
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [pulseAnim]);
 
-        if (token && role === "customer") {
-          setIsLoggedIn(true);
-          setCustomerId(userId);
-        } else {
-          setIsLoggedIn(false);
-          setLoading(false);
-        }
-      } catch (error) {
-        console.log("Auth check error:", error);
-        setLoading(false);
-      }
-    };
-    checkAuth();
-  }, []);
-
-  // ============================================================================
-  // FETCH ORDERS
-  // ============================================================================
-
-  const fetchOrders = useCallback(async () => {
+  // ─── Fetch Orders ────────────────────────────────────────────────────────
+  const fetchOrders = useCallback(async (showRefresh = false) => {
     try {
+      if (showRefresh) setRefreshing(true);
+      else setLoading(true);
+
       const token = await AsyncStorage.getItem("token");
-      const response = await fetch(`${API_BASE_URL}/orders/my-orders`, {
+      if (!token || token === "null") {
+        setIsLoggedIn(false);
+        return;
+      }
+      setIsLoggedIn(true);
+
+      const res = await fetch(`${API_BASE_URL}/orders`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      const data = await res.json().catch(() => ({}));
 
-      const data = await response.json();
-      if (response.ok) {
-        setOrders(data.orders || []);
-      } else {
-        console.log("Failed to fetch orders:", data.message);
+      if (res.ok) {
+        const list = data.orders || data || [];
+        setOrders(Array.isArray(list) ? list : []);
       }
-    } catch (error) {
-      console.log("Fetch orders error:", error);
+    } catch (e) {
+      console.log("Fetch orders error:", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -118,444 +94,315 @@ export default function OrdersScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
-    if (isLoggedIn) {
-      fetchOrders();
-    }
-  }, [isLoggedIn, fetchOrders]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
     fetchOrders();
   }, [fetchOrders]);
 
-  // ============================================================================
-  // SUPABASE REALTIME SUBSCRIPTION
-  // ============================================================================
-
+  // ─── Supabase Realtime ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!supabase || !customerId) return;
+    if (!supabase) return;
 
-    const channel = supabase
-      .channel("customer-orders")
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "orders",
-          filter: `customer_id=eq.${customerId}`,
-        },
-        (payload) => {
-          console.log("Order updated:", payload);
-          handleOrderUpdate(payload.new, payload.old);
-        }
-      )
-      .subscribe((status) => {
-        console.log("Realtime subscription status:", status);
-      });
+    const setupRealtime = async () => {
+      const userId = await AsyncStorage.getItem("userId");
+      if (!userId) return;
 
+      const channel = supabase
+        .channel(`customer-orders-${userId}`)
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "orders" },
+          (payload) => {
+            setOrders((prev) =>
+              prev.map((o) => (o.id === payload.new.id ? { ...o, ...payload.new } : o))
+            );
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "orders" },
+          () => fetchOrders()
+        )
+        .subscribe();
+
+      return () => supabase.removeChannel(channel);
+    };
+
+    const cleanup = setupRealtime();
     return () => {
-      supabase.removeChannel(channel);
+      cleanup.then?.((fn) => fn?.());
     };
-  }, [customerId]);
+  }, [fetchOrders]);
 
-  // ============================================================================
-  // HANDLE ORDER UPDATE (REALTIME)
-  // ============================================================================
-
-  const handleOrderUpdate = (newOrder, oldOrder) => {
-    // Update orders list
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === newOrder.id ? { ...order, ...newOrder } : order
-      )
-    );
-
-    // Update selected order if viewing
-    if (selectedOrder?.id === newOrder.id) {
-      setSelectedOrder((prev) => ({ ...prev, ...newOrder }));
-    }
-
-    // Show notification if status changed
-    if (oldOrder.status !== newOrder.status) {
-      showStatusNotification(newOrder);
-    }
+  // ─── Helpers ─────────────────────────────────────────────────────────────
+  const formatPrice = (p) => {
+    const n = Number(p);
+    return Number.isNaN(n) ? "Rs. 0.00" : `Rs. ${n.toFixed(2)}`;
   };
 
-  // ============================================================================
-  // NOTIFICATIONS
-  // ============================================================================
-
-  const showStatusNotification = (order) => {
-    const statusMessages = {
-      accepted: "Your order has been accepted! 🎉",
-      preparing: "Your food is being prepared! 👨‍🍳",
-      ready: "Your order is ready for pickup! 📦",
-      picked_up: "Driver has picked up your order! 🚗",
-      on_the_way: "Your order is on the way! 🛵",
-      delivered: "Your order has been delivered! ✅",
-      cancelled: "Your order was cancelled 😔",
-      rejected: "Restaurant couldn't accept your order 😔",
-    };
-
-    const id = Date.now();
-    const notification = {
-      id,
-      orderNumber: order.order_number,
-      message: statusMessages[order.status] || `Status: ${order.status}`,
-      status: order.status,
-    };
-
-    // Create animation value
-    notificationAnims.current[id] = new Animated.Value(0);
-
-    setNotifications((prev) => [notification, ...prev]);
-
-    // Animate in
-    Animated.spring(notificationAnims.current[id], {
-      toValue: 1,
-      useNativeDriver: true,
-      tension: 50,
-      friction: 8,
-    }).start();
-
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-      removeNotification(id);
-    }, 5000);
-  };
-
-  const removeNotification = (id) => {
-    if (notificationAnims.current[id]) {
-      Animated.timing(notificationAnims.current[id], {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(() => {
-        setNotifications((prev) => prev.filter((n) => n.id !== id));
-        delete notificationAnims.current[id];
-      });
-    } else {
-      setNotifications((prev) => prev.filter((n) => n.id !== id));
-    }
-  };
-
-  // ============================================================================
-  // HELPER FUNCTIONS
-  // ============================================================================
-
-  const getStatusIndex = (status) => {
-    return STATUS_STEPS.findIndex((s) => s.key === status);
-  };
-
-  const formatTime = (timestamp) => {
-    if (!timestamp) return "--";
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const formatDate = (timestamp) => {
-    if (!timestamp) return "--";
-    const date = new Date(timestamp);
-    return date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  };
-
-  const getTimeAgo = (timestamp) => {
-    if (!timestamp) return "";
+  const formatDate = (ts) => {
+    if (!ts) return "";
+    const d = new Date(ts);
     const now = new Date();
-    const then = new Date(timestamp);
-    const diffMs = now - then;
+    const diffMs = now - d;
     const diffMins = Math.floor(diffMs / 60000);
 
     if (diffMins < 1) return "Just now";
     if (diffMins < 60) return `${diffMins} min ago`;
     const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return formatDate(timestamp);
+    if (diffHours < 24) {
+      return `Today, ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    }
+    if (diffHours < 48) return "Yesterday";
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
-  // ============================================================================
-  // RENDER ORDER CARD
-  // ============================================================================
+  const activeOrders = orders.filter((o) => ACTIVE_STATUSES.includes(o.status));
+  const pastOrders = orders.filter((o) => PAST_STATUSES.includes(o.status));
+  const displayOrders = activeTab === "active" ? activeOrders : pastOrders;
 
-  const renderOrderCard = ({ item: order }) => {
-    const statusConfig = STATUS_CONFIG[order.status] || STATUS_CONFIG.placed;
-    const currentIndex = getStatusIndex(order.status);
-    const isActiveOrder = !["delivered", "cancelled", "rejected"].includes(order.status);
+  // ─── Active Order Card ──────────────────────────────────────────────────
+  const renderActiveCard = (order) => {
+    const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.placed;
+    const itemCount = order.order_items?.length || order.items_count || 0;
 
     return (
       <Pressable
+        key={order.id}
         onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
-        style={({ pressed }) => [
-          styles.orderCard,
-          pressed && styles.orderCardPressed,
-        ]}
+        style={({ pressed }) => [styles.activeCard, pressed && { opacity: 0.95, transform: [{ scale: 0.98 }] }]}
       >
-        {/* Header Row */}
-        <View style={styles.orderHeader}>
-          <View style={styles.orderIconWrap}>
-            <Text style={styles.orderIcon}>{statusConfig.icon}</Text>
-          </View>
-          <View style={styles.orderInfo}>
-            <Text style={styles.orderNumber}>{order.order_number}</Text>
-            <Text style={styles.restaurantName}>{order.restaurant_name}</Text>
-          </View>
-          <View style={styles.orderPriceWrap}>
-            <Text style={styles.orderPrice}>
-              Rs. {parseFloat(order.total_amount).toFixed(2)}
-            </Text>
-            <Text style={styles.orderItems}>
-              {order.order_items?.length || 0} items
-            </Text>
-          </View>
-        </View>
-
-        {/* Status Badge and Time */}
-        <View style={styles.statusRow}>
-          <View style={[styles.statusBadge, { backgroundColor: statusConfig.color }]}>
-            <Text style={[styles.statusText, { color: statusConfig.textColor }]}>
-              {statusConfig.label.toUpperCase()}
-            </Text>
-          </View>
-          <View style={styles.timeWrap}>
-            <Text style={styles.timeIcon}>🕐</Text>
-            <Text style={styles.timeText}>{getTimeAgo(order.placed_at)}</Text>
-          </View>
-        </View>
-
-        {/* Progress Bar for Active Orders */}
-        {isActiveOrder && (
-          <View style={styles.progressContainer}>
-            <View style={styles.progressLine} />
-            <View
-              style={[
-                styles.progressLineActive,
-                { width: `${Math.min((currentIndex / 4) * 100, 100)}%` },
-              ]}
-            />
-            <View style={styles.stepsRow}>
-              {STATUS_STEPS.slice(0, 5).map((step, index) => {
-                const isCompleted = index < currentIndex;
-                const isCurrent = index === currentIndex;
-
-                return (
-                  <View key={step.key} style={styles.stepItem}>
-                    <View
-                      style={[
-                        styles.stepCircle,
-                        isCompleted && styles.stepCircleCompleted,
-                        isCurrent && styles.stepCircleCurrent,
-                      ]}
-                    >
-                      {isCompleted ? (
-                        <Text style={styles.stepCheck}>✓</Text>
-                      ) : (
-                        <Text style={styles.stepIconSmall}>{step.icon}</Text>
-                      )}
-                    </View>
-                    <Text
-                      style={[
-                        styles.stepLabel,
-                        (isCompleted || isCurrent) && styles.stepLabelActive,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {step.label}
-                    </Text>
-                  </View>
-                );
-              })}
+        <View style={styles.activeCardInner}>
+          {/* Restaurant Logo */}
+          {order.restaurant_logo_url ? (
+            <Image source={{ uri: order.restaurant_logo_url }} style={styles.activeLogo} />
+          ) : (
+            <View style={[styles.activeLogo, styles.logoFallback]}>
+              <Text style={styles.logoFallbackText}>
+                {(order.restaurant_name || "R").charAt(0)}
+              </Text>
             </View>
-          </View>
-        )}
+          )}
 
-        {/* Arrow indicator */}
-        <View style={styles.arrowWrap}>
-          <Text style={styles.arrow}>›</Text>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            {/* Name + Price */}
+            <View style={styles.cardRow}>
+              <Text style={styles.restaurantName} numberOfLines={1}>
+                {order.restaurant_name || "Restaurant"}
+              </Text>
+              <Text style={styles.priceActive}>{formatPrice(order.total_amount)}</Text>
+            </View>
+
+            {/* Date & Items */}
+            <Text style={styles.cardMeta}>
+              {formatDate(order.created_at)} • {itemCount} Item{itemCount !== 1 ? "s" : ""}
+            </Text>
+
+            {/* Status Badge with pulse */}
+            <View style={styles.statusRow}>
+              <Animated.View style={[styles.pulseDot, { opacity: pulseAnim }]} />
+              <View style={[styles.statusBadge, { backgroundColor: `${cfg.textColor}15` }]}>
+                <Text style={[styles.statusText, { color: cfg.textColor }]}>{cfg.label}</Text>
+              </View>
+            </View>
+
+            {/* Track Order Button */}
+            <Pressable
+              onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
+              style={({ pressed }) => [styles.trackBtn, pressed && { opacity: 0.85 }]}
+            >
+              <Ionicons name="navigate-outline" size={16} color="#fff" />
+              <Text style={styles.trackBtnText}>Track Order</Text>
+            </Pressable>
+          </View>
         </View>
       </Pressable>
     );
   };
 
-  // ============================================================================
-  // RENDER EMPTY STATE
-  // ============================================================================
+  // ─── Past Order Card ─────────────────────────────────────────────────────
+  const renderPastCard = (order) => {
+    const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.delivered;
+    const itemCount = order.order_items?.length || order.items_count || 0;
 
-  const renderEmptyState = () => (
+    return (
+      <Pressable
+        key={order.id}
+        onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
+        style={({ pressed }) => [styles.pastCard, pressed && { opacity: 0.95 }]}
+      >
+        <View style={styles.pastCardInner}>
+          {/* Logo */}
+          {order.restaurant_logo_url ? (
+            <Image source={{ uri: order.restaurant_logo_url }} style={styles.pastLogo} />
+          ) : (
+            <View style={[styles.pastLogo, styles.logoFallback]}>
+              <Text style={styles.logoFallbackText}>
+                {(order.restaurant_name || "R").charAt(0)}
+              </Text>
+            </View>
+          )}
+
+          <View style={{ flex: 1, minWidth: 0 }}>
+            {/* Name + Price */}
+            <View style={styles.cardRow}>
+              <Text style={styles.restaurantName} numberOfLines={1}>
+                {order.restaurant_name || "Restaurant"}
+              </Text>
+              <Text style={styles.pricePast}>{formatPrice(order.total_amount)}</Text>
+            </View>
+
+            {/* Date & Items */}
+            <Text style={styles.cardMeta}>
+              {formatDate(order.created_at)} • {itemCount} Item{itemCount !== 1 ? "s" : ""}
+            </Text>
+
+            {/* Status + Reorder */}
+            <View style={[styles.cardRow, { marginTop: 10 }]}>
+              <View style={[styles.pastBadge, { backgroundColor: cfg.color }]}>
+                <Text style={[styles.pastBadgeText, { color: cfg.textColor }]}>{cfg.label}</Text>
+              </View>
+              <Pressable
+                onPress={() => {
+                  // Navigate to restaurant to reorder
+                  if (order.restaurant_id) {
+                    navigation.navigate("RestaurantFoods", { restaurantId: order.restaurant_id });
+                  }
+                }}
+                style={styles.reorderBtn}
+              >
+                <Ionicons name="refresh-outline" size={14} color={PRIMARY} />
+                <Text style={styles.reorderText}>Reorder</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Pressable>
+    );
+  };
+
+  // ─── Empty State ─────────────────────────────────────────────────────────
+  const renderEmpty = () => (
     <View style={styles.emptyContainer}>
-      <View style={styles.emptyIllustration}>
-        <View style={styles.emptyCircle}>
-          <Text style={styles.emptyMainEmoji}>📋</Text>
-        </View>
-        <View style={styles.floatingEmoji1}>
-          <Text style={styles.floatingText}>📦</Text>
-        </View>
-        <View style={styles.floatingEmoji2}>
-          <Text style={styles.floatingText}>🛵</Text>
-        </View>
-        <View style={styles.floatingEmoji3}>
-          <Text style={styles.floatingText}>🍕</Text>
-        </View>
+      <View style={styles.emptyIconWrap}>
+        <Ionicons
+          name={activeTab === "active" ? "receipt-outline" : "time-outline"}
+          size={48}
+          color={PRIMARY}
+        />
       </View>
-
-      <Text style={styles.emptyTitle}>No Orders Yet</Text>
-      <Text style={styles.emptySubtitle}>
-        Your order history will appear here.{"\n"}Let's find something delicious!
+      <Text style={styles.emptyTitle}>
+        {activeTab === "active" ? "No active orders" : "No past orders"}
       </Text>
-
-      <Pressable
-        style={({ pressed }) => [
-          styles.browseButton,
-          pressed && styles.browseButtonPressed,
-        ]}
-        onPress={() => navigation.navigate("Home")}
-      >
-        <Text style={styles.browseButtonText}>🔍 Browse Restaurants</Text>
-      </Pressable>
-
-      <Pressable
-        style={styles.homeLink}
-        onPress={() => navigation.navigate("Home")}
-      >
-        <Text style={styles.homeLinkText}>← Go to Home</Text>
-      </Pressable>
+      <Text style={styles.emptySubtitle}>
+        {activeTab === "active"
+          ? "Hungry? Your delicious journey starts with your first order."
+          : "Your completed orders will appear here."}
+      </Text>
+      {activeTab === "active" && (
+        <Pressable
+          onPress={() => navigation.navigate("Home")}
+          style={({ pressed }) => [styles.browseBtn, pressed && { opacity: 0.85 }]}
+        >
+          <Text style={styles.browseBtnText}>Browse Restaurants</Text>
+        </Pressable>
+      )}
     </View>
   );
 
-  // ============================================================================
-  // RENDER NOT LOGGED IN STATE
-  // ============================================================================
-
+  // ─── Not Logged In ──────────────────────────────────────────────────────
   const renderNotLoggedIn = () => (
     <View style={styles.emptyContainer}>
-      <View style={styles.emptyCircle}>
-        <Text style={styles.emptyMainEmoji}>👤</Text>
+      <View style={styles.emptyIconWrap}>
+        <Ionicons name="log-in-outline" size={48} color={PRIMARY} />
       </View>
-      <Text style={styles.emptyTitle}>Please login to view your orders</Text>
-      <Text style={styles.emptySubtitle}>
-        Sign in to track your orders and order history
-      </Text>
+      <Text style={styles.emptyTitle}>Login Required</Text>
+      <Text style={styles.emptySubtitle}>Please login to view your orders.</Text>
       <Pressable
-        style={({ pressed }) => [
-          styles.browseButton,
-          pressed && styles.browseButtonPressed,
-        ]}
         onPress={() => navigation.navigate("Login")}
+        style={({ pressed }) => [styles.browseBtn, pressed && { opacity: 0.85 }]}
       >
-        <Text style={styles.browseButtonText}>Login</Text>
+        <Text style={styles.browseBtnText}>Go to Login</Text>
       </Pressable>
     </View>
   );
 
-  // ============================================================================
-  // RENDER LOADING STATE
-  // ============================================================================
-
-  const renderLoading = () => (
-    <View style={styles.loadingContainer}>
-      <ActivityIndicator size="large" color="#FF7A00" />
-      <Text style={styles.loadingText}>Loading your orders...</Text>
-    </View>
-  );
-
-  // ============================================================================
-  // MAIN RENDER
-  // ============================================================================
+  // ─── Main Render ─────────────────────────────────────────────────────────
+  if (!isLoggedIn) {
+    return (
+      <SafeAreaView style={styles.page} edges={["top"]}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>My Orders</Text>
+        </View>
+        {renderNotLoggedIn()}
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Header */}
+    <SafeAreaView style={styles.page} edges={["top"]}>
+      {/* ── Header ── */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.logoBox}>
-            <Text style={styles.logoText}>N</Text>
-          </View>
-          <View style={styles.headerTitleWrap}>
-            <Text style={styles.headerTitle}>My Orders</Text>
-            <Text style={styles.headerSubtitle}>Track your orders in real-time</Text>
-          </View>
-        </View>
+        <Text style={styles.headerTitle}>My Orders</Text>
         <Pressable
-          onPress={onRefresh}
-          style={({ pressed }) => [
-            styles.refreshButton,
-            pressed && styles.refreshButtonPressed,
-          ]}
+          onPress={() => fetchOrders(true)}
+          style={({ pressed }) => [styles.headerBtn, pressed && { backgroundColor: "#E2E8F0" }]}
         >
-          <Text style={styles.refreshIcon}>🔄</Text>
+          <Ionicons name="refresh-outline" size={20} color={TEXT_MUTED} />
         </Pressable>
       </View>
 
-      {/* Notification Toasts */}
-      <View style={styles.notificationsContainer}>
-        {notifications.map((notification) => {
-          const animValue = notificationAnims.current[notification.id];
-          const statusConfig = STATUS_CONFIG[notification.status] || STATUS_CONFIG.placed;
-          
-          return (
-            <Animated.View
-              key={notification.id}
-              style={[
-                styles.toastCard,
-                {
-                  borderLeftColor: statusConfig.textColor,
-                  opacity: animValue || 1,
-                  transform: [
-                    {
-                      translateX: animValue
-                        ? animValue.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [300, 0],
-                          })
-                        : 0,
-                    },
-                  ],
-                },
-              ]}
-            >
-              <Text style={styles.toastIcon}>{statusConfig.icon}</Text>
-              <View style={styles.toastContent}>
-                <Text style={styles.toastOrderNumber}>
-                  {notification.orderNumber}
-                </Text>
-                <Text style={styles.toastMessage}>{notification.message}</Text>
-              </View>
-              <Pressable onPress={() => removeNotification(notification.id)}>
-                <Text style={styles.toastClose}>✕</Text>
-              </Pressable>
-            </Animated.View>
-          );
-        })}
+      {/* ── Tabs ── */}
+      <View style={styles.tabsWrap}>
+        <View style={styles.tabsContainer}>
+          <Pressable
+            onPress={() => setActiveTab("active")}
+            style={[styles.tab, activeTab === "active" && styles.tabActive]}
+          >
+            <Text style={[styles.tabText, activeTab === "active" && styles.tabTextActive]}>
+              Active{activeOrders.length > 0 ? ` (${activeOrders.length})` : ""}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setActiveTab("past")}
+            style={[styles.tab, activeTab === "past" && styles.tabActive]}
+          >
+            <Text style={[styles.tabText, activeTab === "past" && styles.tabTextActive]}>
+              Past Orders{pastOrders.length > 0 ? ` (${pastOrders.length})` : ""}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
-      {/* Main Content */}
-      {!isLoggedIn ? (
-        renderNotLoggedIn()
-      ) : loading ? (
-        renderLoading()
+      {/* ── Content ── */}
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={PRIMARY} />
+          <Text style={styles.loadingText}>Loading orders...</Text>
+        </View>
       ) : (
         <FlatList
-          data={orders}
+          data={displayOrders}
           keyExtractor={(item) => String(item.id)}
-          renderItem={renderOrderCard}
+          renderItem={({ item }) =>
+            activeTab === "active" ? renderActiveCard(item) : renderPastCard(item)
+          }
           contentContainerStyle={[
             styles.listContent,
-            orders.length === 0 && styles.listContentEmpty,
+            displayOrders.length === 0 && { flex: 1 },
           ]}
-          ListEmptyComponent={renderEmptyState}
+          ListHeaderComponent={
+            displayOrders.length > 0 ? (
+              <Text style={styles.sectionLabel}>
+                {activeTab === "active" ? "ONGOING DELIVERY" : "RECENT HISTORY"}
+              </Text>
+            ) : null
+          }
+          ListEmptyComponent={renderEmpty}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#FF7A00"
-              colors={["#FF7A00"]}
+              onRefresh={() => fetchOrders(true)}
+              tintColor={PRIMARY}
+              colors={[PRIMARY]}
             />
           }
           showsVerticalScrollIndicator={false}
@@ -565,14 +412,11 @@ export default function OrdersScreen({ navigation }) {
   );
 }
 
-// ============================================================================
-// STYLES
-// ============================================================================
-
+// ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
-    backgroundColor: "#F9FAFB",
+    backgroundColor: BG,
   },
 
   // Header
@@ -580,409 +424,282 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#fff",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#EEF2F7",
-  },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  logoBox: {
-    width: 40,
-    height: 40,
-    backgroundColor: "#FF7A00",
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#FF7A00",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  logoText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  headerTitleWrap: {
-    gap: 2,
+    borderBottomColor: BORDER,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: "800",
-    color: "#111827",
+    color: TEXT_DARK,
+    letterSpacing: -0.3,
   },
-  headerSubtitle: {
-    fontSize: 12,
-    color: "#6B7280",
-  },
-  refreshButton: {
+  headerBtn: {
     width: 40,
     height: 40,
-    backgroundColor: "#FFF7ED",
     borderRadius: 20,
+    backgroundColor: "#F8FAFC",
     alignItems: "center",
     justifyContent: "center",
   },
-  refreshButtonPressed: {
-    backgroundColor: "#FFEDD5",
-  },
-  refreshIcon: {
-    fontSize: 18,
-  },
 
-  // Notifications
-  notificationsContainer: {
-    position: "absolute",
-    top: 120,
-    right: 16,
-    zIndex: 100,
-    gap: 8,
+  // Tabs
+  tabsWrap: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
-  toastCard: {
+  tabsContainer: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 12,
-    borderLeftWidth: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-    maxWidth: width - 32,
-    gap: 10,
-  },
-  toastIcon: {
-    fontSize: 24,
-  },
-  toastContent: {
-    flex: 1,
-  },
-  toastOrderNumber: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  toastMessage: {
-    fontSize: 12,
-    color: "#6B7280",
-    marginTop: 2,
-  },
-  toastClose: {
-    fontSize: 16,
-    color: "#9CA3AF",
+    height: 48,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 24,
     padding: 4,
   },
-
-  // Loading
-  loadingContainer: {
+  tab: {
     flex: 1,
-    justifyContent: "center",
+    borderRadius: 22,
     alignItems: "center",
+    justifyContent: "center",
   },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#6B7280",
+  tabActive: {
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: TEXT_MUTED,
+  },
+  tabTextActive: {
+    color: PRIMARY,
+  },
+
+  // Section label
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 1,
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
 
   // List
   listContent: {
-    padding: 16,
+    paddingHorizontal: 20,
     paddingBottom: 100,
   },
-  listContentEmpty: {
-    flex: 1,
-  },
 
-  // Order Card
-  orderCard: {
+  // Active Card
+  activeCard: {
     backgroundColor: "#fff",
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.04)",
+    borderColor: BORDER,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
     elevation: 2,
   },
-  orderCardPressed: {
-    backgroundColor: "#FAFAFA",
-    transform: [{ scale: 0.98 }],
-  },
-  orderHeader: {
+  activeCardInner: {
     flexDirection: "row",
-    alignItems: "center",
+    gap: 14,
   },
-  orderIconWrap: {
+  activeLogo: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+
+  // Past Card
+  pastCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  pastCardInner: {
+    flexDirection: "row",
+    gap: 14,
+  },
+  pastLogo: {
     width: 48,
     height: 48,
-    borderRadius: 16,
-    backgroundColor: "#FFF7ED",
+    borderRadius: 24,
+    backgroundColor: "#F1F5F9",
+  },
+
+  // Shared
+  logoFallback: {
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: PRIMARY,
   },
-  orderIcon: {
-    fontSize: 24,
-  },
-  orderInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  orderNumber: {
-    fontSize: 16,
+  logoFallbackText: {
+    fontSize: 18,
     fontWeight: "800",
-    color: "#111827",
+    color: "#fff",
+  },
+
+  cardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   restaurantName: {
-    fontSize: 13,
-    color: "#6B7280",
-    marginTop: 2,
-  },
-  orderPriceWrap: {
-    alignItems: "flex-end",
-  },
-  orderPrice: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "800",
-    color: "#FF7A00",
+    color: TEXT_DARK,
+    flex: 1,
+    marginRight: 8,
   },
-  orderItems: {
-    fontSize: 11,
-    color: "#9CA3AF",
+  priceActive: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: PRIMARY,
+  },
+  pricePast: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#94A3B8",
+  },
+  cardMeta: {
+    fontSize: 13,
+    color: TEXT_MUTED,
     marginTop: 2,
   },
 
-  // Status Row
+  // Status
   statusRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 12,
-    marginLeft: 60,
-    gap: 12,
+    gap: 8,
+    marginTop: 10,
+  },
+  pulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: PRIMARY,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
   },
   statusText: {
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: "800",
   },
-  timeWrap: {
+
+  // Track button
+  trackBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: PRIMARY,
+    marginTop: 12,
+  },
+  trackBtnText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  // Past badge & reorder
+  pastBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  pastBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  reorderBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
   },
-  timeIcon: {
-    fontSize: 12,
-  },
-  timeText: {
-    fontSize: 11,
-    color: "#9CA3AF",
+  reorderText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: PRIMARY,
   },
 
-  // Progress
-  progressContainer: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#F3F4F6",
-  },
-  progressLine: {
-    position: "absolute",
-    top: 36,
-    left: 30,
-    right: 30,
-    height: 2,
-    backgroundColor: "#E5E7EB",
-    borderRadius: 1,
-  },
-  progressLineActive: {
-    position: "absolute",
-    top: 36,
-    left: 30,
-    height: 2,
-    backgroundColor: "#FF7A00",
-    borderRadius: 1,
-  },
-  stepsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  stepItem: {
-    alignItems: "center",
-    width: "20%",
-  },
-  stepCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#F3F4F6",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stepCircleCompleted: {
-    backgroundColor: "#FF7A00",
-    borderColor: "#FF7A00",
-  },
-  stepCircleCurrent: {
-    backgroundColor: "#fff",
-    borderWidth: 2,
-    borderColor: "#FF7A00",
-    shadowColor: "#FF7A00",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  stepCheck: {
-    fontSize: 12,
-    color: "#fff",
-    fontWeight: "bold",
-  },
-  stepIconSmall: {
-    fontSize: 12,
-  },
-  stepLabel: {
-    fontSize: 9,
-    color: "#9CA3AF",
-    marginTop: 6,
-    textAlign: "center",
-  },
-  stepLabelActive: {
-    color: "#111827",
-    fontWeight: "600",
-  },
-
-  // Arrow
-  arrowWrap: {
-    position: "absolute",
-    right: 16,
-    top: "50%",
-    marginTop: -10,
-  },
-  arrow: {
-    fontSize: 24,
-    color: "#D1D5DB",
-  },
-
-  // Empty State
+  // Empty
   emptyContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: 24,
+    paddingHorizontal: 32,
+    paddingBottom: 60,
   },
-  emptyIllustration: {
-    width: 180,
-    height: 180,
-    marginBottom: 24,
-    position: "relative",
+  emptyIconWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: PRIMARY_SOFT,
     alignItems: "center",
     justifyContent: "center",
-  },
-  emptyCircle: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    backgroundColor: "#FFF7ED",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  emptyMainEmoji: {
-    fontSize: 64,
-  },
-  floatingEmoji1: {
-    position: "absolute",
-    top: 0,
-    right: 10,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#FFEDD5",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  floatingEmoji2: {
-    position: "absolute",
-    bottom: 10,
-    left: 0,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#FFEDD5",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  floatingEmoji3: {
-    position: "absolute",
-    top: 40,
-    left: 10,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#FFEDD5",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  floatingText: {
-    fontSize: 16,
+    marginBottom: 20,
   },
   emptyTitle: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: "800",
-    color: "#111827",
-    marginBottom: 8,
-    textAlign: "center",
+    color: TEXT_DARK,
+    marginBottom: 6,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: "#6B7280",
+    color: TEXT_MUTED,
     textAlign: "center",
-    lineHeight: 22,
-    marginBottom: 24,
+    lineHeight: 20,
+    maxWidth: 240,
   },
-  browseButton: {
-    backgroundColor: "#FF7A00",
+  browseBtn: {
+    marginTop: 24,
     paddingHorizontal: 32,
     paddingVertical: 14,
-    borderRadius: 30,
-    shadowColor: "#FF7A00",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
+    borderRadius: 999,
+    backgroundColor: PRIMARY,
+    shadowColor: PRIMARY,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  browseButtonPressed: {
-    backgroundColor: "#E56D00",
-    transform: [{ scale: 0.97 }],
-  },
-  browseButtonText: {
+  browseBtnText: {
     color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  homeLink: {
-    marginTop: 16,
-    padding: 8,
-  },
-  homeLinkText: {
-    color: "#FF7A00",
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "800",
+  },
+
+  // Loading
+  loadingWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: TEXT_MUTED,
   },
 });
