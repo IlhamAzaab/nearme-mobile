@@ -29,8 +29,20 @@ const BORDER = "#F1F5F9";
 const BG = "#FFFFFF";
 
 const STATUS_CONFIG = {
+  // Uppercase (actual API values)
+  PLACED: { color: "#FEF3C7", textColor: "#D97706", label: "Order Placed", icon: "time-outline" },
+  DRIVER_ACCEPTED: { color: "#DBEAFE", textColor: "#2563EB", label: "Driver Accepted", icon: "checkmark-circle-outline" },
+  RECEIVED: { color: "#F3E8FF", textColor: "#9333EA", label: "Preparing", icon: "restaurant-outline" },
+  PICKED_UP: { color: "#CFFAFE", textColor: "#0891B2", label: "Picked Up", icon: "car-outline" },
+  ON_THE_WAY: { color: "#CFFAFE", textColor: "#0891B2", label: "On the Way", icon: "bicycle-outline" },
+  DELIVERED: { color: "#D1FAE5", textColor: "#059669", label: "Delivered", icon: "checkmark-done-outline" },
+  CANCELLED: { color: "#FEE2E2", textColor: "#DC2626", label: "Cancelled", icon: "close-circle-outline" },
+  REJECTED: { color: "#FEE2E2", textColor: "#DC2626", label: "Rejected", icon: "close-circle-outline" },
+  // Lowercase fallbacks (just in case)
   placed: { color: "#FEF3C7", textColor: "#D97706", label: "Order Placed", icon: "time-outline" },
+  driver_accepted: { color: "#DBEAFE", textColor: "#2563EB", label: "Driver Accepted", icon: "checkmark-circle-outline" },
   accepted: { color: "#DBEAFE", textColor: "#2563EB", label: "Accepted", icon: "checkmark-circle-outline" },
+  received: { color: "#F3E8FF", textColor: "#9333EA", label: "Preparing", icon: "restaurant-outline" },
   preparing: { color: "#F3E8FF", textColor: "#9333EA", label: "Preparing", icon: "restaurant-outline" },
   ready: { color: "#E0E7FF", textColor: "#4F46E5", label: "Ready", icon: "cube-outline" },
   picked_up: { color: "#CFFAFE", textColor: "#0891B2", label: "Picked Up", icon: "car-outline" },
@@ -40,8 +52,14 @@ const STATUS_CONFIG = {
   rejected: { color: "#FEE2E2", textColor: "#DC2626", label: "Rejected", icon: "close-circle-outline" },
 };
 
-const ACTIVE_STATUSES = ["placed", "accepted", "preparing", "ready", "picked_up", "on_the_way"];
-const PAST_STATUSES = ["delivered", "cancelled", "rejected"];
+const ACTIVE_STATUSES = [
+  "placed", "accepted", "preparing", "ready", "picked_up", "on_the_way",
+  "PLACED", "DRIVER_ACCEPTED", "RECEIVED", "PICKED_UP", "ON_THE_WAY",
+];
+const PAST_STATUSES = [
+  "delivered", "cancelled", "rejected",
+  "DELIVERED", "CANCELLED", "REJECTED",
+];
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function OrdersScreen({ navigation }) {
