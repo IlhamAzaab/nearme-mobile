@@ -4,6 +4,43 @@
  */
 
 /**
+ * Format ETA as clock arrival time(s).
+ * Example: etaRangeMin=12, etaRangeMax=22, current time 10:30 PM → "10:42 PM - 10:52 PM"
+ * For on_the_way: single time + "Insha Allah"
+ */
+export function formatETAClockTime(etaRangeMin, etaRangeMax, options = {}) {
+  const now = new Date();
+  const arriveEarly = new Date(now.getTime() + etaRangeMin * 60000);
+  const arriveLate = new Date(now.getTime() + etaRangeMax * 60000);
+
+  const fmt = (d) =>
+    d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+  if (etaRangeMin === etaRangeMax || options.isOnTheWay) {
+    const time = fmt(arriveEarly);
+    return options.isOnTheWay ? `${time} Insha Allah` : time;
+  }
+
+  return `${fmt(arriveEarly)} - ${fmt(arriveLate)}`;
+}
+
+/**
+ * Build display string from backend ETA data.
+ */
+export function getFormattedETA(etaData, fallback = "Calculating...") {
+  if (!etaData) return fallback;
+  const { etaRangeMin, etaRangeMax, driverStatus } = etaData;
+  if (etaRangeMin == null || etaRangeMax == null) return fallback;
+  const isOnTheWay =
+    driverStatus === "on_the_way" || driverStatus === "at_customer";
+  return formatETAClockTime(etaRangeMin, etaRangeMax, { isOnTheWay });
+}
+
+/**
  * Format minutes into a human-readable ETA string
  * @param {number} minutes - ETA in minutes
  * @returns {string} Formatted ETA string
@@ -75,4 +112,6 @@ export default {
   formatRelativeTime,
   calculateETAFromDistance,
   formatETARange,
+  formatETAClockTime,
+  getFormattedETA,
 };

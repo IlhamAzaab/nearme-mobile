@@ -1,230 +1,140 @@
+import React from "react";
+import { View, Text, Pressable, StyleSheet } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import React, { useState, useCallback } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { API_BASE_URL } from "../constants/api";
-import { useOrders } from "../context/OrderContext";
 
-// Tab Screens
-import CartScreen from "../screens/customer/CartScreen";
 import HomeScreen from "../screens/customer/HomeScreen";
 import OrdersScreen from "../screens/customer/OrdersScreen";
+import CartScreen from "../screens/customer/CartScreen";
 import ProfileScreen from "../screens/customer/ProfileScreen";
 
 const Tab = createBottomTabNavigator();
 
-function TabIcon({ label, focused, badge, showDot }) {
-  // Modern icon mapping
-  const getIconName = () => {
-    switch (label) {
-      case "HOME":
-        return focused ? "home" : "home-outline";
-      case "ORDER":
-        return focused ? "receipt" : "receipt-outline";
-      case "CART":
-        return focused ? "cart" : "cart-outline";
-      case "PROFILE":
-        return focused ? "person-circle" : "person-circle-outline";
-      default:
-        return "ellipse";
-    }
-  };
+const ACCENT = "#F59E0B";
+const GREEN = "#10b981";
+
+function MyTabBar({ state, navigation }) {
+  const insets = useSafeAreaInsets();
+  const bottomSpace = Math.max(insets.bottom, 10);
 
   return (
-    <View style={styles.iconWrap}>
-      <View style={styles.iconContent}>
-        <Ionicons 
-          name={getIconName()} 
-          size={24} 
-          color={focused ? "#10b981" : "#94A3B8"} 
+    <View style={[styles.wrapper, { bottom: bottomSpace }]}>
+      <View style={styles.container}>
+
+        <RoundButton
+          label="HOME"
+          icon="home-outline"
+          activeIcon="home"
+          focused={state.index === 0}
+          onPress={() => navigation.navigate("Home")}
         />
-        
-        <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
-          {label}
-        </Text>
+
+        <RoundButton
+          label="ORDERS"
+          icon="receipt-outline"
+          activeIcon="receipt"
+          focused={state.index === 1}
+          onPress={() => navigation.navigate("Orders")}
+        />
+
+        <RoundButton
+          label="CART"
+          icon="cart-outline"
+          activeIcon="cart"
+          focused={state.index === 2}
+          onPress={() => navigation.navigate("Cart")}
+        />
+
+        <RoundButton
+          label="PROFILE"
+          icon="person-outline"
+          activeIcon="person"
+          focused={state.index === 3}
+          onPress={() => navigation.navigate("Profile")}
+        />
+
       </View>
-
-      {/* Active indicator dot */}
-      {focused && <View style={styles.activeDot} />}
-
-      {/* Badge for cart */}
-      {!!badge && badge > 0 && (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{badge > 9 ? "9+" : badge}</Text>
-        </View>
-      )}
-
-      {/* Green dot for new orders */}
-      {!!showDot && (
-        <View style={styles.greenDot} />
-      )}
     </View>
   );
 }
 
-export default function CustomerTabs() {
-  const insets = useSafeAreaInsets();
-  const [cartBadge, setCartBadge] = useState(0);
-  const { hasNewOrder } = useOrders();
+function RoundButton({ label, icon, activeIcon, focused, onPress }) {
+  return (
+    <Pressable onPress={onPress} style={styles.roundWrapper}>
+      <View style={[styles.roundButton, focused && styles.roundActive]}>
+        <Ionicons
+          name={focused ? activeIcon : icon}
+          size={22}
+          color={focused ? ACCENT : "#1E293B"}
+        />
+      </View>
 
-  // Fetch real cart count silently whenever any tab is focused
-  useFocusEffect(
-    useCallback(() => {
-      (async () => {
-        try {
-          const token = await AsyncStorage.getItem("token");
-          if (!token || token === "null") return;
-          const res = await fetch(`${API_BASE_URL}/cart`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const data = await res.json().catch(() => ({}));
-          if (res.ok) {
-            const carts = data.carts || [];
-            const count = carts.reduce(
-              (sum, cart) => sum + (cart.items || []).reduce((s, it) => s + (it.quantity || 0), 0),
-              0
-            );
-            setCartBadge(count);
-          }
-        } catch {}
-      })();
-    }, [])
+      <Text style={[styles.label, focused && styles.activeLabel]}>
+        {label}
+      </Text>
+    </Pressable>
   );
+}
 
+export default function CustomerTabs() {
   return (
     <Tab.Navigator
-      initialRouteName="Home"
-      screenOptions={{
-        headerShown: false,
-        tabBarShowLabel: false,
-        tabBarStyle: {
-          position: "absolute",
-          bottom: Math.max(insets.bottom, 4),
-          left: 12,
-          right: 12,
-          height: 68,
-          backgroundColor: "#fff",
-          borderRadius: 24,
-          borderWidth: 0.5,
-          borderColor: "#E2E8F0",
-          shadowColor: "#000",
-          shadowOpacity: 0.1,
-          shadowRadius: 24,
-          shadowOffset: { width: 0, height: -2 },
-          elevation: 10,
-          paddingHorizontal: 16,
-          paddingTop: 8,
-          paddingBottom: Math.max(insets.bottom > 0 ? 8 : 12, 8),
-        },
-      }}
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <MyTabBar {...props} />}
     >
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="HOME" focused={focused} />
-          ),
-        }}
-      />
-
-      <Tab.Screen
-        name="Orders"
-        component={OrdersScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="ORDER" focused={focused} showDot={hasNewOrder} />
-          ),
-        }}
-      />
-
-      <Tab.Screen
-        name="Cart"
-        component={CartScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="CART" focused={focused} badge={cartBadge} />
-          ),
-        }}
-      />
-
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="PROFILE" focused={focused} />
-          ),
-        }}
-      />
+      <Tab.Screen name="Home" component={HomeScreen} />
+      <Tab.Screen name="Orders" component={OrdersScreen} />
+      <Tab.Screen name="Cart" component={CartScreen} />
+      <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
 
 const styles = StyleSheet.create({
-  iconWrap: { 
-    position: "relative",
-    alignItems: "center", 
-    justifyContent: "center",
-    paddingHorizontal: 4,
-    flex: 1,
+  wrapper: {
+    position: "absolute",
+    left: 20,
+    right: 20,
   },
-  iconContent: {
+
+  container: {
+    height: 90,
+    backgroundColor: GREEN,
+    borderRadius: 45,
+    flexDirection: "row",
+    justifyContent: "space-evenly",
+    alignItems: "center",
+    elevation: 15,
+  },
+
+  roundWrapper: {
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
   },
-  iconLabel: {
-    fontSize: 9,
-    color: "#94A3B8",
+
+  roundButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  roundActive: {
+    borderWidth: 3,
+    borderColor: ACCENT,
+  },
+
+  label: {
+    marginTop: 6,
+    fontSize: 10,
+    color: "#fff",
     fontWeight: "600",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    marginTop: 2,
   },
-  iconLabelActive: { 
-    color: "#10b981", 
-    fontWeight: "700",
-  },
-  activeDot: {
-    position: "absolute",
-    bottom: -10,
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#10b981",
-  },
-  badge: {
-    position: "absolute",
-    top: -2,
-    right: 8,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 5,
-    borderRadius: 9,
-    backgroundColor: "#10b981",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#fff",
-  },
-  badgeText: { 
-    color: "#fff", 
-    fontSize: 9, 
-    fontWeight: "700",
-  },
-  greenDot: {
-    position: "absolute",
-    top: -2,
-    right: 8,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#10b981",
-    borderWidth: 2,
-    borderColor: "#fff",
+
+  activeLabel: {
+    color: ACCENT,
   },
 });

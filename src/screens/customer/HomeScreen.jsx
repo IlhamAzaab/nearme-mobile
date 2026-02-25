@@ -12,24 +12,45 @@ import {
   StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
 import { fuzzySearchRestaurants, fuzzySearchFoods } from "../../utils/fuzzySearch";
 
-// ✅ Circular category images
+// ✅ Circular category images with fallback
+const CATEGORY_IMAGES = {
+  kothu: "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=200&h=200&fit=crop",
+  friedrice: "https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=200&h=200&fit=crop",
+  biryani: "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=200&h=200&fit=crop",
+  parotta: "https://images.unsplash.com/photo-1604152135912-04a022e23696?w=200&h=200&fit=crop",
+  shorteats: "https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?w=200&h=200&fit=crop",
+};
+const CATEGORY_EMOJI = {
+  kothu: "🍜",
+  friedrice: "🍚",
+  biryani: "🍛",
+  parotta: "🫓",
+  shorteats: "🍢",
+};
 const CategoryIcon = ({ type }) => {
-  const imageMap = {
-    kothu: "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=200&h=200&fit=crop",
-    friedrice: "https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=200&h=200&fit=crop",
-    biryani: "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=200&h=200&fit=crop",
-    parotta: "https://images.unsplash.com/photo-1627308595126-613c7d5e6c3a?w=200&h=200&fit=crop",
-    shorteats: "https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?w=200&h=200&fit=crop",
-  };
+  const [failed, setFailed] = useState(false);
+  const uri = CATEGORY_IMAGES[type] || CATEGORY_IMAGES.biryani;
+  const emoji = CATEGORY_EMOJI[type] || "🍽️";
+
+  if (failed) {
+    return (
+      <View style={[styles.catImage, styles.catFallback]}>
+        <Text style={{ fontSize: 32 }}>{emoji}</Text>
+      </View>
+    );
+  }
+
   return (
     <Image 
-      source={{ uri: imageMap[type] || imageMap.biryani }} 
+      source={{ uri }} 
       style={styles.catImage}
       resizeMode="cover"
+      onError={() => setFailed(true)}
     />
   );
 };
@@ -208,12 +229,12 @@ export default function HomeScreen({ navigation }) {
 
           {/* Search */}
           <View style={styles.searchWrap}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <Ionicons name="search" size={20} color="#fff" style={styles.searchIcon} />
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Search..."
-              placeholderTextColor="#9CA3AF"
+              placeholder="Search for foods and restaurants"
+              placeholderTextColor="rgba(255,255,255,0.6)"
               style={styles.searchInput}
             />
           </View>
@@ -223,7 +244,7 @@ export default function HomeScreen({ navigation }) {
             onPress={() => navigation.navigate("Notifications")}
             style={({ pressed }) => [styles.bellBtn, pressed && { opacity: 0.85 }]}
           >
-            <Text style={styles.bellIcon}></Text>
+            <Ionicons name="notifications" size={22} color="#10B981" />
             {unreadCount > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
@@ -512,18 +533,17 @@ const styles = StyleSheet.create({
   deliverAddress: { fontSize: 13, fontWeight: "700", color: "#1E293B" },
 
   bellBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
-    borderWidth: 1,
-    borderColor: "#F1F5F9",
+    borderWidth: 2,
+    borderColor: "#10B981",
     flexShrink: 0,
   },
-  bellIcon: { fontSize: 20 },
   badge: {
     position: "absolute",
     top: -2,
@@ -544,23 +564,21 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(16, 185, 129, 0.05)",
+    backgroundColor: "#10B981",
     borderRadius: 999,
     paddingHorizontal: 14,
-    height: 42,
-    borderWidth: 2,
-    borderColor: "rgba(16, 185, 129, 0.1)",
+    height: 44,
   },
-  searchIcon: { fontSize: 18, marginRight: 8 },
+  searchIcon: { marginRight: 10 },
   searchInput: { 
     flex: 1, 
-    color: "#1E293B", 
-    fontSize: 13, 
+    color: "#fff", 
+    fontSize: 14, 
     fontWeight: "600",
     paddingVertical: 0,
   },
 
-  content: { padding: 16, paddingBottom: 95 },
+  content: { padding: 16, paddingBottom: 100 },
 
   sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   sectionTitle: { fontSize: 19, fontWeight: "800", color: "#0F172A", letterSpacing: -0.5 },
@@ -605,6 +623,12 @@ const styles = StyleSheet.create({
   catImage: { 
     width: 72, 
     height: 72, 
+  },
+  catFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F1F5F9",
+    borderRadius: 36,
   },
   catText: { fontSize: 13, fontWeight: "700", color: "#64748B" },
   catTextActive: { color: "#10b981" },

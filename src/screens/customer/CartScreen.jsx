@@ -318,7 +318,7 @@ export default function CartScreen({ navigation }) {
       <SafeAreaView style={styles.container} edges={["top"]}>
         <CartHeader cartCount={cartCount} onClose={() => navigation.navigate("MainTabs", { screen: "Home" })} />
 
-        <ScrollView style={styles.page} contentContainerStyle={{ paddingBottom: 95 }}>
+        <ScrollView style={styles.page} contentContainerStyle={{ paddingBottom: 100 }}>
           {/* Back Link */}
           <Pressable onPress={() => setSelectedCartId(null)} style={styles.backRow}>
             <Ionicons name="arrow-back" size={16} color={PRIMARY} />

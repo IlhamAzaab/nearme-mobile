@@ -851,7 +851,20 @@ export default function CheckoutScreen({ route, navigation }) {
       }
 
       setTimeout(() => {
-        navigation.replace("OrderTracking", { orderId: placedOrder.id });
+        navigation.replace("OrderTracking", {
+          orderId: placedOrder.id,
+          orderNumber: placedOrder.order_number || "",
+          order: placedOrder,
+          address: address,
+          restaurantName: placedOrder.restaurant_name || cart?.restaurant_name || "Restaurant",
+          totalAmount: placedOrder.total_amount || 0,
+          items: (cart?.items || []).map((item) => ({
+            name: item.name || item.food_name,
+            quantity: item.quantity,
+            price: item.unit_price || item.price,
+            image: item.image_url,
+          })),
+        });
       }, 900);
     } catch (e) {
       // Hide overlay on error

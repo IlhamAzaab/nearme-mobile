@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 20,
-    paddingBottom: 95,
+    paddingBottom: 100,
   },
   title: {
     fontSize: 24,

@@ -7,13 +7,17 @@ const OrderContext = createContext(null);
 
 // ─── Status Constants (shared across app) ─────────────────────────────────
 export const ACTIVE_STATUSES = [
-  "placed", "accepted", "preparing", "ready", "picked_up", "on_the_way",
-  "PLACED", "DRIVER_ACCEPTED", "RECEIVED", "PICKED_UP", "ON_THE_WAY",
+  "placed", "pending", "accepted", "preparing", "ready", "picked_up", "on_the_way",
+  "driver_accepted", "received",
+  "PLACED", "PENDING", "DRIVER_ACCEPTED", "RECEIVED", "ACCEPTED", "PREPARING", "READY", "PICKED_UP", "ON_THE_WAY",
 ];
 export const PAST_STATUSES = [
-  "delivered", "cancelled", "rejected",
-  "DELIVERED", "CANCELLED", "REJECTED",
+  "delivered", "cancelled", "rejected", "failed",
+  "DELIVERED", "CANCELLED", "REJECTED", "FAILED",
 ];
+
+// Helper to get the displayable status from an order object
+export const getOrderStatus = (order) => order?.effective_status || order?.status || "placed";
 
 export function OrderProvider({ children }) {
   const [orders, setOrders] = useState([]);
@@ -34,7 +38,7 @@ export function OrderProvider({ children }) {
       const token = await AsyncStorage.getItem("token");
       if (!token || token === "null") return false;
 
-      const res = await fetch(`${API_BASE_URL}/orders`, {
+      const res = await fetch(`${API_BASE_URL}/orders/my-orders`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
@@ -45,7 +49,7 @@ export function OrderProvider({ children }) {
         setOrders(orderList);
 
         // Update badge count (active orders)
-        const activeCount = orderList.filter((o) => ACTIVE_STATUSES.includes(o.status)).length;
+        const activeCount = orderList.filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))).length;
         setOrdersBadgeCount(activeCount);
 
         return true;
@@ -104,7 +108,7 @@ export function OrderProvider({ children }) {
             );
             // Update badge count
             setOrders((current) => {
-              const activeCount = current.filter((o) => ACTIVE_STATUSES.includes(o.status)).length;
+              const activeCount = current.filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))).length;
               setOrdersBadgeCount(activeCount);
               return current;
             });

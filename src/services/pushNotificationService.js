@@ -35,7 +35,8 @@ Notifications.setNotificationHandler({
     const data = notification.request.content.data || {};
     const isAlarmPulse = data.isAlarm === "true" || data.isAlarm === true;
     return {
-      shouldShowAlert: !isAlarmPulse, // no banner for alarm pulses
+      shouldShowBanner: !isAlarmPulse, // no banner for alarm pulses
+      shouldShowList: !isAlarmPulse,
       shouldPlaySound: true, // always play sound
       shouldSetBadge: !isAlarmPulse,
       priority: Notifications.AndroidNotificationPriority.MAX,

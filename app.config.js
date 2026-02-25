@@ -8,6 +8,16 @@ export default {
     scheme: "nearmemobile",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
+    androidStatusBar: {
+      barStyle: "dark-content",
+      backgroundColor: "#FFFFFF",
+      translucent: false,
+    },
+    androidNavigationBar: {
+      visible: "sticky-immersive",
+      backgroundColor: "#000000",
+      barStyle: "light-content",
+    },
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.nearme.mobile",
@@ -27,7 +37,7 @@ export default {
         backgroundImage: "./assets/images/android-icon-background.png",
         monochromeImage: "./assets/images/android-icon-monochrome.png",
       },
-      edgeToEdgeEnabled: true,
+      edgeToEdgeEnabled: false,
       predictiveBackGestureEnabled: false,
       permissions: [
         "RECEIVE_BOOT_COMPLETED",

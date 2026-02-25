@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NavigationContainer } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, AppState, StatusBar } from "react-native";
+import { Alert, AppState, Platform, StatusBar } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import UrgentNotificationModal from "../components/common/UrgentNotificationModal";
 import { API_URL } from "../config/env";
@@ -13,8 +13,22 @@ import { NotificationProvider } from "./providers/NotificationProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
 import { OrderProvider } from "../context/OrderContext";
 
+// Safe import — requires native rebuild to work
+let NavigationBar = null;
+try {
+  NavigationBar = require("expo-navigation-bar");
+} catch {}
+
 export default function App() {
   const navigationRef = useRef(null);
+
+  // Force Android system navigation bar to black with white icons
+  useEffect(() => {
+    if (Platform.OS === "android" && NavigationBar) {
+      NavigationBar.setBackgroundColorAsync?.("#000000");
+      NavigationBar.setButtonStyleAsync?.("light");
+    }
+  }, []);
 
   // Urgent notification modal state
   const [urgentNotification, setUrgentNotification] = useState(null);
@@ -297,8 +311,8 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar
         barStyle="dark-content"
-        backgroundColor="transparent"
-        translucent={true}
+        backgroundColor="#FFFFFF"
+        translucent={false}
       />
       <ThemeProvider>
         <AuthProvider>

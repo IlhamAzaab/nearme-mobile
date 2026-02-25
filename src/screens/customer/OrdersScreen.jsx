@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { useOrders, ACTIVE_STATUSES, PAST_STATUSES } from "../../context/OrderContext";
+import { useOrders, ACTIVE_STATUSES, PAST_STATUSES, getOrderStatus } from "../../context/OrderContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -176,17 +176,18 @@ export default function OrdersScreen({ navigation }) {
   };
 
   const activeOrders = useMemo(
-    () => orders.filter((o) => ACTIVE_STATUSES.includes(o.status)),
+    () => orders.filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))),
     [orders]
   );
   const pastOrders = useMemo(
-    () => orders.filter((o) => PAST_STATUSES.includes(o.status)),
+    () => orders.filter((o) => PAST_STATUSES.includes(getOrderStatus(o))),
     [orders]
   );
 
   // ─── Active Order Card ──────────────────────────────────────────────────
   const renderActiveCard = (order, index) => {
-    const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.PLACED;
+    const status = getOrderStatus(order);
+    const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.PLACED;
     const itemCount = order.order_items?.length || order.items_count || 0;
     const isNew = newOrderIds.has(order.id);
 
@@ -258,7 +259,8 @@ export default function OrdersScreen({ navigation }) {
 
   // ─── Past Order Card ─────────────────────────────────────────────────────
   const renderPastCard = (order, index) => {
-    const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.delivered;
+    const status = getOrderStatus(order);
+    const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.delivered;
     const itemCount = order.order_items?.length || order.items_count || 0;
     const isNew = newOrderIds.has(order.id);
 
@@ -650,11 +652,10 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#fff",
   },
-
   cardRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
+    alignItems: "center",
   },
   restaurantName: {
     fontSize: 15,
