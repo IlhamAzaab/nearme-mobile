@@ -1,50 +1,74 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 /**
- * ManagerHeader - Header bar for manager screens
+ * ManagerHeader – website-style header for all manager screens.
+ *
+ * Props:
+ *  title       {string}   Screen title (required)
+ *  onRefresh   {function} Optional refresh handler – shows refresh icon
+ *  onMenuPress {function} Optional menu handler – shows hamburger icon
+ *  showBack    {boolean}  Show back chevron (default false)
  */
 const ManagerHeader = ({
-  title = 'Manager',
+  title = "Dashboard",
+  onRefresh,
+  onMenuPress,
   showBack = false,
-  showNotifications = true,
-  unreadCount = 0,
-  rightAction,
 }) => {
   const navigation = useNavigation();
 
   return (
     <View style={styles.container}>
-      {showBack ? (
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
-      ) : (
-        <View style={styles.logoContainer}>
-          <Text style={styles.logo}>📊</Text>
-        </View>
-      )}
-
-      <Text style={styles.title} numberOfLines={1}>{title}</Text>
-
-      <View style={styles.rightContainer}>
-        {rightAction || null}
-        {showNotifications && (
+      {/* Left section */}
+      <View style={styles.leftSection}>
+        {showBack && navigation.canGoBack() && (
           <TouchableOpacity
-            onPress={() => navigation.navigate('ManagerNotifications')}
+            onPress={() => navigation.goBack()}
             style={styles.iconBtn}
+            activeOpacity={0.7}
           >
-            <Text style={styles.iconText}>🔔</Text>
-            {unreadCount > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </Text>
-              </View>
-            )}
+            <Ionicons name="chevron-back" size={22} color="#374151" />
           </TouchableOpacity>
         )}
+        {onMenuPress && (
+          <TouchableOpacity
+            onPress={onMenuPress}
+            style={styles.iconBtn}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="menu" size={22} color="#374151" />
+          </TouchableOpacity>
+        )}
+        <View style={styles.nmIcon}>
+          <Text style={styles.nmText}>NM</Text>
+        </View>
+      </View>
+
+      {/* Title */}
+      <Text style={styles.title} numberOfLines={1}>
+        {title}
+      </Text>
+
+      {/* Right section */}
+      <View style={styles.rightSection}>
+        {onRefresh && (
+          <TouchableOpacity
+            onPress={onRefresh}
+            style={styles.iconBtn}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="refresh" size={20} color="#374151" />
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          onPress={() => navigation.navigate("ManagerAccount")}
+          style={styles.iconBtn}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="person-circle-outline" size={26} color="#374151" />
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -52,35 +76,52 @@ const ManagerHeader = ({
 
 const styles = StyleSheet.create({
   container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#1E293B',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: "#E5E7EB",
+    gap: 8,
   },
-  backBtn: { padding: 4, marginRight: 8 },
-  backText: { fontSize: 24, color: '#fff' },
-  logoContainer: { marginRight: 8 },
-  logo: { fontSize: 24 },
-  title: { flex: 1, fontSize: 18, fontWeight: '700', color: '#fff' },
-  rightContainer: { flexDirection: 'row', alignItems: 'center' },
-  iconBtn: { padding: 4, marginLeft: 8, position: 'relative' },
-  iconText: { fontSize: 20 },
-  badge: {
-    position: 'absolute',
-    top: -2,
-    right: -4,
-    backgroundColor: '#EF4444',
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
+  leftSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  nmIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "#059669",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  nmText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  title: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  rightSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 });
 
 export default ManagerHeader;

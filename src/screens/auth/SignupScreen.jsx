@@ -1,16 +1,17 @@
-import React, { useMemo, useRef, useState } from "react";
+import { LinearGradient } from "expo-linear-gradient";
+import { useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  Pressable,
   ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Platform,
-  Animated,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import { API_BASE_URL } from "../../constants/api";
 
 export default function SignupScreen({ navigation }) {
@@ -38,11 +39,31 @@ export default function SignupScreen({ navigation }) {
   const triggerShake = () => {
     shakeX.setValue(0);
     Animated.sequence([
-      Animated.timing(shakeX, { toValue: -10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: -8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 0, duration: 60, useNativeDriver: true }),
+      Animated.timing(shakeX, {
+        toValue: -10,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 10,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: -8,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 8,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 0,
+        duration: 60,
+        useNativeDriver: true,
+      }),
     ]).start();
   };
 
@@ -76,11 +97,14 @@ export default function SignupScreen({ navigation }) {
 
     try {
       // 1) Check availability
-      const checkResponse = await fetch(`${API_BASE_URL}/auth/check-availability`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: formData.email.trim() }),
-      });
+      const checkResponse = await fetch(
+        `${API_BASE_URL}/auth/check-availability`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: formData.email.trim() }),
+        },
+      );
 
       const checkData = await checkResponse.json().catch(() => ({}));
 
@@ -123,7 +147,10 @@ export default function SignupScreen({ navigation }) {
   // ✅ Success Screen (green theme keep)
   if (success) {
     return (
-      <LinearGradient colors={["#123321", "#1db95b", "#0a1f14"]} style={styles.container}>
+      <LinearGradient
+        colors={["#123321", "#1db95b", "#0a1f14"]}
+        style={styles.container}
+      >
         <View style={styles.successWrap}>
           <View style={styles.successCard}>
             <View style={styles.mailIconCircle}>
@@ -139,18 +166,26 @@ export default function SignupScreen({ navigation }) {
             <View style={styles.stepsBox}>
               <Text style={styles.stepsTitle}>Next steps:</Text>
               <Text style={styles.stepItem}>1) Open your email inbox</Text>
-              <Text style={styles.stepItem}>2) Click the verification link</Text>
+              <Text style={styles.stepItem}>
+                2) Click the verification link
+              </Text>
               <Text style={styles.stepItem}>3) Complete your profile</Text>
-              <Text style={styles.stepItem}>4) Start ordering delicious food!</Text>
+              <Text style={styles.stepItem}>
+                4) Start ordering delicious food!
+              </Text>
             </View>
 
             <Text style={styles.smallNote}>
-              Didn't receive the email? Check spam folder or try again in a few minutes.
+              Didn't receive the email? Check spam folder or try again in a few
+              minutes.
             </Text>
 
             <Pressable
               onPress={() => navigation.navigate("Login")}
-              style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                pressed && styles.pressed,
+              ]}
             >
               <Text style={styles.primaryBtnText}>Go to Login</Text>
             </Pressable>
@@ -162,116 +197,139 @@ export default function SignupScreen({ navigation }) {
 
   // ✅ Main Signup Screen
   return (
-    <LinearGradient colors={["#123321", "#1db95b", "#0a1f14"]} style={styles.container}>
+    <LinearGradient
+      colors={["#123321", "#1db95b", "#0a1f14"]}
+      style={styles.container}
+    >
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <Animated.View style={[styles.content, { transform: [{ translateX: shakeX }] }]}>
-          {/* Logo */}
-          <View style={styles.logoWrap}>
-            <View style={styles.logoCircle}>
-              <Text style={styles.logoIcon}>🛵</Text>
-            </View>
-            <Text style={styles.appTitle}>Near Me</Text>
-            <Text style={styles.appSubtitle}>Your favorite food, fast.</Text>
-          </View>
-
-          {/* Card */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Create Account 🌱</Text>
-            <Text style={styles.cardSub}>Sign up to get started</Text>
-
-            {/* Error */}
-            {!!error && (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorText}>{error}</Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          <Animated.View
+            style={[styles.content, { transform: [{ translateX: shakeX }] }]}
+          >
+            {/* Logo */}
+            <View style={styles.logoWrap}>
+              <View style={styles.logoCircle}>
+                <Text style={styles.logoIcon}>🛵</Text>
               </View>
-            )}
-
-            {/* Email */}
-            <Text style={styles.label}>Email Address</Text>
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputIcon}>✉️</Text>
-              <TextInput
-                value={formData.email}
-                onChangeText={(v) => handleChange("email", v)}
-                placeholder="you@example.com"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                style={styles.input}
-              />
+              <Text style={styles.appTitle}>Near Me</Text>
+              <Text style={styles.appSubtitle}>Your favorite food, fast.</Text>
             </View>
 
-            {/* Password */}
-            <Text style={[styles.label, { marginTop: 12 }]}>Password</Text>
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputIcon}>🔒</Text>
-              <TextInput
-                value={formData.password}
-                onChangeText={(v) => handleChange("password", v)}
-                placeholder="••••••••"
-                placeholderTextColor="#9CA3AF"
-                secureTextEntry={!showPassword}
-                style={[styles.input, { paddingRight: 48 }]}
-              />
-              <Pressable onPress={() => setShowPassword((v) => !v)} style={styles.eyeBtn}>
-                <Text style={styles.eyeText}>{showPassword ? "🙈" : "👁️"}</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.hint}>Must be at least 6 characters</Text>
+            {/* Card */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Create Account 🌱</Text>
+              <Text style={styles.cardSub}>Sign up to get started</Text>
 
-            {/* Confirm Password */}
-            <Text style={[styles.label, { marginTop: 10 }]}>Confirm Password</Text>
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputIcon}>🛡️</Text>
-              <TextInput
-                value={formData.confirmPassword}
-                onChangeText={(v) => handleChange("confirmPassword", v)}
-                placeholder="••••••••"
-                placeholderTextColor="#9CA3AF"
-                secureTextEntry={!showConfirmPassword}
-                style={[styles.input, { paddingRight: 48 }]}
-              />
-              <Pressable
-                onPress={() => setShowConfirmPassword((v) => !v)}
-                style={styles.eyeBtn}
-              >
-                <Text style={styles.eyeText}>{showConfirmPassword ? "🙈" : "👁️"}</Text>
-              </Pressable>
-            </View>
-
-            {/* Submit */}
-            <Pressable
-              onPress={handleSubmit}
-              disabled={loading}
-              style={({ pressed }) => [
-                styles.primaryBtn,
-                { marginTop: 16 },
-                (pressed || loading) && styles.pressed,
-                loading && { opacity: 0.75 },
-              ]}
-            >
-              {loading ? (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator color="#fff" />
-                  <Text style={styles.primaryBtnText}>Creating account...</Text>
+              {/* Error */}
+              {!!error && (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorText}>{error}</Text>
                 </View>
-              ) : (
-                <Text style={styles.primaryBtnText}>Sign Up</Text>
               )}
-            </Pressable>
-          </View>
 
-          {/* Footer */}
-          <View style={styles.footerRow}>
-            <Text style={styles.footerText}>Already have an account?</Text>
-            <Pressable onPress={() => navigation.navigate("Login")}>
-              <Text style={styles.footerLink}> Log in here</Text>
-            </Pressable>
-          </View>
-        </Animated.View>
+              {/* Email */}
+              <Text style={styles.label}>Email Address</Text>
+              <View style={styles.inputWrap}>
+                <Text style={styles.inputIcon}>✉️</Text>
+                <TextInput
+                  value={formData.email}
+                  onChangeText={(v) => handleChange("email", v)}
+                  placeholder="you@example.com"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  style={styles.input}
+                />
+              </View>
+
+              {/* Password */}
+              <Text style={[styles.label, { marginTop: 12 }]}>Password</Text>
+              <View style={styles.inputWrap}>
+                <Text style={styles.inputIcon}>🔒</Text>
+                <TextInput
+                  value={formData.password}
+                  onChangeText={(v) => handleChange("password", v)}
+                  placeholder="••••••••"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry={!showPassword}
+                  style={[styles.input, { paddingRight: 48 }]}
+                />
+                <Pressable
+                  onPress={() => setShowPassword((v) => !v)}
+                  style={styles.eyeBtn}
+                >
+                  <Text style={styles.eyeText}>
+                    {showPassword ? "🙈" : "👁️"}
+                  </Text>
+                </Pressable>
+              </View>
+              <Text style={styles.hint}>Must be at least 6 characters</Text>
+
+              {/* Confirm Password */}
+              <Text style={[styles.label, { marginTop: 10 }]}>
+                Confirm Password
+              </Text>
+              <View style={styles.inputWrap}>
+                <Text style={styles.inputIcon}>🛡️</Text>
+                <TextInput
+                  value={formData.confirmPassword}
+                  onChangeText={(v) => handleChange("confirmPassword", v)}
+                  placeholder="••••••••"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry={!showConfirmPassword}
+                  style={[styles.input, { paddingRight: 48 }]}
+                />
+                <Pressable
+                  onPress={() => setShowConfirmPassword((v) => !v)}
+                  style={styles.eyeBtn}
+                >
+                  <Text style={styles.eyeText}>
+                    {showConfirmPassword ? "🙈" : "👁️"}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Submit */}
+              <Pressable
+                onPress={handleSubmit}
+                disabled={loading}
+                style={({ pressed }) => [
+                  styles.primaryBtn,
+                  { marginTop: 16 },
+                  (pressed || loading) && styles.pressed,
+                  loading && { opacity: 0.75 },
+                ]}
+              >
+                {loading ? (
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator color="#fff" />
+                    <Text style={styles.primaryBtnText}>
+                      Creating account...
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.primaryBtnText}>Sign Up</Text>
+                )}
+              </Pressable>
+            </View>
+
+            {/* Footer */}
+            <View style={styles.footerRow}>
+              <Text style={styles.footerText}>Already have an account?</Text>
+              <Pressable onPress={() => navigation.navigate("Login")}>
+                <Text style={styles.footerLink}> Log in here</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -279,6 +337,9 @@ export default function SignupScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  scrollContent: {
+    flexGrow: 1,
+  },
 
   content: {
     flex: 1,
@@ -318,8 +379,19 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     elevation: 6,
   },
-  cardTitle: { fontSize: 22, fontWeight: "900", color: "#111827", textAlign: "center" },
-  cardSub: { fontSize: 13, color: "#6B7280", textAlign: "center", marginTop: 6, marginBottom: 14 },
+  cardTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#111827",
+    textAlign: "center",
+  },
+  cardSub: {
+    fontSize: 13,
+    color: "#6B7280",
+    textAlign: "center",
+    marginTop: 6,
+    marginBottom: 14,
+  },
 
   errorBox: {
     backgroundColor: "#FEF2F2",
@@ -332,7 +404,13 @@ const styles = StyleSheet.create({
   },
   errorText: { color: "#DC2626", fontWeight: "700", fontSize: 13 },
 
-  label: { fontSize: 13, fontWeight: "800", color: "#374151", marginLeft: 6, marginBottom: 6 },
+  label: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#374151",
+    marginLeft: 6,
+    marginBottom: 6,
+  },
 
   inputWrap: {
     flexDirection: "row",
@@ -348,7 +426,12 @@ const styles = StyleSheet.create({
   inputIcon: { width: 28, textAlign: "center", opacity: 0.7 },
   input: { flex: 1, color: "#111827", fontSize: 15, paddingHorizontal: 8 },
 
-  eyeBtn: { position: "absolute", right: 10, height: "100%", justifyContent: "center" },
+  eyeBtn: {
+    position: "absolute",
+    right: 10,
+    height: "100%",
+    justifyContent: "center",
+  },
   eyeText: { fontSize: 16 },
 
   hint: { marginTop: 6, marginLeft: 6, color: "#9CA3AF", fontSize: 12 },
@@ -370,7 +453,12 @@ const styles = StyleSheet.create({
 
   footerRow: { flexDirection: "row", justifyContent: "center", marginTop: 10 },
   footerText: { color: "rgba(255,255,255,0.9)", fontSize: 13 },
-  footerLink: { color: "#fff", fontWeight: "900", fontSize: 13, textDecorationLine: "underline" },
+  footerLink: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 13,
+    textDecorationLine: "underline",
+  },
 
   pressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
 
@@ -399,7 +487,12 @@ const styles = StyleSheet.create({
   mailIcon: { fontSize: 34, color: "#fff" },
 
   successTitle: { fontSize: 22, fontWeight: "900", color: "#111827" },
-  successText: { textAlign: "center", color: "#6B7280", marginTop: 8, lineHeight: 20 },
+  successText: {
+    textAlign: "center",
+    color: "#6B7280",
+    marginTop: 8,
+    lineHeight: 20,
+  },
   emailHighlight: { color: "#1db95b", fontWeight: "900" },
 
   stepsBox: {
@@ -414,5 +507,10 @@ const styles = StyleSheet.create({
   stepsTitle: { fontWeight: "900", color: "#111827", marginBottom: 6 },
   stepItem: { color: "#6B7280", marginTop: 2 },
 
-  smallNote: { color: "#9CA3AF", fontSize: 12, textAlign: "center", marginTop: 12 },
+  smallNote: {
+    color: "#9CA3AF",
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 12,
+  },
 });

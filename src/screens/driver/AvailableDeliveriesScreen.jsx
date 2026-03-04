@@ -13,33 +13,26 @@
  * - Caching for instant load
  */
 
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-} from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useIsFocused } from "@react-navigation/native";
+import * as Location from "expo-location";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
   ActivityIndicator,
-  RefreshControl,
-  Dimensions,
-  Alert,
-  FlatList,
   Animated,
-  Platform,
+  Dimensions,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FreeMapView from "../../components/maps/FreeMapView";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Location from "expo-location";
 import { API_BASE_URL } from "../../constants/api";
-import { getOSRMRoute } from "../../services/mapService";
+import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -49,9 +42,9 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 const CACHE_KEY = "available_deliveries_cache";
 const CACHE_EXPIRY = 60000; // 1 minute cache
-const MOVEMENT_THRESHOLD_METERS = 50; // Minimum distance to trigger refresh
-const LOCATION_UPDATE_INTERVAL = 3000; // 3 seconds
-const SAFETY_REFRESH_INTERVAL = 60000; // 60 second fallback
+const DATA_REFRESH_THRESHOLD = 100; // Only fetch API data when driver moves 100m+
+const LIVE_TRACKING_INTERVAL = 3000; // 3 seconds - smooth driver marker updates
+const SAFETY_REFRESH_INTERVAL = 120000; // 120 second fallback (was 60s)
 
 // Default driver location (Kinniya, Sri Lanka)
 const DEFAULT_DRIVER_LOCATION = {
@@ -60,7 +53,8 @@ const DEFAULT_DRIVER_LOCATION = {
 };
 
 // Carto Voyager tiles (FREE - no API key needed)
-const CARTO_TILE_URL = "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png";
+const CARTO_TILE_URL =
+  "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png";
 
 // ============================================================================
 // CACHE HELPERS
@@ -85,7 +79,7 @@ const saveCacheData = async (data) => {
   try {
     await AsyncStorage.setItem(
       CACHE_KEY,
-      JSON.stringify({ data, timestamp: Date.now() })
+      JSON.stringify({ data, timestamp: Date.now() }),
     );
   } catch (e) {
     console.warn("Cache save error:", e);
@@ -115,6 +109,14 @@ const calculateDistance = (lat1, lng1, lat2, lng2) => {
 // ============================================================================
 
 export default function AvailableDeliveriesScreen({ navigation }) {
+  const isFocused = useIsFocused();
+  const isFocusedRef = useRef(true);
+
+  // Keep ref in sync (so callbacks see latest value without re-creating)
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
+
   // Initialize with cached data for instant display
   const [deliveries, setDeliveries] = useState([]);
   const [declinedIds, setDeclinedIds] = useState(new Set());
@@ -160,7 +162,9 @@ export default function AvailableDeliveriesScreen({ navigation }) {
     const cached = await loadCachedData();
     if (cached) {
       setDeliveries(cached.deliveries || []);
-      setCurrentRoute(cached.currentRoute || { total_stops: 0, active_deliveries: 0 });
+      setCurrentRoute(
+        cached.currentRoute || { total_stops: 0, active_deliveries: 0 },
+      );
       if (cached.driverLocation) setDriverLocation(cached.driverLocation);
       setHasCompletedFirstFetch(true);
       setInitialLoading(false);
@@ -178,9 +182,10 @@ export default function AvailableDeliveriesScreen({ navigation }) {
     // Start location tracking every 3 seconds
     startLocationTracking();
 
-    // Safety fallback refresh every 60 seconds
+    // Safety fallback refresh every 120 seconds (only when focused)
     dataFetchIntervalRef.current = setInterval(() => {
-      console.log("[DATA REFRESH] Safety fallback check (60s interval)...");
+      if (!isFocusedRef.current) return;
+      console.log("[DATA REFRESH] Safety fallback check (120s interval)...");
       fetchDeliveriesWithCurrentLocation(true);
     }, SAFETY_REFRESH_INTERVAL);
   };
@@ -232,12 +237,13 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") return;
 
-      // Watch position changes
+      // Watch position: fires every 3s for smooth live tracking
+      // distanceInterval: 0 so marker updates continuously
       locationSubscriptionRef.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
-          timeInterval: LOCATION_UPDATE_INTERVAL,
-          distanceInterval: 10, // Update if moved 10 meters
+          timeInterval: LIVE_TRACKING_INTERVAL, // 3 seconds
+          distanceInterval: 0, // Always fire for smooth marker updates
         },
         (position) => {
           const location = {
@@ -245,20 +251,23 @@ export default function AvailableDeliveriesScreen({ navigation }) {
             longitude: position.coords.longitude,
           };
 
+          // Always update driver marker on map (smooth live tracking every 3s)
           setDriverLocation(location);
 
-          // Check if driver moved significantly since last API fetch
+          // Only fetch API data when moved 100m+ from last fetch
           if (lastFetchLocationRef.current) {
             const distanceMoved = calculateDistance(
               lastFetchLocationRef.current.latitude,
               lastFetchLocationRef.current.longitude,
               location.latitude,
-              location.longitude
+              location.longitude,
             );
 
-            if (distanceMoved >= MOVEMENT_THRESHOLD_METERS) {
+            if (distanceMoved >= DATA_REFRESH_THRESHOLD) {
+              // Only trigger API refresh when this tab is focused
+              if (!isFocusedRef.current) return;
               console.log(
-                `[LOCATION] 🚗 Driver moved ${distanceMoved.toFixed(0)}m (threshold: ${MOVEMENT_THRESHOLD_METERS}m) - Triggering refresh`
+                `[LOCATION] 🚗 Driver moved ${distanceMoved.toFixed(0)}m (threshold: ${DATA_REFRESH_THRESHOLD}m) - Triggering refresh`,
               );
               lastFetchLocationRef.current = location;
               if (fetchPendingDeliveriesRef.current) {
@@ -266,7 +275,7 @@ export default function AvailableDeliveriesScreen({ navigation }) {
               }
             }
           }
-        }
+        },
       );
     } catch (err) {
       console.error("[LOCATION] Watch error:", err);
@@ -285,7 +294,7 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       lastFetchLocationRef.current = location;
       await fetchPendingDeliveriesWithLocation(location, isBackgroundRefresh);
     },
-    []
+    [],
   );
 
   // ============================================================================
@@ -297,23 +306,26 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       const token = await AsyncStorage.getItem("token");
       const currentLoc = driverLocation || DEFAULT_DRIVER_LOCATION;
 
-      const res = await fetch(
+      const res = await rateLimitedFetch(
         `${API_BASE_URL}/driver/deliveries/pickups?driver_latitude=${currentLoc.latitude}&driver_longitude=${currentLoc.longitude}`,
         {
           headers: { Authorization: `Bearer ${token}` },
-        }
+        },
       );
 
       if (res.ok) {
         const data = await res.json();
         if (!data.pickups || data.pickups.length === 0) {
-          const activeRes = await fetch(`${API_BASE_URL}/driver/deliveries/active`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          const activeRes = await rateLimitedFetch(
+            `${API_BASE_URL}/driver/deliveries/active`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
           if (activeRes.ok) {
             const activeData = await activeRes.json();
             const hasDeliveringOrders = activeData.deliveries?.some((d) =>
-              ["picked_up", "on_the_way", "at_customer"].includes(d.status)
+              ["picked_up", "on_the_way", "at_customer"].includes(d.status),
             );
             if (hasDeliveringOrders) {
               setInDeliveringMode(true);
@@ -333,7 +345,7 @@ export default function AvailableDeliveriesScreen({ navigation }) {
 
   const fetchPendingDeliveriesWithLocation = async (
     location,
-    showLoading = true
+    showLoading = true,
   ) => {
     // Cancel any pending request
     if (abortControllerRef.current) {
@@ -355,7 +367,7 @@ export default function AvailableDeliveriesScreen({ navigation }) {
 
       console.log("[FETCH] Requesting available deliveries from:", url);
 
-      const res = await fetch(url, {
+      const res = await rateLimitedFetch(url, {
         headers: { Authorization: `Bearer ${token}` },
         signal: abortControllerRef.current.signal,
       });
@@ -460,7 +472,7 @@ export default function AvailableDeliveriesScreen({ navigation }) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),
-        }
+        },
       );
 
       const data = await res.json();
@@ -524,7 +536,9 @@ export default function AvailableDeliveriesScreen({ navigation }) {
 
   // Sort deliveries: non-declined first, then declined
   const sortedDeliveries = useMemo(() => {
-    const nonDeclined = deliveries.filter((d) => !declinedIds.has(d.delivery_id));
+    const nonDeclined = deliveries.filter(
+      (d) => !declinedIds.has(d.delivery_id),
+    );
     const declined = deliveries.filter((d) => declinedIds.has(d.delivery_id));
     return [...nonDeclined, ...declined];
   }, [deliveries, declinedIds]);
@@ -598,24 +612,6 @@ export default function AvailableDeliveriesScreen({ navigation }) {
         </Animated.View>
       )}
 
-      {/* WebSocket Status Indicator */}
-      <View
-        style={[
-          styles.socketIndicator,
-          isSocketConnected ? styles.socketConnected : styles.socketDisconnected,
-        ]}
-      >
-        <View
-          style={[
-            styles.socketDot,
-            isSocketConnected ? styles.socketDotConnected : styles.socketDotDisconnected,
-          ]}
-        />
-        <Text style={styles.socketText}>
-          {isSocketConnected ? "Live" : "Offline"}
-        </Text>
-      </View>
-
       {/* Error Banner */}
       {fetchError && (
         <View style={styles.errorBanner}>
@@ -663,7 +659,7 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       {/* Content */}
       {inDeliveringMode ? (
         <View style={styles.deliveringContainer}>
-          <Text style={styles.deliveringEmoji}>🚗</Text>
+          <Text style={styles.deliveringEmoji}></Text>
           <Text style={styles.deliveringTitle}>Currently Delivering</Text>
           <Text style={styles.deliveringSubtitle}>
             Complete current deliveries first
@@ -672,7 +668,9 @@ export default function AvailableDeliveriesScreen({ navigation }) {
             style={styles.goToActiveBtn}
             onPress={() => navigation.navigate("Active")}
           >
-            <Text style={styles.goToActiveBtnText}>Go to Active Deliveries</Text>
+            <Text style={styles.goToActiveBtnText}>
+              Go to Active Deliveries
+            </Text>
           </Pressable>
         </View>
       ) : initialLoading || !hasCompletedFirstFetch || isLoadingAfterAccept ? (
@@ -681,7 +679,9 @@ export default function AvailableDeliveriesScreen({ navigation }) {
           <SkeletonCard withHeartbeat={isLoadingAfterAccept} />
           <SkeletonCard withHeartbeat={isLoadingAfterAccept} />
           {isLoadingAfterAccept && (
-            <Text style={styles.loadingText}>Loading available deliveries...</Text>
+            <Text style={styles.loadingText}>
+              Loading available deliveries...
+            </Text>
           )}
         </ScrollView>
       ) : deliveries.length === 0 ? (
@@ -698,12 +698,13 @@ export default function AvailableDeliveriesScreen({ navigation }) {
               style={styles.refreshBtn}
               onPress={() => {
                 setIsLoadingAfterAccept(true);
-                fetchPendingDeliveriesWithLocation(driverLocation, false).finally(
-                  () => setIsLoadingAfterAccept(false)
-                );
+                fetchPendingDeliveriesWithLocation(
+                  driverLocation,
+                  false,
+                ).finally(() => setIsLoadingAfterAccept(false));
               }}
             >
-              <Text style={styles.refreshBtnText}>🔄 Refresh</Text>
+              <Text style={styles.refreshBtnText}>Refresh</Text>
             </Pressable>
             {currentRoute.active_deliveries > 0 && (
               <Pressable
@@ -735,46 +736,6 @@ export default function AvailableDeliveriesScreen({ navigation }) {
           contentContainerStyle={{ paddingBottom: 100 }}
         />
       )}
-
-      {/* Bottom Navigation */}
-      <SafeAreaView edges={["bottom"]} style={styles.bottomNav}>
-        <View style={styles.bottomNavContent}>
-          <Pressable
-            style={styles.navItem}
-            onPress={() => navigation.navigate("Dashboard")}
-          >
-            <Text style={styles.navIcon}>🏠</Text>
-            <Text style={styles.navLabel}>Home</Text>
-          </Pressable>
-          <Pressable style={[styles.navItem, styles.navItemActive]}>
-            <Text style={styles.navIcon}>📋</Text>
-            <Text style={[styles.navLabel, styles.navLabelActive]}>Orders</Text>
-          </Pressable>
-          <Pressable
-            style={styles.navItem}
-            onPress={() => navigation.navigate("Active")}
-          >
-            <View style={styles.navIconWrap}>
-              <Text style={styles.navIcon}>📍</Text>
-              {currentRoute.active_deliveries > 0 && (
-                <View style={styles.navBadge}>
-                  <Text style={styles.navBadgeText}>
-                    {currentRoute.active_deliveries}
-                  </Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.navLabel}>Active</Text>
-          </Pressable>
-          <Pressable
-            style={styles.navItem}
-            onPress={() => navigation.navigate("Profile")}
-          >
-            <Text style={styles.navIcon}>👤</Text>
-            <Text style={styles.navLabel}>Profile</Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
     </View>
   );
 }
@@ -824,7 +785,7 @@ function DeliveryCard({
   const mapRef = useRef(null);
   const totalItems = order_items.reduce(
     (sum, item) => sum + (item.quantity || 0),
-    0
+    0,
   );
 
   // Earnings calculation
@@ -878,12 +839,13 @@ function DeliveryCard({
         longitude: coord[0],
       })) || [];
 
-  const restaurantToCustomerPath = restaurant_to_customer_route?.encoded_polyline
-    ? decodePolyline(restaurant_to_customer_route.encoded_polyline)
-    : restaurant_to_customer_route?.coordinates?.map((coord) => ({
-        latitude: coord[1],
-        longitude: coord[0],
-      })) || [];
+  const restaurantToCustomerPath =
+    restaurant_to_customer_route?.encoded_polyline
+      ? decodePolyline(restaurant_to_customer_route.encoded_polyline)
+      : restaurant_to_customer_route?.coordinates?.map((coord) => ({
+          latitude: coord[1],
+          longitude: coord[0],
+        })) || [];
 
   const hasPolylineData =
     driverToRestaurantPath.length > 0 || restaurantToCustomerPath.length > 0;
@@ -931,16 +893,28 @@ function DeliveryCard({
   const driverToRestaurantCurved = useMemo(() => {
     if (!driverLocation || !restaurant) return [];
     return generateCurvedPath(
-      { latitude: driverLocation.latitude, longitude: driverLocation.longitude },
-      { latitude: parseFloat(restaurant.latitude), longitude: parseFloat(restaurant.longitude) }
+      {
+        latitude: driverLocation.latitude,
+        longitude: driverLocation.longitude,
+      },
+      {
+        latitude: parseFloat(restaurant.latitude),
+        longitude: parseFloat(restaurant.longitude),
+      },
     );
   }, [driverLocation, restaurant, generateCurvedPath]);
 
   const restaurantToCustomerCurved = useMemo(() => {
     if (!restaurant || !customer) return [];
     return generateCurvedPath(
-      { latitude: parseFloat(restaurant.latitude), longitude: parseFloat(restaurant.longitude) },
-      { latitude: parseFloat(customer.latitude), longitude: parseFloat(customer.longitude) }
+      {
+        latitude: parseFloat(restaurant.latitude),
+        longitude: parseFloat(restaurant.longitude),
+      },
+      {
+        latitude: parseFloat(customer.latitude),
+        longitude: parseFloat(customer.longitude),
+      },
     );
   }, [restaurant, customer, generateCurvedPath]);
 
@@ -985,7 +959,9 @@ function DeliveryCard({
         <View style={styles.declinedBanner}>
           <Text style={styles.declinedBannerIcon}>⏱️</Text>
           <Text style={styles.declinedBannerText}>Moved to bottom</Text>
-          <Text style={styles.declinedBannerHint}>Still available to accept</Text>
+          <Text style={styles.declinedBannerHint}>
+            Still available to accept
+          </Text>
         </View>
       )}
 
@@ -1004,71 +980,107 @@ function DeliveryCard({
             scrollEnabled={false}
             zoomEnabled={false}
             markers={[
-              ...(driverLocation ? [{
-                id: 'driver',
-                coordinate: {
-                  latitude: driverLocation.latitude,
-                  longitude: driverLocation.longitude,
-                },
-                type: 'driver',
-                emoji: '🛵',
-              }] : []),
+              ...(driverLocation
+                ? [
+                    {
+                      id: "driver",
+                      coordinate: {
+                        latitude: driverLocation.latitude,
+                        longitude: driverLocation.longitude,
+                      },
+                      type: "driver",
+                      emoji: "🛵",
+                    },
+                  ]
+                : []),
               {
-                id: 'restaurant',
+                id: "restaurant",
                 coordinate: {
                   latitude: parseFloat(restaurant.latitude),
                   longitude: parseFloat(restaurant.longitude),
                 },
-                type: 'restaurant',
-                emoji: '🏪',
+                type: "restaurant",
+                emoji: "🏪",
               },
               {
-                id: 'customer',
+                id: "customer",
                 coordinate: {
                   latitude: parseFloat(customer.latitude),
                   longitude: parseFloat(customer.longitude),
                 },
-                type: 'customer',
-                emoji: '📍',
+                type: "customer",
+                emoji: "📍",
               },
             ]}
             polylines={[
-              ...(showRoutes && hasPolylineData && driverToRestaurantPath.length > 1 ? [{
-                id: 'driverToRestaurant',
-                coordinates: driverToRestaurantPath,
-                strokeColor: '#1a1a1a',
-                strokeWidth: 4,
-              }] : []),
-              ...(showRoutes && hasPolylineData && restaurantToCustomerPath.length > 1 ? [{
-                id: 'restaurantToCustomer',
-                coordinates: restaurantToCustomerPath,
-                strokeColor: '#1a1a1a',
-                strokeWidth: 3,
-              }] : []),
-              ...(showRoutes && !hasPolylineData && driverToRestaurantCurved.length > 0 ? [{
-                id: 'driverToRestaurantCurved',
-                coordinates: driverToRestaurantCurved,
-                strokeColor: '#1a1a1a',
-                strokeWidth: 4,
-              }] : []),
-              ...(showRoutes && !hasPolylineData && restaurantToCustomerCurved.length > 0 ? [{
-                id: 'restaurantToCustomerCurved',
-                coordinates: restaurantToCustomerCurved,
-                strokeColor: '#1a1a1a',
-                strokeWidth: 3,
-              }] : []),
-              ...(isStackedDelivery && driverToRestaurantCurved.length > 0 ? [{
-                id: 'stackedDriverToRestaurant',
-                coordinates: driverToRestaurantCurved,
-                strokeColor: '#1a1a1a',
-                strokeWidth: 4,
-              }] : []),
-              ...(isStackedDelivery && restaurantToCustomerCurved.length > 0 ? [{
-                id: 'stackedRestaurantToCustomer',
-                coordinates: restaurantToCustomerCurved,
-                strokeColor: '#1a1a1a',
-                strokeWidth: 4,
-              }] : []),
+              ...(showRoutes &&
+              hasPolylineData &&
+              driverToRestaurantPath.length > 1
+                ? [
+                    {
+                      id: "driverToRestaurant",
+                      coordinates: driverToRestaurantPath,
+                      strokeColor: "#1a1a1a",
+                      strokeWidth: 4,
+                    },
+                  ]
+                : []),
+              ...(showRoutes &&
+              hasPolylineData &&
+              restaurantToCustomerPath.length > 1
+                ? [
+                    {
+                      id: "restaurantToCustomer",
+                      coordinates: restaurantToCustomerPath,
+                      strokeColor: "#1a1a1a",
+                      strokeWidth: 3,
+                    },
+                  ]
+                : []),
+              ...(showRoutes &&
+              !hasPolylineData &&
+              driverToRestaurantCurved.length > 0
+                ? [
+                    {
+                      id: "driverToRestaurantCurved",
+                      coordinates: driverToRestaurantCurved,
+                      strokeColor: "#1a1a1a",
+                      strokeWidth: 4,
+                    },
+                  ]
+                : []),
+              ...(showRoutes &&
+              !hasPolylineData &&
+              restaurantToCustomerCurved.length > 0
+                ? [
+                    {
+                      id: "restaurantToCustomerCurved",
+                      coordinates: restaurantToCustomerCurved,
+                      strokeColor: "#1a1a1a",
+                      strokeWidth: 3,
+                    },
+                  ]
+                : []),
+              ...(isStackedDelivery && driverToRestaurantCurved.length > 0
+                ? [
+                    {
+                      id: "stackedDriverToRestaurant",
+                      coordinates: driverToRestaurantCurved,
+                      strokeColor: "#1a1a1a",
+                      strokeWidth: 4,
+                    },
+                  ]
+                : []),
+              ...(isStackedDelivery && restaurantToCustomerCurved.length > 0
+                ? [
+                    {
+                      id: "stackedRestaurantToCustomer",
+                      coordinates: restaurantToCustomerCurved,
+                      strokeColor: "#1a1a1a",
+                      strokeWidth: 4,
+                    },
+                  ]
+                : []),
             ]}
           />
         ) : (
@@ -1114,7 +1126,9 @@ function DeliveryCard({
         {isStackedDelivery && Number(bonus_amount) > 0 && (
           <View style={styles.bonusBox}>
             <Text style={styles.bonusLabel}>Bonus For This Delivery</Text>
-            <Text style={styles.bonusValue}>+Rs.{Number(bonus_amount).toFixed(2)}</Text>
+            <Text style={styles.bonusValue}>
+              +Rs.{Number(bonus_amount).toFixed(2)}
+            </Text>
           </View>
         )}
 
@@ -1165,7 +1179,8 @@ function DeliveryCard({
             </View>
             <View style={styles.timelineContent}>
               <Text style={styles.timelineLabel}>
-                Pickup: <Text style={styles.timelineName}>{restaurant?.name}</Text>
+                Pickup:{" "}
+                <Text style={styles.timelineName}>{restaurant?.name}</Text>
               </Text>
               <Text style={styles.timelineAddress} numberOfLines={2}>
                 {restaurant?.address}
@@ -1182,7 +1197,10 @@ function DeliveryCard({
             </View>
             <View style={styles.timelineContent}>
               <Text style={styles.timelineLabel}>
-                Drop-off: <Text style={styles.timelineName}>{customer?.name || "Customer"}</Text>
+                Drop-off:{" "}
+                <Text style={styles.timelineName}>
+                  {customer?.name || "Customer"}
+                </Text>
               </Text>
               <Text style={styles.timelineAddress} numberOfLines={2}>
                 {customer?.address || "No address"}
@@ -1195,7 +1213,9 @@ function DeliveryCard({
         {totalItems > 0 && (
           <View style={styles.badgesRow}>
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>🛒 {totalItems} item{totalItems !== 1 ? "s" : ""}</Text>
+              <Text style={styles.badgeText}>
+                🛒 {totalItems} item{totalItems !== 1 ? "s" : ""}
+              </Text>
             </View>
             <View style={styles.badge}>
               <Text style={styles.badgeText}>#{order_number}</Text>
@@ -1223,7 +1243,9 @@ function DeliveryCard({
           ) : (
             <>
               <Text style={styles.acceptBtnText}>
-                {isStackedDelivery ? "Accept Stacked Delivery" : "Accept Delivery"}
+                {isStackedDelivery
+                  ? "Accept Stacked Delivery"
+                  : "Accept Delivery"}
               </Text>
               <Text style={styles.acceptBtnArrow}>→</Text>
             </>
@@ -1255,7 +1277,7 @@ function SkeletonCard({ withHeartbeat = false }) {
             duration: 600,
             useNativeDriver: true,
           }),
-        ])
+        ]),
       ).start();
     }
   }, [withHeartbeat]);
@@ -1279,16 +1301,31 @@ function SkeletonCard({ withHeartbeat = false }) {
         <View style={styles.skeletonEarningsRow}>
           <View style={styles.skeletonEarningsLeft}>
             <View style={[styles.skeletonLine, { width: 100, height: 28 }]} />
-            <View style={[styles.skeletonLine, { width: 130, height: 14, marginTop: 6 }]} />
+            <View
+              style={[
+                styles.skeletonLine,
+                { width: 130, height: 14, marginTop: 6 },
+              ]}
+            />
           </View>
           <View style={styles.skeletonEarningsRight}>
             <View style={[styles.skeletonBadge, { width: 80, height: 28 }]} />
-            <View style={[styles.skeletonBadge, { width: 80, height: 28, marginTop: 6 }]} />
+            <View
+              style={[
+                styles.skeletonBadge,
+                { width: 80, height: 28, marginTop: 6 },
+              ]}
+            />
           </View>
         </View>
 
         {/* Route Header */}
-        <View style={[styles.skeletonLine, { width: 110, height: 16, marginBottom: 16 }]} />
+        <View
+          style={[
+            styles.skeletonLine,
+            { width: 110, height: 16, marginBottom: 16 },
+          ]}
+        />
 
         {/* Timeline */}
         <View style={styles.skeletonTimeline}>
@@ -1297,8 +1334,18 @@ function SkeletonCard({ withHeartbeat = false }) {
             <View style={styles.skeletonTimelineIcon} />
             <View style={styles.skeletonTimelineContent}>
               <View style={[styles.skeletonLine, { width: 60, height: 12 }]} />
-              <View style={[styles.skeletonLine, { width: 160, height: 16, marginTop: 4 }]} />
-              <View style={[styles.skeletonLine, { width: 200, height: 14, marginTop: 4 }]} />
+              <View
+                style={[
+                  styles.skeletonLine,
+                  { width: 160, height: 16, marginTop: 4 },
+                ]}
+              />
+              <View
+                style={[
+                  styles.skeletonLine,
+                  { width: 200, height: 14, marginTop: 4 },
+                ]}
+              />
             </View>
           </View>
 
@@ -1307,8 +1354,18 @@ function SkeletonCard({ withHeartbeat = false }) {
             <View style={styles.skeletonTimelineIcon} />
             <View style={styles.skeletonTimelineContent}>
               <View style={[styles.skeletonLine, { width: 60, height: 12 }]} />
-              <View style={[styles.skeletonLine, { width: 130, height: 16, marginTop: 4 }]} />
-              <View style={[styles.skeletonLine, { width: 180, height: 14, marginTop: 4 }]} />
+              <View
+                style={[
+                  styles.skeletonLine,
+                  { width: 130, height: 16, marginTop: 4 },
+                ]}
+              />
+              <View
+                style={[
+                  styles.skeletonLine,
+                  { width: 180, height: 14, marginTop: 4 },
+                ]}
+              />
             </View>
           </View>
         </View>

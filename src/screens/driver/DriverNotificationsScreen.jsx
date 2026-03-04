@@ -1,63 +1,331 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+﻿import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useIsFocused } from "@react-navigation/native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
+import { API_URL } from "../../config/env";
+import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
-export default function DriverNotificationsScreen() {
-  const notifications = [];
+const FILTER_TABS = ["all"];
+
+function getNotifIcon(type) {
+  switch (type) {
+    case "new_delivery":
+    case "order_assigned":
+      return "";
+    case "order_ready":
+      return "";
+    case "reminder":
+      return "";
+    default:
+      return "";
+  }
+}
+
+export default function DriverNotificationsScreen({ navigation }) {
+  const isFocused = useIsFocused();
+  const isFocusedRef = useRef(true);
+
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
+
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState("all");
+  const [driverId, setDriverId] = useState(null);
+
+  useEffect(() => {
+    const getDriver = async () => {
+      const token = await AsyncStorage.getItem("token");
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split(".")[1]));
+          const uid =
+            payload.sub || payload.id || payload.userId || payload.user_id;
+          setDriverId(uid);
+        } catch {}
+      }
+    };
+    getDriver();
+  }, []);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem("token");
+      const res = await rateLimitedFetch(`${API_URL}/driver/notifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNotifications(data.notifications || []);
+      }
+    } catch (e) {
+      console.error("Fetch notifications error:", e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    // Poll every 60 seconds (was 15s), only when this screen is visible
+    const interval = setInterval(() => {
+      if (isFocusedRef.current) fetchNotifications();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const handleNotificationPress = (notification) => {
+    // notification_log is read-only, no mark-as-read
+    try {
+      // notification_log uses 'data' instead of 'metadata'
+      const metadata = notification.data
+        ? typeof notification.data === "string"
+          ? JSON.parse(notification.data)
+          : notification.data
+        : notification.metadata
+          ? typeof notification.metadata === "string"
+            ? JSON.parse(notification.metadata)
+            : notification.metadata
+          : {};
+      if (metadata.delivery_id || metadata.order_id) {
+        navigation.navigate("ActiveDeliveries");
+      }
+    } catch {}
+  };
+
+  // notification_log has no is_read field - show all
+  const filtered = notifications;
+
+  const unreadCount = 0;
+
+  const renderItem = ({ item }) => (
+    <TouchableOpacity
+      style={[styles.notifCard]}
+      onPress={() => handleNotificationPress(item)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.notifRow}>
+        <View style={styles.notifIconWrap}>
+          <Text style={styles.notifIconText}>{getNotifIcon(item.type)}</Text>
+        </View>
+        <View style={styles.notifContent}>
+          <View style={styles.notifTitleRow}>
+            <Text style={[styles.notifTitle]} numberOfLines={2}>
+              {item.title}
+            </Text>
+          </View>
+          <Text style={[styles.notifMessage]} numberOfLines={2}>
+            {item.body || item.message}
+          </Text>
+          <Text style={styles.notifTime}>
+            {new Date(item.created_at).toLocaleString()}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Notifications</Text>
-        
-        {notifications.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No notifications</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={notifications}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <View style={styles.notificationCard}>
-                <Text>{item.message}</Text>
-              </View>
-            )}
-          />
-        )}
+      <DriverScreenHeader
+        title="Notifications"
+        rightIcon="refresh"
+        onBackPress={() => navigation.goBack()}
+        onRightPress={() => {
+          setRefreshing(true);
+          fetchNotifications();
+        }}
+      />
+
+      {/* Filter Tabs */}
+      <View style={styles.tabs}>
+        {FILTER_TABS.map((tab) => {
+          const count = notifications.length;
+          return (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.tab, filter === tab && styles.tabActive]}
+              onPress={() => setFilter(tab)}
+            >
+              <Text
+                style={[styles.tabText, filter === tab && styles.tabTextActive]}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)} ({count})
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
+
+      {loading ? (
+        <ActivityIndicator
+          size="large"
+          color="#3b82f6"
+          style={{ marginTop: 40 }}
+        />
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderItem}
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                fetchNotifications();
+              }}
+              colors={["#3b82f6"]}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}></Text>
+              <Text style={styles.emptyTitle}>No Notifications</Text>
+              <Text style={styles.emptyMessage}>
+                {filter === "unread"
+                  ? "You're all caught up!"
+                  : "New notifications will appear here."}
+              </Text>
+            </View>
+          }
+          ListFooterComponent={
+            <Text style={styles.footer}>Auto-refreshing every 15 seconds</Text>
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
+  container: { flex: 1, backgroundColor: "#f9fafb" },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
   },
-  content: {
-    flex: 1,
-    padding: 20,
+  headerTitle: { fontSize: 22, fontWeight: "800", color: "#111827" },
+  unreadBadge: {
+    fontSize: 12,
+    color: "#3b82f6",
+    fontWeight: "600",
+    marginTop: 2,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 20,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#666',
-  },
-  notificationCard: {
-    backgroundColor: '#fff',
-    padding: 15,
+  refreshBtn: { padding: 8 },
+  refreshIcon: { fontSize: 22, color: "#6b7280" },
+  tabs: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    padding: 4,
+    margin: 12,
     borderRadius: 10,
-    marginBottom: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  tabActive: { backgroundColor: "#3b82f6" },
+  tabText: { fontSize: 12, fontWeight: "600", color: "#6b7280" },
+  tabTextActive: { color: "#fff" },
+  list: { paddingHorizontal: 12, paddingBottom: 40 },
+  notifCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  notifUnread: { borderLeftWidth: 4, borderLeftColor: "#3b82f6" },
+  notifRow: { flexDirection: "row", gap: 12 },
+  notifIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#eff6ff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notifIconText: { fontSize: 18 },
+  notifContent: { flex: 1 },
+  notifTitleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  notifTitle: {
+    fontSize: 13,
+    color: "#6b7280",
+    fontWeight: "500",
+    flex: 1,
+    marginRight: 8,
+  },
+  notifTitleUnread: { color: "#111827", fontWeight: "700" },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#3b82f6",
+    marginTop: 4,
+  },
+  notifMessage: {
+    fontSize: 13,
+    color: "#9ca3af",
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  notifMessageUnread: { color: "#374151" },
+  notifTime: { fontSize: 11, color: "#9ca3af", marginTop: 6 },
+  empty: { alignItems: "center", paddingVertical: 60 },
+  emptyIcon: { fontSize: 48, marginBottom: 16 },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 8,
+  },
+  emptyMessage: {
+    fontSize: 14,
+    color: "#6b7280",
+    textAlign: "center",
+    paddingHorizontal: 32,
+  },
+  footer: {
+    textAlign: "center",
+    fontSize: 11,
+    color: "#9ca3af",
+    marginTop: 16,
+    marginBottom: 8,
   },
 });

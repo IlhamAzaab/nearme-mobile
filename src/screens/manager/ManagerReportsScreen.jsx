@@ -1,73 +1,255 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from "@expo/vector-icons";
+import { useState } from "react";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import ManagerDrawer from "../../components/manager/ManagerDrawer";
+import ManagerHeader from "../../components/manager/ManagerHeader";
 
-/**
- * ManagerReportsScreen - Hub for all report types
- */
+const REPORT_DRAWER_ITEMS = [
+  { route: "SalesReports", label: "Sales", icon: "trending-up-outline" },
+  { route: "DeliveryReports", label: "Delivery", icon: "car-outline" },
+  {
+    route: "RestaurantReports",
+    label: "Restaurants",
+    icon: "restaurant-outline",
+  },
+  { route: "FinancialReports", label: "Financial", icon: "calculator-outline" },
+  { route: "CustomerReports", label: "Customers", icon: "people-outline" },
+  { route: "TimeAnalytics", label: "Time Analytics", icon: "time-outline" },
+];
+
 const ManagerReportsScreen = ({ navigation }) => {
-  const reportSections = [
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const activePages = [
     {
-      title: 'Financial',
-      items: [
-        { label: 'Financial Reports', icon: '💰', screen: 'FinancialReports' },
-        { label: 'Sales Reports', icon: '📊', screen: 'SalesReports' },
-      ],
+      icon: "options-outline",
+      title: "Operations Config",
+      desc: "Configure driver earnings, fees, thresholds, and working hours",
+      iconBg: "#D1FAE5",
+      iconColor: "#059669",
+      screen: "OperationsConfig",
     },
     {
-      title: 'Operations',
-      items: [
-        { label: 'Delivery Reports', icon: '🚚', screen: 'DeliveryReports' },
-        { label: 'Restaurant Reports', icon: '🍽️', screen: 'RestaurantReports' },
-        { label: 'Customer Reports', icon: '👥', screen: 'CustomerReports' },
-      ],
-    },
-    {
-      title: 'Analytics',
-      items: [
-        { label: 'Time Analytics', icon: '⏱️', screen: 'TimeAnalytics' },
-      ],
+      icon: "bicycle-outline",
+      title: "Pending Deliveries",
+      desc: "View deliveries waiting for a driver to accept",
+      iconBg: "#FEE2E2",
+      iconColor: "#DC2626",
+      screen: "Deliveries", // tab name
+      isTab: true,
     },
   ];
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>Reports</Text>
-        <Text style={styles.subtitle}>Insights and analytics for your platform</Text>
+  const reportCards = [
+    {
+      icon: "trending-up-outline",
+      title: "Sales Reports",
+      desc: "Track daily, weekly, and monthly sales performance",
+      iconBg: "#DBEAFE",
+      iconColor: "#2563EB",
+      screen: "SalesReports",
+    },
+    {
+      icon: "car-outline",
+      title: "Delivery Reports",
+      desc: "Monitor delivery metrics and driver performance",
+      iconBg: "#EDE9FE",
+      iconColor: "#7C3AED",
+      screen: "DeliveryReports",
+    },
+    {
+      icon: "restaurant-outline",
+      title: "Restaurant Reports",
+      desc: "Analyze restaurant performance and commission reports",
+      iconBg: "#FEF3C7",
+      iconColor: "#D97706",
+      screen: "RestaurantReports",
+    },
+    {
+      icon: "card-outline",
+      title: "Financial Reports",
+      desc: "View payment summaries and commission breakdowns",
+      iconBg: "#D1FAE5",
+      iconColor: "#059669",
+      screen: "FinancialReports",
+    },
+    {
+      icon: "people-outline",
+      title: "Customer Reports",
+      desc: "Understand customer behavior and order patterns",
+      iconBg: "#FEE2E2",
+      iconColor: "#DC2626",
+      screen: "CustomerReports",
+    },
+    {
+      icon: "time-outline",
+      title: "Time-based Analytics",
+      desc: "Peak hours analysis and scheduling insights",
+      iconBg: "#E0E7FF",
+      iconColor: "#4F46E5",
+      screen: "TimeAnalytics",
+    },
+  ];
 
-        {reportSections.map((section) => (
-          <View key={section.title} style={styles.section}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            {section.items.map((item) => (
-              <TouchableOpacity
-                key={item.screen}
-                style={styles.card}
-                onPress={() => navigation.navigate(item.screen)}
-              >
-                <Text style={styles.cardIcon}>{item.icon}</Text>
-                <Text style={styles.cardLabel}>{item.label}</Text>
-                <Text style={styles.chevron}>›</Text>
-              </TouchableOpacity>
-            ))}
+  const handleNavigate = (item) => {
+    if (item.isTab) {
+      navigation.navigate("PendingDeliveries");
+    } else {
+      navigation.navigate(item.screen);
+    }
+  };
+
+  const renderCard = (item, index) => (
+    <TouchableOpacity
+      key={index}
+      style={styles.card}
+      onPress={() => handleNavigate(item)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.cardTop}>
+        <View style={[styles.cardIcon, { backgroundColor: item.iconBg }]}>
+          <Ionicons name={item.icon} size={20} color={item.iconColor} />
+        </View>
+        <Text style={styles.cardTitle}>{item.title}</Text>
+      </View>
+      <Text style={styles.cardDesc}>{item.desc}</Text>
+      <View style={styles.cardOpenRow}>
+        <Ionicons name="arrow-forward" size={14} color="#13ECB9" />
+        <Text style={styles.cardOpenText}>OPEN</Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <ManagerHeader title="Reports" onMenuPress={() => setDrawerOpen(true)} />
+      <ManagerDrawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        sectionTitle="Reports"
+        items={REPORT_DRAWER_ITEMS}
+        activeRoute="Reports"
+        navigation={navigation}
+      />
+      <ScrollView contentContainerStyle={styles.scroll}>
+        {/* Hero */}
+        <View style={styles.hero}>
+          <View style={styles.heroIconWrap}>
+            <Ionicons name="bar-chart-outline" size={32} color="#fff" />
           </View>
-        ))}
+          <Text style={styles.heroTitle}>Reports & Analytics</Text>
+          <Text style={styles.heroSubtitle}>
+            Explore detailed analytics to understand and improve your platform
+          </Text>
+        </View>
+
+        {/* Active Pages */}
+        <Text style={styles.sectionLabel}>Active Pages</Text>
+        <View style={styles.grid}>
+          {activePages.map((item, i) => renderCard(item, i))}
+        </View>
+
+        {/* Report Pages */}
+        <Text style={[styles.sectionLabel, { marginTop: 8 }]}>
+          Report Pages
+        </Text>
+        <View style={styles.grid}>
+          {reportCards.map((item, i) => renderCard(item, i))}
+        </View>
+
+        <View style={{ height: 24 }} />
       </ScrollView>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 20 },
-  title: { fontSize: 22, fontWeight: '800', color: '#1a1a1a' },
-  subtitle: { fontSize: 14, color: '#6B7280', marginTop: 4, marginBottom: 24 },
-  section: { marginBottom: 24 },
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: '#9CA3AF', textTransform: 'uppercase', marginBottom: 8 },
-  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 12, padding: 16, marginBottom: 8 },
-  cardIcon: { fontSize: 24, marginRight: 14 },
-  cardLabel: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
-  chevron: { fontSize: 22, color: '#D1D5DB' },
+  container: { flex: 1, backgroundColor: "#F8FAFC" },
+  scroll: { padding: 16 },
+
+  // Hero
+  hero: {
+    backgroundColor: "#059669",
+    borderRadius: 16,
+    padding: 24,
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  heroIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  heroTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#111816",
+    marginBottom: 6,
+  },
+  heroSubtitle: {
+    fontSize: 13,
+    color: "rgba(17,24,22,0.7)",
+    textAlign: "center",
+  },
+
+  // Section
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748B",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 10,
+  },
+
+  // Grid
+  grid: { gap: 10, marginBottom: 12 },
+
+  // Card
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 14,
+  },
+  cardTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 8,
+  },
+  cardIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cardTitle: { fontSize: 14, fontWeight: "700", color: "#111816", flex: 1 },
+  cardDesc: {
+    fontSize: 12,
+    color: "#618980",
+    lineHeight: 17,
+    marginBottom: 10,
+  },
+  cardOpenRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  cardOpenText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#13ECB9",
+    letterSpacing: 1,
+  },
 });
 
 export default ManagerReportsScreen;

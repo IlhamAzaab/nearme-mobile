@@ -25,15 +25,44 @@ import alarmService from "./alarmService";
 
 // Detect if running in Expo Go (no native push support since SDK 53)
 const isExpoGo = Constants.appOwnership === "expo";
-
+// Map notification types to the roles they are intended for.
+// Types not listed here are considered role-agnostic (shown to everyone).
+const NOTIFICATION_ROLE_MAP = {
+  new_order: "admin",
+  new_delivery: "driver",
+  unassigned_delivery_alert: "manager",
+  payment_received: "driver",
+  restaurant_approval: "admin",
+  admin_approval: "admin",
+  driver_approval: "driver",
+  order_update: "customer",
+};
 // ─── FOREGROUND HANDLER ───────────────────────────────────────
 // Controls what happens when a notification arrives while app is OPEN.
 // Alarm pulse notifications (isAlarm=true) suppress the banner so the
 // in-app modal stays clean, but we still play the sound.
+// Role-mismatched notifications are silently suppressed.
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const data = notification.request.content.data || {};
     const isAlarmPulse = data.isAlarm === "true" || data.isAlarm === true;
+
+    // Suppress notifications not intended for the current user role
+    const type = data?.type;
+    if (type && NOTIFICATION_ROLE_MAP[type]) {
+      const currentRole = await AsyncStorage.getItem("role");
+      if (currentRole && currentRole !== NOTIFICATION_ROLE_MAP[type]) {
+        console.log(
+          `[Push] Suppressing banner for "${type}" — not for role "${currentRole}"`,
+        );
+        return {
+          shouldShowAlert: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+        };
+      }
+    }
+
     return {
       shouldShowAlert: !isAlarmPulse, // no banner for alarm pulses
       shouldPlaySound: true, // always play sound
@@ -154,8 +183,22 @@ class PushNotificationService {
     this.foregroundSubscription = null;
     this.responseSubscription = null;
     this.isInitialized = false;
+    this._userRole = null; // stored on initialize
 
     this._onUrgentNotification = null; // callback for in-app modal
+  }
+
+  /**
+   * Check whether a notification is relevant for the current user role.
+   * Returns true if the notification should be processed, false if it should be ignored.
+   */
+  _isNotificationForCurrentRole(data) {
+    const type = data?.type;
+    if (!type) return true; // no type → allow
+    const requiredRole = NOTIFICATION_ROLE_MAP[type];
+    if (!requiredRole) return true; // not role-specific → allow
+    if (!this._userRole) return true; // role unknown → allow (safety fallback)
+    return this._userRole === requiredRole;
   }
 
   /**
@@ -359,18 +402,24 @@ class PushNotificationService {
       console.log("[Push] Token:", expoPushToken);
       console.log("[Push] Device:", deviceId, Platform.OS);
 
-      const response = await fetch(`${API_URL}/push/register-token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
+      // Use rateLimitedFetch with retry on 429 to handle rate limits
+      const { rateLimitedFetch } = require("../utils/rateLimitedFetch");
+      const response = await rateLimitedFetch(
+        `${API_URL}/push/register-token`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            expoPushToken,
+            deviceType: Platform.OS,
+            deviceId,
+          }),
         },
-        body: JSON.stringify({
-          expoPushToken,
-          deviceType: Platform.OS,
-          deviceId,
-        }),
-      });
+        { deduplicate: false },
+      );
 
       if (response.ok) {
         const data = await response.json();
@@ -395,14 +444,19 @@ class PushNotificationService {
       const deviceId = await this.getDeviceId();
 
       if (authToken) {
-        await fetch(`${API_URL}/push/unregister-token`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${authToken}`,
+        const { rateLimitedFetch } = require("../utils/rateLimitedFetch");
+        await rateLimitedFetch(
+          `${API_URL}/push/unregister-token`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ deviceId }),
           },
-          body: JSON.stringify({ deviceId }),
-        });
+          { deduplicate: false },
+        );
       }
 
       await AsyncStorage.removeItem("expoPushToken");
@@ -431,6 +485,14 @@ class PushNotificationService {
         // IMPORTANT: Ignore alarm pulse notifications fired by this service itself.
         // They have isAlarm:"true" and would cause an infinite loop if processed.
         if (data?.isAlarm === "true" || data?.isAlarm === true) {
+          return;
+        }
+
+        // Role-based filtering: ignore notifications not meant for this user
+        if (!this._isNotificationForCurrentRole(data)) {
+          console.log(
+            `[Push] Ignoring notification type "${data?.type}" — not for role "${this._userRole}"`,
+          );
           return;
         }
 
@@ -467,6 +529,14 @@ class PushNotificationService {
         const content = response.notification.request.content;
         const notifData = content.data || {};
 
+        // Role-based filtering: ignore notifications not meant for this user
+        if (!this._isNotificationForCurrentRole(notifData)) {
+          console.log(
+            `[Push] Ignoring tapped notification type "${notifData?.type}" — not for role "${this._userRole}"`,
+          );
+          return;
+        }
+
         // Navigate based on notification type
         this.handleNotificationPress(notifData);
 
@@ -499,7 +569,15 @@ class PushNotificationService {
       const notifData = content.data || {};
 
       // Extra delay — navigation ref and modal callback must be ready
-      setTimeout(() => {
+      setTimeout(async () => {
+        // Role-based filtering: ignore notifications not meant for this user
+        if (!this._isNotificationForCurrentRole(notifData)) {
+          console.log(
+            `[Push] Ignoring initial notification type "${notifData?.type}" — not for role "${this._userRole}"`,
+          );
+          return;
+        }
+
         this.handleNotificationPress(notifData);
 
         // If urgent notification, show modal (even when app was killed)
@@ -553,7 +631,7 @@ class PushNotificationService {
         nav.navigate("DriverTabs", { screen: "Earnings" });
         break;
       case "unassigned_delivery_alert":
-        nav.navigate("ManagerPendingDeliveries");
+        nav.navigate("Reports", { screen: "PendingDeliveries" });
         break;
       case "milestone":
         // Navigate based on user screen in data
@@ -572,6 +650,10 @@ class PushNotificationService {
    */
   async initialize(authToken) {
     console.log("[Push] Initializing...");
+
+    // Store the user role so we can filter notifications by role
+    this._userRole = await AsyncStorage.getItem("role");
+    console.log("[Push] User role:", this._userRole);
 
     // Warn if running in Expo Go on Android
     if (isExpoGo && Platform.OS === "android") {
@@ -620,6 +702,7 @@ class PushNotificationService {
       this.responseSubscription = null;
     }
     this._onUrgentNotification = null;
+    this._userRole = null;
     this.isInitialized = false;
   }
 

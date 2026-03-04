@@ -670,7 +670,6 @@ export default function Orders() {
 
       {/* Main Content */}
       <View style={styles.mainContent}>
-
         {/* Filter Tabs */}
         <ScrollView
           horizontal

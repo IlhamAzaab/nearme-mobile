@@ -72,6 +72,7 @@ export default {
         },
       ],
       "@react-native-community/datetimepicker",
+      "expo-document-picker",
     ],
     experiments: {
       reactCompiler: false,

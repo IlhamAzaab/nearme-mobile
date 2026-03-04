@@ -1,25 +1,26 @@
-import React, { useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LinearGradient } from "expo-linear-gradient";
+import { useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  Pressable,
-  Alert,
   ActivityIndicator,
+  Alert,
+  Animated,
   KeyboardAvoidingView,
   Platform,
-  Animated,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { API_BASE_URL } from "../../constants/api";
 import { useAuth } from "../../app/providers/AuthProvider";
+import { API_BASE_URL } from "../../constants/api";
 import pushNotificationService from "../../services/pushNotificationService";
 
 export default function LoginScreen({ navigation }) {
   const { refreshAuthState } = useAuth();
-  
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -30,16 +31,39 @@ export default function LoginScreen({ navigation }) {
   // shake animation
   const shakeX = useRef(new Animated.Value(0)).current;
 
-  const canSubmit = useMemo(() => email.trim() && password.trim(), [email, password]);
+  const canSubmit = useMemo(
+    () => email.trim() && password.trim(),
+    [email, password],
+  );
 
   const triggerShake = () => {
     shakeX.setValue(0);
     Animated.sequence([
-      Animated.timing(shakeX, { toValue: -10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: -8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 0, duration: 60, useNativeDriver: true }),
+      Animated.timing(shakeX, {
+        toValue: -10,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 10,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: -8,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 8,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 0,
+        duration: 60,
+        useNativeDriver: true,
+      }),
     ]).start();
   };
 
@@ -67,7 +91,9 @@ export default function LoginScreen({ navigation }) {
       const data = await res.json().catch(() => ({}));
 
       console.log("🔐 Login response:", {
-        token: data?.token ? `${String(data.token).substring(0, 20)}...` : "NULL",
+        token: data?.token
+          ? `${String(data.token).substring(0, 20)}...`
+          : "NULL",
         role: data?.role,
         profileCompleted: data?.profileCompleted,
         userId: data?.userId,
@@ -77,7 +103,10 @@ export default function LoginScreen({ navigation }) {
       if (res.status === 403) {
         setIsLoading(false);
         triggerShake();
-        Alert.alert("Verify email", data?.message || "Please verify your email before logging in");
+        Alert.alert(
+          "Verify email",
+          data?.message || "Please verify your email before logging in",
+        );
         return;
       }
 
@@ -93,17 +122,22 @@ export default function LoginScreen({ navigation }) {
       if (data?.role) await AsyncStorage.setItem("role", data.role);
       await AsyncStorage.setItem("userEmail", email);
 
-      if (data?.userId) await AsyncStorage.setItem("userId", String(data.userId));
-      if (data?.userName) await AsyncStorage.setItem("userName", String(data.userName));
+      if (data?.userId)
+        await AsyncStorage.setItem("userId", String(data.userId));
+      if (data?.userName)
+        await AsyncStorage.setItem("userName", String(data.userName));
 
       // Save profile completion status for admin onboarding
-      await AsyncStorage.setItem("profileCompleted", data?.profileCompleted ? "true" : "false");
+      await AsyncStorage.setItem(
+        "profileCompleted",
+        data?.profileCompleted ? "true" : "false",
+      );
 
       // Initialize push notifications after successful login
       if (data?.token) {
-        console.log('🔔 Initializing push notifications after login...');
-        pushNotificationService.initialize(data.token).catch(err => {
-          console.warn('Push notification init error:', err);
+        console.log("🔔 Initializing push notifications after login...");
+        pushNotificationService.initialize(data.token).catch((err) => {
+          console.warn("Push notification init error:", err);
         });
       }
 
@@ -118,15 +152,21 @@ export default function LoginScreen({ navigation }) {
       console.error("Login error:", error);
       setIsLoading(false);
       triggerShake();
-      Alert.alert("Network error", "Backend connect aagala. Same Wi-Fi + IP correct ah check pannunga.");
+      Alert.alert(
+        "Network error",
+        "Backend connect aagala. Same Wi-Fi + IP correct ah check pannunga.",
+      );
     }
   }
 
   return (
-    <LinearGradient colors={["#123321", "#1db95b", "#0a1f14"]} style={styles.container}>
+    <LinearGradient
+      colors={["#123321", "#1db95b", "#0a1f14"]}
+      style={styles.container}
+    >
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         {/* Success overlay */}
         {isTransitioning && (
@@ -139,81 +179,98 @@ export default function LoginScreen({ navigation }) {
           </View>
         )}
 
-        <Animated.View style={[styles.content, { transform: [{ translateX: shakeX }] }]}>
-          {/* Logo */}
-          <View style={styles.logoWrap}>
-            <View style={styles.logoCircle}>
-              <Text style={styles.logoIcon}>🛵</Text>
-            </View>
-            <Text style={styles.appTitle}>Near Me</Text>
-            <Text style={styles.appSubtitle}>Your favorite food, fast.</Text>
-          </View>
-
-          {/* Card */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Welcome Back!</Text>
-            <Text style={styles.cardSub}>Please sign in to continue</Text>
-
-            {/* Email */}
-            <Text style={styles.label}>Username</Text>
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputIcon}>👤</Text>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                placeholder="user@example.com"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                style={styles.input}
-              />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          <Animated.View
+            style={[styles.content, { transform: [{ translateX: shakeX }] }]}
+          >
+            {/* Logo */}
+            <View style={styles.logoWrap}>
+              <View style={styles.logoCircle}>
+                <Text style={styles.logoIcon}>🛵</Text>
+              </View>
+              <Text style={styles.appTitle}>Near Me</Text>
+              <Text style={styles.appSubtitle}>Your favorite food, fast.</Text>
             </View>
 
-            {/* Password */}
-            <Text style={[styles.label, { marginTop: 12 }]}>Password</Text>
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputIcon}>🔒</Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="••••••••"
-                placeholderTextColor="#9CA3AF"
-                secureTextEntry={!showPassword}
-                style={[styles.input, { paddingRight: 48 }]}
-              />
-              <Pressable onPress={() => setShowPassword((v) => !v)} style={styles.eyeBtn}>
-                <Text style={styles.eyeText}>{showPassword ? "🙈" : "👁️"}</Text>
+            {/* Card */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Welcome Back!</Text>
+              <Text style={styles.cardSub}>Please sign in to continue</Text>
+
+              {/* Email */}
+              <Text style={styles.label}>Username</Text>
+              <View style={styles.inputWrap}>
+                <Text style={styles.inputIcon}>👤</Text>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="user@example.com"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  style={styles.input}
+                />
+              </View>
+
+              {/* Password */}
+              <Text style={[styles.label, { marginTop: 12 }]}>Password</Text>
+              <View style={styles.inputWrap}>
+                <Text style={styles.inputIcon}>🔒</Text>
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="••••••••"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry={!showPassword}
+                  style={[styles.input, { paddingRight: 48 }]}
+                />
+                <Pressable
+                  onPress={() => setShowPassword((v) => !v)}
+                  style={styles.eyeBtn}
+                >
+                  <Text style={styles.eyeText}>
+                    {showPassword ? "🙈" : "👁️"}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Button */}
+              <Pressable
+                onPress={handleLogin}
+                disabled={isLoading}
+                style={({ pressed }) => [
+                  styles.loginBtn,
+                  (pressed || isLoading) && {
+                    opacity: 0.9,
+                    transform: [{ scale: 0.99 }],
+                  },
+                ]}
+              >
+                {isLoading ? (
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator color="#fff" />
+                    <Text style={styles.loginBtnText}>Signing in...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.loginBtnText}>Log In</Text>
+                )}
               </Pressable>
             </View>
 
-            {/* Button */}
-            <Pressable
-              onPress={handleLogin}
-              disabled={isLoading}
-              style={({ pressed }) => [
-                styles.loginBtn,
-                (pressed || isLoading) && { opacity: 0.9, transform: [{ scale: 0.99 }] },
-              ]}
-            >
-              {isLoading ? (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator color="#fff" />
-                  <Text style={styles.loginBtnText}>Signing in...</Text>
-                </View>
-              ) : (
-                <Text style={styles.loginBtnText}>Log In</Text>
-              )}
-            </Pressable>
-          </View>
-
-          {/* Signup link */}
-          <View style={styles.footerRow}>
-            <Text style={styles.footerText}>Don't have an account?</Text>
-            <Pressable onPress={() => navigation.navigate("Signup")}>
-              <Text style={styles.footerLink}> Sign up here</Text>
-            </Pressable>
-          </View>
-        </Animated.View>
+            {/* Signup link */}
+            <View style={styles.footerRow}>
+              <Text style={styles.footerText}>Don't have an account?</Text>
+              <Pressable onPress={() => navigation.navigate("Signup")}>
+                <Text style={styles.footerLink}> Sign up here</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -221,6 +278,9 @@ export default function LoginScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  scrollContent: {
+    flexGrow: 1,
+  },
   content: {
     flex: 1,
     paddingHorizontal: 18,
@@ -257,10 +317,27 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     elevation: 6,
   },
-  cardTitle: { fontSize: 22, fontWeight: "900", color: "#111827", textAlign: "center" },
-  cardSub: { fontSize: 13, color: "#6B7280", textAlign: "center", marginTop: 6, marginBottom: 14 },
+  cardTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#111827",
+    textAlign: "center",
+  },
+  cardSub: {
+    fontSize: 13,
+    color: "#6B7280",
+    textAlign: "center",
+    marginTop: 6,
+    marginBottom: 14,
+  },
 
-  label: { fontSize: 13, fontWeight: "800", color: "#374151", marginLeft: 6, marginBottom: 6 },
+  label: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#374151",
+    marginLeft: 6,
+    marginBottom: 6,
+  },
 
   inputWrap: {
     flexDirection: "row",
@@ -275,7 +352,12 @@ const styles = StyleSheet.create({
   inputIcon: { width: 24, textAlign: "center", opacity: 0.6 },
   input: { flex: 1, color: "#111827", fontSize: 15, paddingHorizontal: 10 },
 
-  eyeBtn: { position: "absolute", right: 10, height: "100%", justifyContent: "center" },
+  eyeBtn: {
+    position: "absolute",
+    right: 10,
+    height: "100%",
+    justifyContent: "center",
+  },
   eyeText: { fontSize: 16 },
 
   loginBtn: {
@@ -296,7 +378,12 @@ const styles = StyleSheet.create({
 
   footerRow: { flexDirection: "row", justifyContent: "center", marginTop: 10 },
   footerText: { color: "rgba(255,255,255,0.9)", fontSize: 13 },
-  footerLink: { color: "#fff", fontWeight: "900", fontSize: 13, textDecorationLine: "underline" },
+  footerLink: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 13,
+    textDecorationLine: "underline",
+  },
 
   transitionOverlay: {
     ...StyleSheet.absoluteFillObject,

@@ -1,10 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NavigationContainer } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, AppState, StatusBar } from "react-native";
+import { Alert, AppState, Platform, StatusBar } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import UrgentNotificationModal from "../components/common/UrgentNotificationModal";
 import { API_URL } from "../config/env";
+import { CustomAlertProvider } from "../context/CustomAlertContext";
+import { OrderProvider } from "../context/OrderContext";
 import RootNavigator from "../navigation/RootNavigator";
 import orderTrackingService from "../services/orderTrackingService";
 import pushNotificationService from "../services/pushNotificationService";
@@ -12,8 +14,22 @@ import { AuthProvider } from "./providers/AuthProvider";
 import { NotificationProvider } from "./providers/NotificationProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
 
+// Safe import — requires native rebuild to work
+let NavigationBar = null;
+try {
+  NavigationBar = require("expo-navigation-bar");
+} catch {}
+
 export default function App() {
   const navigationRef = useRef(null);
+
+  // Force Android system navigation bar to black with white icons
+  useEffect(() => {
+    if (Platform.OS === "android" && NavigationBar) {
+      NavigationBar.setBackgroundColorAsync?.("#000000");
+      NavigationBar.setButtonStyleAsync?.("light");
+    }
+  }, []);
 
   // Urgent notification modal state
   const [urgentNotification, setUrgentNotification] = useState(null);
@@ -154,20 +170,22 @@ export default function App() {
         "[App] Urgent notification received:",
         notification.data?.type,
       );
-      
+
       // Check if this order has already been displayed
       if (notification.data?.orderId) {
         const alreadyDisplayed = await orderTrackingService.hasBeenDisplayed(
-          notification.data.orderId
+          notification.data.orderId,
         );
         if (alreadyDisplayed) {
-          console.log(`[App] Order ${notification.data.orderId} already displayed, skipping`);
+          console.log(
+            `[App] Order ${notification.data.orderId} already displayed, skipping`,
+          );
           return;
         }
         // Mark as displayed
         await orderTrackingService.markAsDisplayed(notification.data.orderId);
       }
-      
+
       setUrgentNotification(notification);
     });
 
@@ -207,9 +225,8 @@ export default function App() {
               : order.deliveries;
             if (delivery?.status === "placed") {
               // Check if already displayed
-              const alreadyDisplayed = await orderTrackingService.hasBeenDisplayed(
-                String(order.id)
-              );
+              const alreadyDisplayed =
+                await orderTrackingService.hasBeenDisplayed(String(order.id));
               if (!alreadyDisplayed) {
                 pendingOrder = order;
                 break;
@@ -220,7 +237,7 @@ export default function App() {
           if (pendingOrder) {
             // Mark as displayed
             await orderTrackingService.markAsDisplayed(String(pendingOrder.id));
-            
+
             // Show modal for the first pending order
             const items = pendingOrder.order_items || [];
             const itemsSummary = items
@@ -232,16 +249,18 @@ export default function App() {
               .join(", ");
 
             // Format date and time
-            const orderDate = new Date(pendingOrder.placed_at || pendingOrder.created_at);
-            const formattedDate = orderDate.toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric'
+            const orderDate = new Date(
+              pendingOrder.placed_at || pendingOrder.created_at,
+            );
+            const formattedDate = orderDate.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
             });
-            const formattedTime = orderDate.toLocaleTimeString('en-US', {
-              hour: 'numeric',
-              minute: '2-digit',
-              hour12: true
+            const formattedTime = orderDate.toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
             });
 
             setUrgentNotification({
@@ -273,17 +292,22 @@ export default function App() {
     const timer = setTimeout(initPushOnStart, 1500);
 
     // Listen for app state changes (foreground/background)
-    const appStateSubscription = AppState.addEventListener('change', async (nextAppState) => {
-      if (nextAppState === 'active') {
-        // App came to foreground - check for pending orders
-        const token = await AsyncStorage.getItem("token");
-        const role = await AsyncStorage.getItem("role");
-        if (token && role === "admin") {
-          console.log("[App] App became active, checking for pending orders...");
-          checkPendingOrders(token);
+    const appStateSubscription = AppState.addEventListener(
+      "change",
+      async (nextAppState) => {
+        if (nextAppState === "active") {
+          // App came to foreground - check for pending orders
+          const token = await AsyncStorage.getItem("token");
+          const role = await AsyncStorage.getItem("role");
+          if (token && role === "admin") {
+            console.log(
+              "[App] App became active, checking for pending orders...",
+            );
+            checkPendingOrders(token);
+          }
         }
-      }
-    });
+      },
+    );
 
     return () => {
       clearTimeout(timer);
@@ -294,30 +318,34 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor="transparent"
-        translucent={true}
-      />
-      <ThemeProvider>
-        <AuthProvider>
-          <NotificationProvider>
-            <NavigationContainer ref={navigationRef}>
-              <RootNavigator />
-              {/* Urgent notification modal - renders above everything */}
-              <UrgentNotificationModal
-                visible={!!urgentNotification}
-                title={urgentNotification?.title}
-                body={urgentNotification?.body}
-                data={urgentNotification?.data}
-                onAccept={handleAcceptUrgent}
-                onReject={handleRejectUrgent}
-                onDismiss={handleDismissUrgent}
-              />
-            </NavigationContainer>
-          </NotificationProvider>
-        </AuthProvider>
-      </ThemeProvider>
+      <CustomAlertProvider>
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor="transparent"
+          translucent={true}
+        />
+        <ThemeProvider>
+          <AuthProvider>
+            <NotificationProvider>
+              <OrderProvider>
+                <NavigationContainer ref={navigationRef}>
+                  <RootNavigator />
+                  {/* Urgent notification modal - renders above everything */}
+                  <UrgentNotificationModal
+                    visible={!!urgentNotification}
+                    title={urgentNotification?.title}
+                    body={urgentNotification?.body}
+                    data={urgentNotification?.data}
+                    onAccept={handleAcceptUrgent}
+                    onReject={handleRejectUrgent}
+                    onDismiss={handleDismissUrgent}
+                  />
+                </NavigationContainer>
+              </OrderProvider>
+            </NotificationProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </CustomAlertProvider>
     </SafeAreaProvider>
   );
 }

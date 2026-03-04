@@ -1,16 +1,22 @@
 /**
  * FreeMapView Component
- * 
+ *
  * 100% FREE - NO Google Maps SDK required!
  * Uses WebView + Leaflet + OpenStreetMap tiles
- * 
+ *
  * - OpenStreetMap tiles (FREE)
  * - OSRM routing (FREE)
  * - No API keys needed
  */
 
-import React, { forwardRef, useRef, useEffect, useState, useImperativeHandle } from "react";
-import { View, StyleSheet, ActivityIndicator, Platform } from "react-native";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
 
 // Leaflet HTML template - loads OpenStreetMap tiles
@@ -51,6 +57,21 @@ const createLeafletHTML = () => `
     .pickup-pin { background: #F59E0B; }
     .delivery-pin { background: #10B981; }
     .default-pin { background: #6B7280; }
+    
+    /* Professional red teardrop location pin */
+    .location-pin-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 48px;
+      position: relative;
+    }
+    .location-pin-svg {
+      width: 36px;
+      height: 48px;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+    }
     
     .user-location {
       width: 16px; 
@@ -133,13 +154,29 @@ const createLeafletHTML = () => `
       
       removeMarker(id);
       
-      const pinClass = type ? type + '-pin' : 'default-pin';
-      const icon = L.divIcon({
-        className: 'marker-container',
-        html: '<div class="marker-pin ' + pinClass + '">' + (emoji || '📍') + '</div>',
-        iconSize: [44, 44],
-        iconAnchor: [22, 44]
-      });
+      var icon;
+      if (type === 'location-pin') {
+        // Professional red teardrop pin
+        icon = L.divIcon({
+          className: 'location-pin-container',
+          html: '<svg class="location-pin-svg" viewBox="0 0 36 48" xmlns="http://www.w3.org/2000/svg">' +
+            '<path d="M18 0C8.06 0 0 8.06 0 18c0 12.6 18 30 18 30s18-17.4 18-30C36 8.06 27.94 0 18 0z" fill="#E53E3E"/>' +
+            '<path d="M18 1C8.61 1 1 8.61 1 18c0 5.8 3.4 12.5 8.3 19.1C13.2 42.4 17 46 18 47c1-1 4.8-4.6 8.7-9.9C31.6 30.5 35 23.8 35 18 35 8.61 27.39 1 18 1z" fill="#C53030" opacity="0.3"/>' +
+            '<circle cx="18" cy="18" r="8" fill="white"/>' +
+            '<circle cx="18" cy="18" r="4" fill="#E53E3E"/>' +
+            '</svg>',
+          iconSize: [36, 48],
+          iconAnchor: [18, 48]
+        });
+      } else {
+        var pinClass = type ? type + '-pin' : 'default-pin';
+        icon = L.divIcon({
+          className: 'marker-container',
+          html: '<div class="marker-pin ' + pinClass + '">' + (emoji || '📍') + '</div>',
+          iconSize: [44, 44],
+          iconAnchor: [22, 44]
+        });
+      }
       
       markers[id] = L.marker([lat, lng], { icon }).addTo(map);
       if (title) {
@@ -168,19 +205,22 @@ const createLeafletHTML = () => `
     }
 
     // Add polyline (route)
-    function addPolyline(id, coords, color, width) {
+    function addPolyline(id, coords, color, width, dashArray) {
       if (!map || !isMapReady || !coords || coords.length < 2) return;
       
       removePolyline(id);
       
-      const latlngs = coords.map(c => [c.latitude, c.longitude]);
-      polylines[id] = L.polyline(latlngs, { 
+      var opts = { 
         color: color || '#3B82F6', 
         weight: width || 4, 
         opacity: 0.8,
         lineCap: 'round',
         lineJoin: 'round'
-      }).addTo(map);
+      };
+      if (dashArray) { opts.dashArray = dashArray; }
+      
+      var latlngs = coords.map(c => [c.latitude, c.longitude]);
+      polylines[id] = L.polyline(latlngs, opts).addTo(map);
     }
 
     // Remove polyline
@@ -256,202 +296,226 @@ const createLeafletHTML = () => `
 // MAIN COMPONENT
 // ============================================================================
 
-const FreeMapView = forwardRef(({
-  initialRegion,
-  region,
-  style,
-  children,
-  scrollEnabled = true,
-  zoomEnabled = true,
-  showsUserLocation = false,
-  onPress,
-  onRegionChange,
-  onRegionChangeComplete,
-  onMapReady,
-  markers: markersProp = [],
-  polylines: polylinesProp = [],
-  userLocation,
-  ...props
-}, ref) => {
-  const webViewRef = useRef(null);
-  const [isReady, setIsReady] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const prevMarkersRef = useRef([]);
-  const prevPolylinesRef = useRef([]);
-
-  // Default region (Sri Lanka)
-  const defaultRegion = {
-    latitude: 7.8731,
-    longitude: 80.7718,
-    latitudeDelta: 0.05,
-    longitudeDelta: 0.05,
-  };
-
-  const currentRegion = region || initialRegion || defaultRegion;
-
-  // Calculate zoom from delta
-  const getZoomFromDelta = (delta) => {
-    const zoom = Math.round(Math.log2(360 / (delta || 0.05)));
-    return Math.min(Math.max(zoom, 1), 18);
-  };
-
-  // Inject JavaScript into WebView
-  const injectJS = (js) => {
-    if (webViewRef.current && isReady) {
-      webViewRef.current.injectJavaScript(`${js}; true;`);
-    }
-  };
-
-  // Expose methods via ref
-  useImperativeHandle(ref, () => ({
-    animateToRegion: (newRegion, duration) => {
-      injectJS(`animateToRegion(${newRegion.latitude}, ${newRegion.longitude}, ${newRegion.latitudeDelta}, ${newRegion.longitudeDelta})`);
+const FreeMapView = forwardRef(
+  (
+    {
+      initialRegion,
+      region,
+      style,
+      children,
+      scrollEnabled = true,
+      zoomEnabled = true,
+      showsUserLocation = false,
+      onPress,
+      onRegionChange,
+      onRegionChangeComplete,
+      onMapReady,
+      markers: markersProp = [],
+      polylines: polylinesProp = [],
+      userLocation,
+      ...props
     },
-    fitToCoordinates: (coordinates, options) => {
-      if (coordinates?.length > 0) {
-        const padding = options?.edgePadding?.top || 50;
-        injectJS(`fitBounds(${JSON.stringify(coordinates)}, ${padding})`);
+    ref,
+  ) => {
+    const webViewRef = useRef(null);
+    const [isReady, setIsReady] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const prevMarkersRef = useRef([]);
+    const prevPolylinesRef = useRef([]);
+
+    // Default region (Sri Lanka)
+    const defaultRegion = {
+      latitude: 7.8731,
+      longitude: 80.7718,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+    };
+
+    const currentRegion = region || initialRegion || defaultRegion;
+
+    // Calculate zoom from delta
+    const getZoomFromDelta = (delta) => {
+      const zoom = Math.round(Math.log2(360 / (delta || 0.05)));
+      return Math.min(Math.max(zoom, 1), 18);
+    };
+
+    // Inject JavaScript into WebView
+    const injectJS = (js) => {
+      if (webViewRef.current && isReady) {
+        webViewRef.current.injectJavaScript(`${js}; true;`);
       }
-    },
-    setCamera: (camera) => {
-      const lat = camera.center?.latitude || currentRegion.latitude;
-      const lng = camera.center?.longitude || currentRegion.longitude;
-      const zoom = camera.zoom || 15;
-      injectJS(`setCenter(${lat}, ${lng}, ${zoom})`);
-    },
-    getCamera: () => ({
-      center: { latitude: currentRegion.latitude, longitude: currentRegion.longitude },
-      zoom: getZoomFromDelta(currentRegion.latitudeDelta),
-    }),
-    animateCamera: (camera, options) => {
-      const lat = camera.center?.latitude || currentRegion.latitude;
-      const lng = camera.center?.longitude || currentRegion.longitude;
-      const zoom = camera.zoom || 15;
-      injectJS(`setCenter(${lat}, ${lng}, ${zoom})`);
-    },
-  }));
+    };
 
-  // Initialize map when WebView loads
-  const handleLoad = () => {
-    setTimeout(() => {
-      if (webViewRef.current) {
-        const zoom = getZoomFromDelta(currentRegion.latitudeDelta);
-        webViewRef.current.injectJavaScript(`
+    // Expose methods via ref
+    useImperativeHandle(ref, () => ({
+      animateToRegion: (newRegion, duration) => {
+        injectJS(
+          `animateToRegion(${newRegion.latitude}, ${newRegion.longitude}, ${newRegion.latitudeDelta}, ${newRegion.longitudeDelta})`,
+        );
+      },
+      fitToCoordinates: (coordinates, options) => {
+        if (coordinates?.length > 0) {
+          const padding = options?.edgePadding?.top || 50;
+          injectJS(`fitBounds(${JSON.stringify(coordinates)}, ${padding})`);
+        }
+      },
+      setCamera: (camera) => {
+        const lat = camera.center?.latitude || currentRegion.latitude;
+        const lng = camera.center?.longitude || currentRegion.longitude;
+        const zoom = camera.zoom || 15;
+        injectJS(`setCenter(${lat}, ${lng}, ${zoom})`);
+      },
+      getCamera: () => ({
+        center: {
+          latitude: currentRegion.latitude,
+          longitude: currentRegion.longitude,
+        },
+        zoom: getZoomFromDelta(currentRegion.latitudeDelta),
+      }),
+      animateCamera: (camera, options) => {
+        const lat = camera.center?.latitude || currentRegion.latitude;
+        const lng = camera.center?.longitude || currentRegion.longitude;
+        const zoom = camera.zoom || 15;
+        injectJS(`setCenter(${lat}, ${lng}, ${zoom})`);
+      },
+    }));
+
+    // Initialize map when WebView loads
+    const handleLoad = () => {
+      setTimeout(() => {
+        if (webViewRef.current) {
+          const zoom = getZoomFromDelta(currentRegion.latitudeDelta);
+          webViewRef.current.injectJavaScript(`
           initMap(${currentRegion.latitude}, ${currentRegion.longitude}, ${zoom});
           true;
         `);
+        }
+      }, 100);
+    };
+
+    // Handle messages from WebView
+    const handleMessage = (event) => {
+      try {
+        const data = JSON.parse(event.nativeEvent.data);
+
+        switch (data.type) {
+          case "ready":
+            setIsReady(true);
+            setIsLoading(false);
+            onMapReady?.();
+            break;
+          case "press":
+            onPress?.({ nativeEvent: { coordinate: data.coordinate } });
+            break;
+          case "regionChange":
+            onRegionChange?.(data.region);
+            onRegionChangeComplete?.(data.region);
+            break;
+          case "error":
+            console.warn("Map error:", data.message);
+            break;
+        }
+      } catch (e) {
+        console.log("Map message parse error:", e);
       }
-    }, 100);
-  };
+    };
 
-  // Handle messages from WebView
-  const handleMessage = (event) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      
-      switch (data.type) {
-        case 'ready':
-          setIsReady(true);
-          setIsLoading(false);
-          onMapReady?.();
-          break;
-        case 'press':
-          onPress?.({ nativeEvent: { coordinate: data.coordinate } });
-          break;
-        case 'regionChange':
-          onRegionChange?.(data.region);
-          onRegionChangeComplete?.(data.region);
-          break;
-        case 'error':
-          console.warn('Map error:', data.message);
-          break;
-      }
-    } catch (e) {
-      console.log('Map message parse error:', e);
-    }
-  };
+    // Update markers when props change
+    useEffect(() => {
+      if (!isReady) return;
 
-  // Update markers when props change
-  useEffect(() => {
-    if (!isReady) return;
+      // Clear old markers and add new ones
+      injectJS("clearMarkers()");
 
-    // Clear old markers and add new ones
-    injectJS('clearMarkers()');
-    
-    markersProp.forEach((marker) => {
-      if (marker.coordinate) {
-        const { latitude, longitude } = marker.coordinate;
-        const type = marker.type || 'default';
-        const emoji = marker.emoji || '📍';
-        const title = marker.title || '';
-        injectJS(`addMarker('${marker.id}', ${latitude}, ${longitude}, '${type}', '${emoji}', '${title}')`);
-      }
-    });
+      markersProp.forEach((marker) => {
+        if (marker.coordinate) {
+          const { latitude, longitude } = marker.coordinate;
+          const type = marker.type || "default";
+          const emoji = marker.emoji || "📍";
+          const title = marker.title || "";
+          injectJS(
+            `addMarker('${marker.id}', ${latitude}, ${longitude}, '${type}', '${emoji}', '${title}')`,
+          );
+        }
+      });
 
-    prevMarkersRef.current = markersProp;
-  }, [isReady, JSON.stringify(markersProp)]);
+      prevMarkersRef.current = markersProp;
+    }, [isReady, JSON.stringify(markersProp)]);
 
-  // Update polylines when props change
-  useEffect(() => {
-    if (!isReady) return;
+    // Update polylines when props change
+    useEffect(() => {
+      if (!isReady) return;
 
-    // Clear old polylines and add new ones
-    injectJS('clearPolylines()');
-    
-    polylinesProp.forEach((polyline, index) => {
-      if (polyline.coordinates?.length > 1) {
-        const id = polyline.id || `polyline_${index}`;
-        const color = polyline.strokeColor || '#3B82F6';
-        const width = polyline.strokeWidth || 4;
-        injectJS(`addPolyline('${id}', ${JSON.stringify(polyline.coordinates)}, '${color}', ${width})`);
-      }
-    });
+      // Clear old polylines and add new ones
+      injectJS("clearPolylines()");
 
-    prevPolylinesRef.current = polylinesProp;
-  }, [isReady, JSON.stringify(polylinesProp)]);
+      polylinesProp.forEach((polyline, index) => {
+        if (polyline.coordinates?.length > 1) {
+          const id = polyline.id || `polyline_${index}`;
+          const color = polyline.strokeColor || "#3B82F6";
+          const width = polyline.strokeWidth || 4;
+          const dashArray = polyline.dashArray || "";
+          injectJS(
+            `addPolyline('${id}', ${JSON.stringify(polyline.coordinates)}, '${color}', ${width}, '${dashArray}')`,
+          );
+        }
+      });
 
-  // Update user location
-  useEffect(() => {
-    if (!isReady || !showsUserLocation || !userLocation) return;
-    
-    injectJS(`showUserLocation(${userLocation.latitude}, ${userLocation.longitude})`);
-  }, [isReady, showsUserLocation, userLocation?.latitude, userLocation?.longitude]);
+      prevPolylinesRef.current = polylinesProp;
+    }, [isReady, JSON.stringify(polylinesProp)]);
 
-  // Update region when prop changes
-  useEffect(() => {
-    if (!isReady || !region) return;
-    
-    injectJS(`animateToRegion(${region.latitude}, ${region.longitude}, ${region.latitudeDelta}, ${region.longitudeDelta})`);
-  }, [isReady, region?.latitude, region?.longitude]);
+    // Update user location
+    useEffect(() => {
+      if (!isReady || !showsUserLocation || !userLocation) return;
 
-  return (
-    <View style={[styles.container, style]}>
-      <WebView
-        ref={webViewRef}
-        source={{ html: createLeafletHTML() }}
-        style={styles.webview}
-        onLoad={handleLoad}
-        onMessage={handleMessage}
-        scrollEnabled={scrollEnabled}
-        javaScriptEnabled={true}
-        domStorageEnabled={true}
-        startInLoadingState={false}
-        originWhitelist={['*']}
-        cacheEnabled={true}
-        mixedContentMode="compatibility"
-        allowsInlineMediaPlayback={true}
-        mediaPlaybackRequiresUserAction={false}
-        androidLayerType="hardware"
-      />
-      
-      {isLoading && (
-        <View style={styles.loading}>
-          <ActivityIndicator size="large" color="#10B981" />
-        </View>
-      )}
-    </View>
-  );
-});
+      injectJS(
+        `showUserLocation(${userLocation.latitude}, ${userLocation.longitude})`,
+      );
+    }, [
+      isReady,
+      showsUserLocation,
+      userLocation?.latitude,
+      userLocation?.longitude,
+    ]);
+
+    // Update region when prop changes
+    useEffect(() => {
+      if (!isReady || !region) return;
+
+      injectJS(
+        `animateToRegion(${region.latitude}, ${region.longitude}, ${region.latitudeDelta}, ${region.longitudeDelta})`,
+      );
+    }, [isReady, region?.latitude, region?.longitude]);
+
+    return (
+      <View style={[styles.container, style]}>
+        <WebView
+          ref={webViewRef}
+          source={{ html: createLeafletHTML() }}
+          style={styles.webview}
+          onLoad={handleLoad}
+          onMessage={handleMessage}
+          scrollEnabled={scrollEnabled}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          startInLoadingState={false}
+          originWhitelist={["*"]}
+          cacheEnabled={true}
+          mixedContentMode="compatibility"
+          allowsInlineMediaPlayback={true}
+          mediaPlaybackRequiresUserAction={false}
+          androidLayerType="hardware"
+        />
+
+        {isLoading && (
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" color="#10B981" />
+          </View>
+        )}
+      </View>
+    );
+  },
+);
 
 FreeMapView.displayName = "FreeMapView";
 
@@ -460,22 +524,23 @@ FreeMapView.displayName = "FreeMapView";
 // ============================================================================
 
 export const DriverMarker = ({ coordinate, title }) => null;
-DriverMarker.displayName = 'DriverMarker';
+DriverMarker.displayName = "DriverMarker";
 
 export const RestaurantMarker = ({ coordinate, title, label }) => null;
-RestaurantMarker.displayName = 'RestaurantMarker';
+RestaurantMarker.displayName = "RestaurantMarker";
 
 export const CustomerMarker = ({ coordinate, title, label }) => null;
-CustomerMarker.displayName = 'CustomerMarker';
+CustomerMarker.displayName = "CustomerMarker";
 
 export const DeliveryLocationMarker = ({ coordinate, title }) => null;
-DeliveryLocationMarker.displayName = 'DeliveryLocationMarker';
+DeliveryLocationMarker.displayName = "DeliveryLocationMarker";
 
 export const PickupMarker = ({ coordinate, title }) => null;
-PickupMarker.displayName = 'PickupMarker';
+PickupMarker.displayName = "PickupMarker";
 
-export const RoutePolyline = ({ coordinates, strokeColor, strokeWidth }) => null;
-RoutePolyline.displayName = 'RoutePolyline';
+export const RoutePolyline = ({ coordinates, strokeColor, strokeWidth }) =>
+  null;
+RoutePolyline.displayName = "RoutePolyline";
 
 // ============================================================================
 // STYLES
@@ -484,17 +549,17 @@ RoutePolyline.displayName = 'RoutePolyline';
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   webview: {
     flex: 1,
-    backgroundColor: '#E8E8E8',
+    backgroundColor: "#E8E8E8",
   },
   loading: {
     ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F9FAFB',
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F9FAFB",
   },
 });
 

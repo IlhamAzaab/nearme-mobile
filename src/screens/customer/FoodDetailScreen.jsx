@@ -1,12 +1,128 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator, Alert } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Alert,
+  Animated,
+  Dimensions,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_BASE_URL } from "../../constants/api";
+
+/* ── Skeleton shimmer block ── */
+function SkeletonBlock({ width: w, height: h, borderRadius: br = 12, style }) {
+  const shimmer = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmer, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shimmer, {
+          toValue: 0,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ]),
+    ).start();
+  }, []);
+  const opacity = shimmer.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.25, 0.55],
+  });
+  return (
+    <Animated.View
+      style={[
+        {
+          width: w,
+          height: h,
+          borderRadius: br,
+          backgroundColor: "#CBD5E1",
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+function FoodDetailSkeleton({ onClose, insets }) {
+  return (
+    <View style={styles.container}>
+      {/* header */}
+      <View style={[styles.header, { paddingTop: insets.top + 4 }]}>
+        <Pressable onPress={onClose} style={styles.closeBtn}>
+          <Ionicons name="close" size={22} color="#0F172A" />
+        </Pressable>
+        <SkeletonBlock width={100} height={16} borderRadius={8} />
+        <View style={{ width: 40 }} />
+      </View>
+      <ScrollView style={styles.page} showsVerticalScrollIndicator={false}>
+        {/* hero */}
+        <View style={styles.heroWrap}>
+          <SkeletonBlock width="100%" height={260} borderRadius={16} />
+        </View>
+        {/* title + price */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 24, gap: 10 }}>
+          <View
+            style={{ flexDirection: "row", justifyContent: "space-between" }}
+          >
+            <View style={{ gap: 8, flex: 1 }}>
+              <SkeletonBlock width="75%" height={22} borderRadius={8} />
+              <SkeletonBlock width="40%" height={14} borderRadius={6} />
+            </View>
+            <View style={{ alignItems: "flex-end", gap: 6 }}>
+              <SkeletonBlock width={90} height={22} borderRadius={8} />
+              <SkeletonBlock width={60} height={10} borderRadius={4} />
+            </View>
+          </View>
+          <SkeletonBlock
+            width="90%"
+            height={14}
+            borderRadius={6}
+            style={{ marginTop: 6 }}
+          />
+        </View>
+        {/* sizes */}
+        <View style={{ paddingHorizontal: 20, marginTop: 32, gap: 14 }}>
+          <SkeletonBlock width={100} height={12} borderRadius={6} />
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <SkeletonBlock width="48%" height={64} borderRadius={16} />
+            <SkeletonBlock width="48%" height={64} borderRadius={16} />
+          </View>
+        </View>
+        {/* qty */}
+        <View style={{ paddingHorizontal: 20, marginTop: 32 }}>
+          <SkeletonBlock width="100%" height={56} borderRadius={16} />
+        </View>
+      </ScrollView>
+      {/* bottom */}
+      <View style={[styles.bottomActions, { gap: 14 }]}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <SkeletonBlock width={80} height={14} borderRadius={6} />
+          <SkeletonBlock width={100} height={22} borderRadius={8} />
+        </View>
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <SkeletonBlock width="30%" height={52} borderRadius={999} />
+          <SkeletonBlock width="65%" height={52} borderRadius={999} />
+        </View>
+      </View>
+    </View>
+  );
+}
 
 export default function FoodDetailScreen({ route, navigation }) {
   // react-router useParams -> RN route.params
   const { restaurantId, foodId } = route.params;
+  const insets = useSafeAreaInsets();
 
   const [restaurant, setRestaurant] = useState(null);
   const [food, setFood] = useState(null);
@@ -27,14 +143,17 @@ export default function FoodDetailScreen({ route, navigation }) {
       setError("");
 
       // Restaurant
-      const restaurantRes = await fetch(`${API_BASE_URL}/public/restaurants/${restaurantId}`);
+      const restaurantRes = await fetch(
+        `${API_BASE_URL}/public/restaurants/${restaurantId}`,
+      );
       const restaurantData = await restaurantRes.json().catch(() => ({}));
-      if (!restaurantRes.ok) throw new Error(restaurantData.message || "Restaurant not found");
+      if (!restaurantRes.ok)
+        throw new Error(restaurantData.message || "Restaurant not found");
       setRestaurant(restaurantData.restaurant);
 
       // Food
       const foodRes = await fetch(
-        `${API_BASE_URL}/public/restaurants/${restaurantId}/foods/${foodId}`
+        `${API_BASE_URL}/public/restaurants/${restaurantId}/foods/${foodId}`,
       );
       const foodData = await foodRes.json().catch(() => ({}));
       if (!foodRes.ok) throw new Error(foodData.message || "Food not found");
@@ -59,7 +178,7 @@ export default function FoodDetailScreen({ route, navigation }) {
     if (!food) return 0;
     const base =
       selectedSize === "large" && food.extra_price
-        ? food.extra_price
+        ? food.extra_offer_price || food.extra_price
         : food.offer_price || food.regular_price || 0;
     return Number(base) || 0;
   }, [food, selectedSize]);
@@ -104,14 +223,19 @@ export default function FoodDetailScreen({ route, navigation }) {
       if (!res.ok) throw new Error(data.message || "Failed to add to cart");
 
       if (goToCheckout) {
-        // Get the cartId from the response and navigate to Checkout
+        // Navigate to Cart and auto-select this restaurant's cart
         const cartId = data.cartId || data.cart_id || data.cart?.id;
-        if (cartId) {
-          navigation.navigate("Checkout", { cartId });
-        } else {
-          // If no cartId in response, go to Cart tab first
-          navigation.navigate("MainTabs", { screen: "Cart" });
-        }
+        navigation.navigate("MainTabs", {
+          screen: "Cart",
+          params: {
+            screen: "CartMain",
+            params: {
+              buyNowCartId: cartId || undefined,
+              buyNowRestaurantId: restaurantId,
+              buyNowTs: Date.now(),
+            },
+          },
+        });
         return;
       }
 
@@ -126,198 +250,737 @@ export default function FoodDetailScreen({ route, navigation }) {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#10b981" />
-          <Text style={styles.muted}>Loading delicious details...</Text>
-        </View>
-      </SafeAreaView>
+      <FoodDetailSkeleton onClose={() => navigation.goBack()} insets={insets} />
     );
   }
 
   if (error) {
     return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.center}>
           <Text style={styles.errTitle}>Oops!</Text>
           <Text style={styles.errText}>{error}</Text>
-          <Pressable onPress={() => navigation.goBack()} style={styles.primaryBtn}>
+          <Pressable
+            onPress={() => navigation.goBack()}
+            style={styles.primaryBtn}
+          >
             <Text style={styles.primaryText}>Go Back</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!food) return null;
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Back Button */}
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
+    <View style={styles.container}>
+      {/* Blur Header - overlapping the image */}
+      <View style={[styles.header, { paddingTop: insets.top + 4 }]}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.closeBtn}>
+          <Ionicons name="close" size={22} color="#0F172A" />
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{food.name}</Text>
-        <View style={{ width: 40 }} />
+        <Text style={styles.headerTitle}>Item Details</Text>
+        <Pressable style={styles.headerBtn}>
+          <Ionicons name="share-social" size={18} color="#0F172A" />
+        </Pressable>
       </View>
 
-      <ScrollView style={styles.page} contentContainerStyle={{ paddingBottom: 110 }}>
-        {/* Hero */}
-        <View style={styles.card}>
-        <View style={styles.hero}>
-          <Image
-            source={{
-              uri:
-                food.image_url ||
-                "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=900&q=80",
-            }}
-            style={styles.heroImg}
-          />
-          <View style={styles.heroBadge}>
-            <Text style={styles.heroBadgeText}>{restaurant?.restaurant_name || "Restaurant"}</Text>
+      <ScrollView
+        style={styles.page}
+        contentContainerStyle={{ paddingBottom: 130 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Hero Image */}
+        <View style={styles.heroWrap}>
+          <View style={styles.heroContainer}>
+            <Image
+              source={{
+                uri:
+                  food.image_url ||
+                  "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=900&q=80",
+              }}
+              style={styles.heroImg}
+            />
+            {/* Restaurant Badge */}
+            <View style={styles.restaurantBadge}>
+              <View style={styles.restaurantBadgeIcon}>
+                <Ionicons name="restaurant" size={12} color="#fff" />
+              </View>
+              <Text style={styles.restaurantBadgeText}>
+                {restaurant?.restaurant_name || "Restaurant"}
+              </Text>
+            </View>
+
+            {/* Not Available Overlay */}
+            {food.is_available === false && (
+              <View style={styles.unavailOverlay}>
+                <View style={styles.unavailBadge}>
+                  <Ionicons
+                    name="time-outline"
+                    size={14}
+                    color="#fff"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.unavailBadgeText}>
+                    Currently Not Available
+                  </Text>
+                </View>
+                {food.available_time?.length > 0 && (
+                  <Text style={styles.unavailSubText}>
+                    Available during: {food.available_time.join(", ")}
+                  </Text>
+                )}
+              </View>
+            )}
           </View>
         </View>
 
-        <View style={{ padding: 14 }}>
-          <Text style={styles.title}>{food.name}</Text>
-          {!!food.description && <Text style={styles.desc}>{food.description}</Text>}
-        </View>
-      </View>
-
-      {/* Size */}
-      <View style={styles.cardPad}>
-        <Text style={styles.h3}>Choose Size</Text>
-
-        <Pressable
-          onPress={() => setSelectedSize("regular")}
-          style={[styles.sizeRow, selectedSize === "regular" && styles.sizeActive]}
-        >
-          <Text style={styles.sizeName}>{food.regular_size || "Regular"}</Text>
-          <Text style={styles.price}>
-            {food.offer_price ? formatPrice(food.offer_price) : formatPrice(food.regular_price)}
-          </Text>
-        </Pressable>
-
-        {!!food.extra_price && (
-          <Pressable
-            onPress={() => setSelectedSize("large")}
-            style={[styles.sizeRow, selectedSize === "large" && styles.sizeActive]}
-          >
-            <Text style={styles.sizeName}>{food.extra_size || "Large"}</Text>
-            <Text style={styles.price}>{formatPrice(food.extra_price)}</Text>
-          </Pressable>
-        )}
-      </View>
-
-      {/* Qty */}
-      <View style={styles.cardPad}>
-        <Text style={styles.h3}>Quantity</Text>
-
-        <View style={styles.qtyRow}>
-          <Pressable onPress={() => setQuantity(Math.max(1, quantity - 1))} style={styles.qtyBtn}>
-            <Text style={styles.qtyBtnText}>−</Text>
-          </Pressable>
-
-          <Text style={styles.qtyValue}>{quantity}</Text>
-
-          <Pressable onPress={() => setQuantity(quantity + 1)} style={[styles.qtyBtn, styles.qtyPlus]}>
-            <Text style={[styles.qtyBtnText, { color: "#fff" }]}>+</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      {/* Total + Actions */}
-      <View style={styles.cardPad}>
-        <View style={styles.totalRow}>
-          <Text style={styles.muted}>Total</Text>
-          <Text style={styles.total}>{formatPrice(totalPrice)}</Text>
+        {/* Product Info */}
+        <View style={styles.productInfo}>
+          <View style={styles.productTop}>
+            <View style={styles.productLeft}>
+              <Text style={styles.productName}>{food.name}</Text>
+            </View>
+          </View>
+          {!!food.description && (
+            <Text style={styles.productDesc}>{food.description}</Text>
+          )}
         </View>
 
-        <Pressable
-          disabled={addingToCart}
-          onPress={() => addToCart()}
-          style={[styles.primaryBtn, addingToCart && { opacity: 0.7 }]}
-        >
-          <Text style={styles.primaryText}>{addingToCart ? "Adding..." : "Add to Cart"}</Text>
-        </Pressable>
+        {/* Size Selection */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionLabel}>SELECT SIZE</Text>
+          <View style={styles.sizeContainer}>
+            <Pressable
+              onPress={() => setSelectedSize("regular")}
+              style={[
+                styles.sizeOption,
+                selectedSize === "regular" && styles.sizeOptionActive,
+              ]}
+            >
+              {food.regular_size ? (
+                <Text
+                  style={[
+                    styles.sizeOptionName,
+                    selectedSize === "regular" && styles.sizeOptionNameActive,
+                  ]}
+                >
+                  {food.regular_size}
+                </Text>
+              ) : (
+                <Text
+                  style={[
+                    styles.sizeOptionName,
+                    selectedSize === "regular" && styles.sizeOptionNameActive,
+                  ]}
+                >
+                  Regular
+                </Text>
+              )}
+              {food.regular_portion ? (
+                <Text
+                  style={[
+                    styles.sizePortionText,
+                    selectedSize === "regular" && styles.sizePortionTextActive,
+                  ]}
+                >
+                  portion {food.regular_portion}
+                </Text>
+              ) : null}
+              <View style={styles.sizePriceWrap}>
+                {food.offer_price ? (
+                  <>
+                    <Text
+                      style={[
+                        styles.sizeOldPrice,
+                        selectedSize === "regular" && styles.sizeOldPriceActive,
+                      ]}
+                    >
+                      {formatPrice(food.regular_price)}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.sizeOptionPrice,
+                        selectedSize === "regular" &&
+                          styles.sizeOptionPriceActive,
+                      ]}
+                    >
+                      {formatPrice(food.offer_price)}
+                    </Text>
+                  </>
+                ) : (
+                  <Text
+                    style={[
+                      styles.sizeOptionPrice,
+                      selectedSize === "regular" &&
+                        styles.sizeOptionPriceActive,
+                    ]}
+                  >
+                    {formatPrice(food.regular_price)}
+                  </Text>
+                )}
+              </View>
+              {selectedSize === "regular" && (
+                <View style={styles.sizeCheck}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                </View>
+              )}
+            </Pressable>
 
-        <Pressable
-          disabled={addingToCart}
-          onPress={() => addToCart({ goToCheckout: true })}
-          style={[styles.outlineBtn, addingToCart && { opacity: 0.7 }]}
-        >
-          <Text style={styles.outlineText}>{addingToCart ? "Processing..." : "Buy Now"}</Text>
-        </Pressable>
-      </View>
+            {!!food.extra_price && (
+              <Pressable
+                onPress={() => setSelectedSize("large")}
+                style={[
+                  styles.sizeOption,
+                  selectedSize === "large" && styles.sizeOptionActive,
+                ]}
+              >
+                {food.extra_size ? (
+                  <Text
+                    style={[
+                      styles.sizeOptionName,
+                      selectedSize === "large" && styles.sizeOptionNameActive,
+                    ]}
+                  >
+                    {food.extra_size}
+                  </Text>
+                ) : (
+                  <Text
+                    style={[
+                      styles.sizeOptionName,
+                      selectedSize === "large" && styles.sizeOptionNameActive,
+                    ]}
+                  >
+                    Large
+                  </Text>
+                )}
+                {food.extra_portion ? (
+                  <Text
+                    style={[
+                      styles.sizePortionText,
+                      selectedSize === "large" && styles.sizePortionTextActive,
+                    ]}
+                  >
+                    portion {food.extra_portion}
+                  </Text>
+                ) : null}
+                <View style={styles.sizePriceWrap}>
+                  {food.extra_offer_price ? (
+                    <>
+                      <Text
+                        style={[
+                          styles.sizeOldPrice,
+                          selectedSize === "large" && styles.sizeOldPriceActive,
+                        ]}
+                      >
+                        {formatPrice(food.extra_price)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.sizeOptionPrice,
+                          selectedSize === "large" &&
+                            styles.sizeOptionPriceActive,
+                        ]}
+                      >
+                        {formatPrice(food.extra_offer_price)}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text
+                      style={[
+                        styles.sizeOptionPrice,
+                        selectedSize === "large" &&
+                          styles.sizeOptionPriceActive,
+                      ]}
+                    >
+                      {formatPrice(food.extra_price)}
+                    </Text>
+                  )}
+                </View>
+                {selectedSize === "large" && (
+                  <View style={styles.sizeCheck}>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color="#10b981"
+                    />
+                  </View>
+                )}
+              </Pressable>
+            )}
+          </View>
+        </View>
 
-        {/* Bottom tab navigation web la BottomNavbar; RN la ithu CustomerTabs bottom navigator la irukkum */}
+        {/* Quantity Stepper */}
+        <View style={styles.quantityContainer}>
+          <View style={styles.quantityInner}>
+            <Text style={styles.quantityLabel}>Quantity</Text>
+            <View style={styles.quantityStepper}>
+              <Pressable
+                onPress={() => setQuantity(Math.max(1, quantity - 1))}
+                style={styles.qtyBtnMinus}
+              >
+                <Ionicons name="remove" size={20} color="#0F172A" />
+              </Pressable>
+              <Text style={styles.qtyValue}>
+                {String(quantity).padStart(2, "0")}
+              </Text>
+              <Pressable
+                onPress={() => setQuantity(quantity + 1)}
+                style={styles.qtyBtnPlus}
+              >
+                <Ionicons name="add" size={20} color="#fff" />
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </ScrollView>
-    </SafeAreaView>
+
+      {/* Bottom Actions - Fixed */}
+      <View style={styles.bottomActions}>
+        <View style={styles.btnRow}>
+          <Pressable
+            disabled={addingToCart}
+            onPress={() => addToCart({ goToCheckout: true })}
+            style={({ pressed }) => [
+              styles.buyNowBtn,
+              pressed && { opacity: 0.8 },
+              addingToCart && { opacity: 0.6 },
+            ]}
+          >
+            <Text style={styles.buyNowText}>
+              {addingToCart ? "Buying..." : "Buy Now"}
+            </Text>
+          </Pressable>
+          <Pressable
+            disabled={addingToCart}
+            onPress={() => addToCart()}
+            style={({ pressed }) => [
+              styles.addToCartBtn,
+              pressed && { opacity: 0.8 },
+              addingToCart && { opacity: 0.6 },
+            ]}
+          >
+            <Ionicons
+              name="cart"
+              size={18}
+              color="#fff"
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.addToCartText}>
+              {addingToCart
+                ? "Adding..."
+                : `Add to Cart • ${formatPrice(totalPrice)}`}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F9FAFB" },
-  page: { flex: 1, backgroundColor: "#F9FAFB", padding: 12 },
+const { width } = Dimensions.get("window");
 
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#ffffff" },
+  page: { flex: 1, backgroundColor: "#fff" },
+
+  // Header
   header: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEF2F7",
+    paddingBottom: 12,
+    backgroundColor: "rgba(255,255,255,0.85)",
   },
-  backBtn: {
+  closeBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  headerBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+  },
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0F172A",
+    letterSpacing: -0.3,
+  },
+
+  // Loading / Error
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    gap: 12,
+  },
+  muted: { color: "#64748B", fontSize: 14, fontWeight: "500" },
+
+  // Hero Image
+  heroWrap: {
+    // Edge-to-edge hero — no padding
+  },
+  heroContainer: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: "hidden",
+    backgroundColor: "#ffffff",
+  },
+  heroImg: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  restaurantBadge: {
+    position: "absolute",
+    bottom: 16,
+    left: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  restaurantBadgeIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
   },
-  backText: { fontSize: 20, color: "#111827" },
-  headerTitle: { fontSize: 18, fontWeight: "900", color: "#111827", flex: 1, textAlign: "center" },
+  restaurantBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
 
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 18, gap: 10 },
-  muted: { color: "#6B7280" },
+  // Not Available overlay
+  unavailOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.52)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  unavailBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#000",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  unavailBadgeText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  unavailSubText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
+    opacity: 0.9,
+  },
 
-  card: { backgroundColor: "#fff", borderRadius: 18, overflow: "hidden", marginBottom: 12, elevation: 2 },
-  cardPad: { backgroundColor: "#fff", borderRadius: 18, padding: 14, marginBottom: 12, elevation: 2 },
+  // Product Info
+  productInfo: {
+    paddingHorizontal: 20,
+    paddingTop: 24,
+  },
+  productTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  productLeft: {
+    flex: 1,
+    marginRight: 16,
+  },
+  productName: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.5,
+    lineHeight: 28,
+  },
+  ratingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    gap: 4,
+  },
+  ratingText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#10b981",
+  },
+  reviewText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#94A3B8",
+    marginLeft: 4,
+  },
+  productRight: {
+    alignItems: "flex-end",
+  },
+  productPrice: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#10b981",
+  },
+  priceLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 1,
+    marginTop: 2,
+  },
+  productDesc: {
+    marginTop: 12,
+    fontSize: 14,
+    color: "#64748B",
+    lineHeight: 20,
+    fontWeight: "400",
+  },
 
-  hero: { height: 220, backgroundColor: "#D1FAE5" },
-  heroImg: { width: "100%", height: "100%" },
-  heroBadge: { position: "absolute", left: 12, bottom: 12, backgroundColor: "rgba(255,255,255,0.9)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
-  heroBadgeText: { color: "#10b981", fontWeight: "900" },
+  // Size Selection
+  sectionContainer: {
+    paddingHorizontal: 20,
+    marginTop: 32,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 2,
+  },
+  sizeContainer: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 16,
+  },
+  sizeOption: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#F1F5F9",
+    backgroundColor: "#fff",
+  },
+  sizeOptionActive: {
+    borderColor: "#10b981",
+    backgroundColor: "#ECFDF5",
+    shadowColor: "#10b981",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  sizeOptionName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+  sizeOptionNameActive: {
+    color: "#059669",
+    fontWeight: "800",
+  },
+  sizeOptionPrice: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#94A3B8",
+  },
+  sizeOptionPriceActive: {
+    color: "#059669",
+    fontWeight: "800",
+  },
+  sizePriceWrap: {
+    alignItems: "center",
+    gap: 2,
+  },
+  sizeOldPrice: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#CBD5E1",
+    textDecorationLine: "line-through",
+  },
+  sizeOldPriceActive: {
+    color: "#94A3B8",
+  },
+  sizePortionText: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#94A3B8",
+    marginTop: -2,
+  },
+  sizePortionTextActive: {
+    color: "#059669",
+    fontWeight: "600",
+  },
+  sizeCheck: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+  },
 
-  title: { fontSize: 22, fontWeight: "900", color: "#111827" },
-  desc: { marginTop: 6, color: "#6B7280" },
+  // Quantity
+  quantityContainer: {
+    paddingHorizontal: 20,
+    marginTop: 32,
+  },
+  quantityInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 16,
+    padding: 16,
+  },
+  quantityLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  quantityStepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 24,
+  },
+  qtyBtnMinus: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    shadowColor: "#000",
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  qtyBtnPlus: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#10b981",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#10b981",
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  qtyValue: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0F172A",
+    minWidth: 30,
+    textAlign: "center",
+  },
 
-  h3: { fontWeight: "900", color: "#111827", marginBottom: 10 },
+  // Bottom Actions
+  bottomActions: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(255,255,255,0.97)",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+  },
+  btnRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  buyNowBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  buyNowText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  addToCartBtn: {
+    flex: 2,
+    height: 52,
+    borderRadius: 999,
+    backgroundColor: "#10b981",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#10b981",
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  addToCartText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff",
+  },
 
-  sizeRow: { flexDirection: "row", justifyContent: "space-between", padding: 12, borderRadius: 14, backgroundColor: "#F3F4F6", marginTop: 8 },
-  sizeActive: { borderWidth: 2, borderColor: "#10b981", backgroundColor: "#ECFDF5" },
-  sizeName: { fontWeight: "800", color: "#111827" },
-  price: { fontWeight: "900", color: "#10b981" },
-
-  qtyRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
-  qtyBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center" },
-  qtyPlus: { backgroundColor: "#10b981" },
-  qtyBtnText: { fontSize: 22, fontWeight: "900", color: "#111827" },
-  qtyValue: { fontSize: 22, fontWeight: "900", color: "#10b981", minWidth: 50, textAlign: "center" },
-
-  totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  total: { fontSize: 22, fontWeight: "900", color: "#10b981" },
-
-  primaryBtn: { height: 52, borderRadius: 14, backgroundColor: "#10b981", alignItems: "center", justifyContent: "center", marginTop: 6 },
-  primaryText: { color: "#fff", fontWeight: "900", fontSize: 16 },
-
-  outlineBtn: { height: 52, borderRadius: 14, borderWidth: 2, borderColor: "#10b981", alignItems: "center", justifyContent: "center", marginTop: 10 },
-  outlineText: { color: "#10b981", fontWeight: "900", fontSize: 16 },
-
-  errTitle: { fontSize: 22, fontWeight: "900", color: "#111827" },
+  // Error
+  errTitle: { fontSize: 22, fontWeight: "900", color: "#0F172A" },
   errText: { color: "#DC2626", textAlign: "center" },
+  primaryBtn: {
+    height: 52,
+    borderRadius: 999,
+    backgroundColor: "#10b981",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+    paddingHorizontal: 32,
+  },
+  primaryText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });

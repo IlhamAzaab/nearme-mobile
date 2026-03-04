@@ -1,419 +1,683 @@
 /**
- * Driver Map Screen
+ * Driver Map Screen - Professional React Native Implementation
  *
- * Full-featured delivery map with:
- * - Live GPS tracking (every 3 seconds)
- * - Pickup and Delivery modes
- * - Route display with polyline
- * - Real-time location updates to backend
- * - Bottom sheet with delivery info
+ * Two-tier location tracking:
+ *   - Live display: Updates driver marker every 3 seconds (smooth visual)
+ *   - Data refresh: Only calls API when driver moves 100m+
+ *
+ * Features:
+ *   - Pickup and Delivery modes with auto-switch
+ *   - OSRM driving route with distance/ETA
+ *   - Bottom sheet with delivery details
+ *   - Google Maps navigation
+ *   - Correct API endpoints matching backend
  */
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Location from "expo-location";
+import { useEffect, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
-  ActivityIndicator,
-  Linking,
-  Alert,
-  Dimensions,
-  Animated,
-  Image,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FreeMapView from "../../components/maps/FreeMapView";
-import * as Location from "expo-location";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
-import { getOSRMRoute } from "../../services/mapService";
+import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
-const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 // ============================================================================
-// MARKER COMPONENTS
+// CONSTANTS
 // ============================================================================
 
-const DriverMarker = () => (
-  <View style={styles.markerContainer}>
-    <View style={[styles.markerPin, styles.driverPin]}>
-      <Text style={styles.markerEmoji}>🚗</Text>
-    </View>
-  </View>
-);
+const LIVE_TRACKING_INTERVAL = 3000; // 3s - smooth driver marker updates
+const DATA_REFRESH_THRESHOLD = 100; // 100m - only fetch API data after this
+const DEFAULT_LOCATION = { latitude: 8.5017, longitude: 81.186 };
 
-const RestaurantMarker = () => (
-  <View style={styles.markerContainer}>
-    <View style={[styles.markerPin, styles.restaurantPin]}>
-      <Text style={styles.markerEmoji}>🏪</Text>
-    </View>
-  </View>
-);
+// ============================================================================
+// HELPERS
+// ============================================================================
 
-const CustomerMarker = () => (
-  <View style={styles.markerContainer}>
-    <View style={[styles.markerPin, styles.customerPin]}>
-      <Text style={styles.markerEmoji}>📍</Text>
-    </View>
-  </View>
-);
+const getDistanceMeters = (lat1, lng1, lat2, lng2) => {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const fetchOSRMRoute = async (fromLat, fromLng, toLat, toLng) => {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`;
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(tid);
+    const data = await res.json();
+    if (data.code === "Ok" && data.routes && data.routes[0]) {
+      const r = data.routes[0];
+      return {
+        success: true,
+        coordinates: r.geometry.coordinates.map(function (c) {
+          return { latitude: c[1], longitude: c[0] };
+        }),
+        distance_km: (r.distance / 1000).toFixed(1),
+        duration_min: Math.ceil(r.duration / 60),
+      };
+    }
+    return { success: false };
+  } catch (e) {
+    return { success: false };
+  }
+};
 
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
 export default function DriverMapScreen({ route, navigation }) {
-  const { deliveryId } = route.params || {};
-  const mapRef = useRef(null);
-  const locationInterval = useRef(null);
-  const [sheetAnim] = useState(new Animated.Value(0));
+  const params = route.params || {};
+  const deliveryId = params.deliveryId;
+  const initialMode = params.mode || "pickup";
 
-  // State
-  const [mode, setMode] = useState("pickup"); // "pickup" or "delivery"
+  const mapRef = useRef(null);
+  const watchIdRef = useRef(null);
+  const lastFetchLocationRef = useRef(null);
+  const lastBackendUpdateRef = useRef(0);
+  const isFetchingRef = useRef(false);
+  const routeFetchLocRef = useRef(null);
+  const sheetAnim = useRef(new Animated.Value(0)).current;
+
+  const [mode, setMode] = useState(initialMode);
   const [pickups, setPickups] = useState([]);
-  const [deliveries, setDeliveries] = useState([]);
+  const [deliveriesList, setDeliveriesList] = useState([]);
   const [currentTarget, setCurrentTarget] = useState(null);
   const [driverLocation, setDriverLocation] = useState(null);
+  const [targetForMap, setTargetForMap] = useState(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [isTracking, setIsTracking] = useState(false);
-  const [userHasInteracted, setUserHasInteracted] = useState(false);
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeInfo, setRouteInfo] = useState(null);
+  const [isTracking, setIsTracking] = useState(false);
+  const [userInteracted, setUserInteracted] = useState(false);
+
+  // ============================================================================
+  // INIT / CLEANUP
+  // ============================================================================
+
+  useEffect(function () {
+    startLocationTracking();
+    return function () {
+      if (watchIdRef.current) {
+        watchIdRef.current.remove();
+        watchIdRef.current = null;
+      }
+    };
+  }, []);
 
   // ============================================================================
   // LOCATION TRACKING
+  // Live display: marker updates every 3s (distanceInterval: 0)
+  // Data refresh: API calls only when moved 100m+ from last fetch
   // ============================================================================
 
-  const startLocationTracking = useCallback(async () => {
+  const startLocationTracking = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission Denied", "Location permission is required for delivery tracking");
+      const permResult = await Location.requestForegroundPermissionsAsync();
+      if (permResult.status !== "granted") {
+        setDriverLocation(DEFAULT_LOCATION);
+        lastFetchLocationRef.current = DEFAULT_LOCATION;
+        await fetchPickupsAndDeliveries(DEFAULT_LOCATION);
         return;
       }
 
-      setIsTracking(true);
-
-      // Get initial location
-      const location = await Location.getCurrentPositionAsync({
+      const pos = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
-
-      const initialLocation = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
+      const initLoc = {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
       };
 
-      setDriverLocation(initialLocation);
-      updateLocationOnBackend(deliveryId, initialLocation);
+      setDriverLocation(initLoc);
+      lastFetchLocationRef.current = initLoc;
+      setIsTracking(true);
+      await fetchPickupsAndDeliveries(initLoc);
 
-      // Update every 3 seconds
-      locationInterval.current = setInterval(async () => {
-        try {
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.High,
-          });
-
-          const newLocation = {
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
+      watchIdRef.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: LIVE_TRACKING_INTERVAL,
+          distanceInterval: 0,
+        },
+        function (position) {
+          var newLoc = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
           };
 
-          setDriverLocation(newLocation);
-          updateLocationOnBackend(deliveryId, newLocation);
-        } catch (err) {
-          console.log("Location update error:", err);
-        }
-      }, 3000);
-    } catch (err) {
-      console.log("Location tracking error:", err);
-      setIsTracking(false);
-    }
-  }, [deliveryId]);
+          // Always update marker (smooth live tracking every 3s)
+          setDriverLocation(newLoc);
 
-  const stopLocationTracking = useCallback(() => {
-    setIsTracking(false);
-    if (locationInterval.current) {
-      clearInterval(locationInterval.current);
-      locationInterval.current = null;
-    }
-  }, []);
+          // Backend location update (throttled 5s)
+          updateBackendLocation(newLoc);
 
-  const updateLocationOnBackend = async (delivId, location) => {
-    try {
-      const token = await AsyncStorage.getItem("token");
-      await fetch(`${API_BASE_URL}/driver/deliveries/${delivId}/location`, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+          // Only fetch API data when moved 100m+ from last fetch
+          var lastFetch = lastFetchLocationRef.current;
+          if (lastFetch) {
+            var moved = getDistanceMeters(
+              lastFetch.latitude,
+              lastFetch.longitude,
+              newLoc.latitude,
+              newLoc.longitude,
+            );
+            if (moved >= DATA_REFRESH_THRESHOLD) {
+              console.log(
+                "[LOCATION] Moved " +
+                  moved.toFixed(0) +
+                  "m (threshold: " +
+                  DATA_REFRESH_THRESHOLD +
+                  "m) - refreshing data",
+              );
+              lastFetchLocationRef.current = newLoc;
+              fetchPickupsAndDeliveries(newLoc);
+            }
+          }
         },
-        body: JSON.stringify({
-          latitude: location.latitude,
-          longitude: location.longitude,
-        }),
-      });
-    } catch (e) {
-      console.log("Backend location update error:", e);
+      );
+    } catch (err) {
+      console.error("[LOCATION] Tracking error:", err);
+      setDriverLocation(DEFAULT_LOCATION);
+      lastFetchLocationRef.current = DEFAULT_LOCATION;
+      await fetchPickupsAndDeliveries(DEFAULT_LOCATION);
     }
   };
 
   // ============================================================================
-  // FETCH DATA
+  // DATA FETCHING (Correct API endpoints)
   // ============================================================================
 
-  const fetchPickupsAndDeliveries = useCallback(async () => {
-    if (!driverLocation) return;
+  const fetchPickupsAndDeliveries = async (location) => {
+    if (!location || isFetchingRef.current) return;
+    isFetchingRef.current = true;
 
     try {
-      const token = await AsyncStorage.getItem("token");
-
-      // Fetch pickups
-      const pickupsUrl = `${API_BASE_URL}/driver/deliveries/pickups?driver_latitude=${driverLocation.latitude}&driver_longitude=${driverLocation.longitude}`;
-      const pickupsRes = await fetch(pickupsUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const pickupsData = await pickupsRes.json();
-
-      // Fetch deliveries
-      const deliveriesUrl = `${API_BASE_URL}/driver/deliveries/deliveries-route?driver_latitude=${driverLocation.latitude}&driver_longitude=${driverLocation.longitude}`;
-      const deliveriesRes = await fetch(deliveriesUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const deliveriesData = await deliveriesRes.json();
-
-      if (pickupsRes.ok) {
-        setPickups(pickupsData.pickups || []);
-        if (pickupsData.pickups?.length > 0) {
-          setMode("pickup");
-          setCurrentTarget(pickupsData.pickups[0]);
-        }
-      }
-
-      if (deliveriesRes.ok) {
-        setDeliveries(deliveriesData.deliveries || []);
-        if ((!pickupsData.pickups || pickupsData.pickups.length === 0) && deliveriesData.deliveries?.length > 0) {
-          setMode("delivery");
-          setCurrentTarget(deliveriesData.deliveries[0]);
-        }
-      }
-    } catch (e) {
-      console.log("Fetch error:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [driverLocation]);
-
-  // ============================================================================
-  // EFFECTS
-  // ============================================================================
-
-  useEffect(() => {
-    startLocationTracking();
-    return () => stopLocationTracking();
-  }, []);
-
-  useEffect(() => {
-    if (driverLocation) {
-      fetchPickupsAndDeliveries();
-    }
-  }, [driverLocation?.latitude, driverLocation?.longitude]);
-
-  // ============================================================================
-  // OSRM ROUTE FETCHING (Same as Website)
-  // ============================================================================
-  
-  useEffect(() => {
-    const fetchRoute = async () => {
-      if (!driverLocation || !currentTarget) {
-        setRouteCoords([]);
-        setRouteInfo(null);
+      var token = await AsyncStorage.getItem("token");
+      if (!token) {
+        navigation.replace("Login");
         return;
       }
 
-      let targetLat, targetLng;
-      
-      if (mode === "pickup" && currentTarget.restaurant) {
-        targetLat = parseFloat(currentTarget.restaurant.latitude);
-        targetLng = parseFloat(currentTarget.restaurant.longitude);
-      } else if (mode === "delivery" && currentTarget.customer) {
-        targetLat = parseFloat(currentTarget.customer.latitude);
-        targetLng = parseFloat(currentTarget.customer.longitude);
+      // Fetch pickups
+      var pickupsUrl =
+        API_BASE_URL +
+        "/driver/deliveries/pickups?driver_latitude=" +
+        location.latitude +
+        "&driver_longitude=" +
+        location.longitude;
+      var pickupsRes = await rateLimitedFetch(pickupsUrl, {
+        headers: { Authorization: "Bearer " + token },
+      });
+      var pickupsData = { pickups: [] };
+      if (pickupsRes.ok) {
+        pickupsData = await pickupsRes.json();
       }
-      
-      if (!targetLat || !targetLng) return;
-      
-      // Fetch OSRM route (same as website)
-      const result = await getOSRMRoute(
-        driverLocation.latitude,
-        driverLocation.longitude,
-        targetLat,
-        targetLng
-      );
-      
-      if (result.success) {
-        setRouteCoords(result.coordinates);
-        setRouteInfo({
-          distance_km: result.distance_km,
-          duration_min: result.duration_min,
-        });
+
+      // Fetch deliveries
+      var deliveriesUrl =
+        API_BASE_URL +
+        "/driver/deliveries/deliveries-route?driver_latitude=" +
+        location.latitude +
+        "&driver_longitude=" +
+        location.longitude;
+      var deliveriesRes = await rateLimitedFetch(deliveriesUrl, {
+        headers: { Authorization: "Bearer " + token },
+      });
+      var deliveriesData = { deliveries: [] };
+      if (deliveriesRes.ok) {
+        deliveriesData = await deliveriesRes.json();
+      }
+
+      var pList = pickupsData.pickups || [];
+      var dList = deliveriesData.deliveries || [];
+
+      // ── Fallback: hit /active when both lists are empty ──
+      if (pList.length === 0 && dList.length === 0) {
+        console.log(
+          "[FETCH] Both endpoints empty, trying /driver/deliveries/active fallback...",
+        );
+        try {
+          var fallbackRes = await rateLimitedFetch(
+            API_BASE_URL + "/driver/deliveries/active",
+            {
+              headers: { Authorization: "Bearer " + token },
+            },
+          );
+          if (fallbackRes.ok) {
+            var fallbackData = await fallbackRes.json();
+            var activeList = fallbackData.deliveries || [];
+            if (activeList.length > 0) {
+              var accepted = activeList.filter(function (d) {
+                return d.status === "accepted";
+              });
+              var inProgress = activeList.filter(function (d) {
+                return d.status !== "accepted";
+              });
+              if (accepted.length > 0) {
+                pList = accepted.map(function (d) {
+                  return {
+                    delivery_id: d.id,
+                    order_id: d.order_id,
+                    order_number:
+                      d.order && d.order.order_number
+                        ? d.order.order_number
+                        : "N/A",
+                    status: d.status,
+                    restaurant: (d.order && d.order.restaurant) || {
+                      name: "Restaurant",
+                      address: "",
+                      latitude: 0,
+                      longitude: 0,
+                    },
+                    customer: {
+                      name:
+                        (d.order &&
+                          d.order.customer &&
+                          d.order.customer.name) ||
+                        "Customer",
+                      phone:
+                        (d.order &&
+                          d.order.customer &&
+                          d.order.customer.phone) ||
+                        "",
+                      address:
+                        (d.order &&
+                          d.order.delivery &&
+                          d.order.delivery.address) ||
+                        "",
+                      latitude:
+                        (d.order &&
+                          d.order.delivery &&
+                          d.order.delivery.latitude) ||
+                        0,
+                      longitude:
+                        (d.order &&
+                          d.order.delivery &&
+                          d.order.delivery.longitude) ||
+                        0,
+                    },
+                    distance_km: ((d.total_distance || 0) / 1000).toFixed(2),
+                    estimated_time_minutes: 0,
+                  };
+                });
+              } else if (inProgress.length > 0) {
+                dList = inProgress.map(function (d) {
+                  return {
+                    delivery_id: d.id,
+                    order_id: d.order_id,
+                    order_number:
+                      d.order && d.order.order_number
+                        ? d.order.order_number
+                        : "N/A",
+                    status: d.status,
+                    restaurant: (d.order && d.order.restaurant) || {
+                      name: "Restaurant",
+                      address: "",
+                      latitude: 0,
+                      longitude: 0,
+                    },
+                    customer: {
+                      name:
+                        (d.order &&
+                          d.order.customer &&
+                          d.order.customer.name) ||
+                        "Customer",
+                      phone:
+                        (d.order &&
+                          d.order.customer &&
+                          d.order.customer.phone) ||
+                        "",
+                      address:
+                        (d.order &&
+                          d.order.delivery &&
+                          d.order.delivery.address) ||
+                        "",
+                      latitude:
+                        (d.order &&
+                          d.order.delivery &&
+                          d.order.delivery.latitude) ||
+                        0,
+                      longitude:
+                        (d.order &&
+                          d.order.delivery &&
+                          d.order.delivery.longitude) ||
+                        0,
+                    },
+                    distance_km: ((d.total_distance || 0) / 1000).toFixed(2),
+                    estimated_time_minutes: 0,
+                  };
+                });
+              }
+            }
+          }
+        } catch (fbErr) {
+          console.error("[FETCH] Fallback error:", fbErr);
+        }
+      }
+
+      setPickups(pList);
+      setDeliveriesList(dList);
+
+      // Auto-select mode and target
+      if (pList.length > 0) {
+        setMode("pickup");
+        var pTarget = deliveryId
+          ? pList.find(function (p) {
+              return p.delivery_id === deliveryId;
+            }) || pList[0]
+          : pList[0];
+        setCurrentTarget(pTarget);
+      } else if (dList.length > 0) {
+        setMode("deliver");
+        var dTarget = deliveryId
+          ? dList.find(function (d) {
+              return d.delivery_id === deliveryId;
+            }) || dList[0]
+          : dList[0];
+        setCurrentTarget(dTarget);
       } else {
-        // Fallback to backend route if OSRM fails
-        const backendCoords = currentTarget.route_geometry?.coordinates?.map((coord) => ({
-          latitude: coord[1],
-          longitude: coord[0],
-        })) || [];
-        setRouteCoords(backendCoords);
+        setCurrentTarget(null);
       }
-    };
-    
-    fetchRoute();
-  }, [driverLocation?.latitude, driverLocation?.longitude, currentTarget?.delivery_id, mode]);
-
-  // Animate bottom sheet
-  useEffect(() => {
-    if (!loading && currentTarget) {
-      Animated.spring(sheetAnim, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 8,
-      }).start();
+    } catch (err) {
+      console.error("[FETCH] Data error:", err);
+    } finally {
+      isFetchingRef.current = false;
+      setLoading(false);
     }
-  }, [loading, currentTarget]);
+  };
 
-  // Fit map to markers
-  useEffect(() => {
-    if (mapRef.current && driverLocation && currentTarget && !userHasInteracted) {
-      const coordinates = [
-        { latitude: driverLocation.latitude, longitude: driverLocation.longitude },
-      ];
+  // ============================================================================
+  // ROUTE + TARGET LOCATION
+  // ============================================================================
 
+  // Update target location for map when currentTarget or mode changes
+  useEffect(
+    function () {
+      if (!currentTarget) {
+        setTargetForMap(null);
+        return;
+      }
       if (mode === "pickup" && currentTarget.restaurant) {
-        coordinates.push({
+        setTargetForMap({
           latitude: parseFloat(currentTarget.restaurant.latitude),
           longitude: parseFloat(currentTarget.restaurant.longitude),
         });
-      } else if (mode === "delivery" && currentTarget.customer) {
-        coordinates.push({
+      } else if (mode === "deliver" && currentTarget.customer) {
+        setTargetForMap({
           latitude: parseFloat(currentTarget.customer.latitude),
           longitude: parseFloat(currentTarget.customer.longitude),
         });
       }
+    },
+    [currentTarget, mode],
+  );
 
-      if (coordinates.length > 1) {
-        mapRef.current.fitToCoordinates(coordinates, {
-          edgePadding: { top: 100, right: 50, bottom: SCREEN_HEIGHT * 0.45, left: 50 },
-          animated: true,
-        });
+  // Fetch route when target changes
+  useEffect(
+    function () {
+      if (driverLocation && targetForMap) {
+        doFetchRoute(driverLocation, targetForMap);
+        routeFetchLocRef.current = driverLocation;
+      } else {
+        setRouteCoords([]);
+        setRouteInfo(null);
       }
+    },
+    [targetForMap],
+  );
+
+  // Refetch route when driver moves 100m+ (not every 3s)
+  useEffect(
+    function () {
+      if (!driverLocation || !targetForMap) return;
+      var prev = routeFetchLocRef.current;
+      if (!prev) {
+        routeFetchLocRef.current = driverLocation;
+        return;
+      }
+      var moved = getDistanceMeters(
+        prev.latitude,
+        prev.longitude,
+        driverLocation.latitude,
+        driverLocation.longitude,
+      );
+      if (moved >= DATA_REFRESH_THRESHOLD) {
+        routeFetchLocRef.current = driverLocation;
+        doFetchRoute(driverLocation, targetForMap);
+      }
+    },
+    [driverLocation],
+  );
+
+  const doFetchRoute = async (from, to) => {
+    var result = await fetchOSRMRoute(
+      from.latitude,
+      from.longitude,
+      to.latitude,
+      to.longitude,
+    );
+    if (result.success) {
+      setRouteCoords(result.coordinates);
+      setRouteInfo({
+        distance_km: result.distance_km,
+        duration_min: result.duration_min,
+      });
+    } else {
+      // Fallback
+      var backendCoords =
+        currentTarget &&
+        currentTarget.route_geometry &&
+        currentTarget.route_geometry.coordinates
+          ? currentTarget.route_geometry.coordinates.map(function (c) {
+              return { latitude: c[1], longitude: c[0] };
+            })
+          : [];
+      if (backendCoords.length > 1) {
+        setRouteCoords(backendCoords);
+      } else {
+        setRouteCoords([from, to]);
+      }
+      setRouteInfo(null);
     }
-  }, [driverLocation, currentTarget, mode, userHasInteracted]);
+  };
 
   // ============================================================================
-  // ACTIONS
+  // BACKEND LOCATION UPDATE (throttled to 5s)
   // ============================================================================
 
-  const handlePickedUp = async () => {
-    if (!currentTarget) return;
-
-    setUpdating(true);
+  const updateBackendLocation = async (loc) => {
+    var now = Date.now();
+    if (now - lastBackendUpdateRef.current < 5000) return;
+    lastBackendUpdateRef.current = now;
     try {
-      const token = await AsyncStorage.getItem("token");
-      const res = await fetch(
-        `${API_BASE_URL}/driver/deliveries/${currentTarget.delivery_id}/status`,
+      var token = await AsyncStorage.getItem("token");
+      if (!token || !deliveryId) return;
+      await fetch(
+        API_BASE_URL + "/driver/deliveries/" + deliveryId + "/location",
         {
           method: "PATCH",
           headers: {
-            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + token,
+          },
+          body: JSON.stringify({
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+          }),
+        },
+      );
+    } catch (e) {
+      // silent
+    }
+  };
+
+  // ============================================================================
+  // ACTIONS (Correct endpoints: /driver/deliveries/:id/status)
+  // ============================================================================
+
+  const handlePickedUp = async () => {
+    if (!currentTarget || updating) return;
+    setUpdating(true);
+    try {
+      var token = await AsyncStorage.getItem("token");
+      var res = await fetch(
+        API_BASE_URL +
+          "/driver/deliveries/" +
+          currentTarget.delivery_id +
+          "/status",
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: "Bearer " + token,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
             status: "picked_up",
-            latitude: driverLocation.latitude,
-            longitude: driverLocation.longitude,
+            latitude: driverLocation ? driverLocation.latitude : null,
+            longitude: driverLocation ? driverLocation.longitude : null,
           }),
-        }
+        },
       );
-
       if (res.ok) {
-        const updatedPickups = pickups.filter((p) => p.delivery_id !== currentTarget.delivery_id);
-        setPickups(updatedPickups);
-
-        if (updatedPickups.length > 0) {
-          setCurrentTarget(updatedPickups[0]);
+        var updated = pickups.filter(function (p) {
+          return p.delivery_id !== currentTarget.delivery_id;
+        });
+        setPickups(updated);
+        if (updated.length > 0) {
+          setCurrentTarget(updated[0]);
         } else {
-          await fetchPickupsAndDeliveries();
+          // All picked up - refetch to switch to delivery mode
+          if (driverLocation) {
+            await fetchPickupsAndDeliveries(driverLocation);
+          }
         }
+        Alert.alert("Picked Up", "Order picked up successfully!");
       } else {
-        const data = await res.json();
-        Alert.alert("Error", data.message || "Failed to update status");
+        var errData = await res.json().catch(function () {
+          return {};
+        });
+        Alert.alert("Error", errData.message || "Failed to update status");
       }
     } catch (e) {
-      Alert.alert("Error", "Failed to update status");
+      Alert.alert("Error", "Failed to mark as picked up");
     } finally {
       setUpdating(false);
     }
   };
 
   const handleDelivered = async () => {
-    if (!currentTarget) return;
-
+    if (!currentTarget || updating) return;
     setUpdating(true);
     try {
-      const token = await AsyncStorage.getItem("token");
+      var token = await AsyncStorage.getItem("token");
+      var statusUrl =
+        API_BASE_URL +
+        "/driver/deliveries/" +
+        currentTarget.delivery_id +
+        "/status";
+      var headers = {
+        Authorization: "Bearer " + token,
+        "Content-Type": "application/json",
+      };
+      var locBody = {
+        latitude: driverLocation ? driverLocation.latitude : null,
+        longitude: driverLocation ? driverLocation.longitude : null,
+      };
 
-      // Update status progression
-      if (currentTarget.status === "picked_up") {
-        await fetch(`${API_BASE_URL}/driver/deliveries/${currentTarget.delivery_id}/status`, {
+      // Progress through status steps
+      var currentStatus = currentTarget.status || "";
+      if (currentStatus === "picked_up" || currentStatus === "accepted") {
+        await fetch(statusUrl, {
           method: "PATCH",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "on_the_way" }),
+          headers: headers,
+          body: JSON.stringify(
+            Object.assign({ status: "on_the_way" }, locBody),
+          ),
         });
       }
-
-      if (currentTarget.status === "picked_up" || currentTarget.status === "on_the_way") {
-        await fetch(`${API_BASE_URL}/driver/deliveries/${currentTarget.delivery_id}/status`, {
+      if (
+        currentStatus === "picked_up" ||
+        currentStatus === "on_the_way" ||
+        currentStatus === "accepted"
+      ) {
+        await fetch(statusUrl, {
           method: "PATCH",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "at_customer" }),
+          headers: headers,
+          body: JSON.stringify(
+            Object.assign({ status: "at_customer" }, locBody),
+          ),
         });
       }
+      // Final: delivered
+      var finalRes = await fetch(statusUrl, {
+        method: "PATCH",
+        headers: headers,
+        body: JSON.stringify(Object.assign({ status: "delivered" }, locBody)),
+      });
 
-      // Mark as delivered
-      const res = await fetch(
-        `${API_BASE_URL}/driver/deliveries/${currentTarget.delivery_id}/status`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            status: "delivered",
-            latitude: driverLocation.latitude,
-            longitude: driverLocation.longitude,
-          }),
+      if (finalRes.ok) {
+        var resData = await finalRes.json().catch(function () {
+          return {};
+        });
+        var updated = deliveriesList.filter(function (d) {
+          return d.delivery_id !== currentTarget.delivery_id;
+        });
+
+        // If backend promoted another delivery to on_the_way, update its status in the list
+        if (resData.promotedDelivery && updated.length > 0) {
+          var promotedIdx = updated.findIndex(function (d) {
+            return d.delivery_id === resData.promotedDelivery.id;
+          });
+          if (promotedIdx !== -1) {
+            updated[promotedIdx] = Object.assign({}, updated[promotedIdx], {
+              status: "on_the_way",
+            });
+          }
         }
-      );
 
-      if (res.ok) {
-        const updatedDeliveries = deliveries.filter((d) => d.delivery_id !== currentTarget.delivery_id);
-        setDeliveries(updatedDeliveries);
-
-        if (updatedDeliveries.length > 0) {
-          setCurrentTarget(updatedDeliveries[0]);
+        setDeliveriesList(updated);
+        if (updated.length > 0) {
+          setCurrentTarget(updated[0]);
         } else {
-          Alert.alert("🎉 All Deliveries Completed!", "Great job!", [
-            { text: "OK", onPress: () => navigation.navigate("Active") },
+          Alert.alert("All Deliveries Completed!", "Great job!", [
+            {
+              text: "OK",
+              onPress: function () {
+                navigation.navigate("ActiveDeliveries");
+              },
+            },
           ]);
         }
       } else {
-        const data = await res.json();
-        Alert.alert("Error", data.message || "Failed to mark as delivered");
+        var errData = await finalRes.json().catch(function () {
+          return {};
+        });
+        Alert.alert("Error", errData.message || "Failed to mark as delivered");
       }
     } catch (e) {
       Alert.alert("Error", "Failed to mark as delivered");
@@ -422,21 +686,70 @@ export default function DriverMapScreen({ route, navigation }) {
     }
   };
 
+  const handleStartDelivery = () => {
+    if (deliveriesList.length > 0) {
+      setMode("deliver");
+      setCurrentTarget(deliveriesList[0]);
+    }
+  };
+
+  // ============================================================================
+  // MAP + SHEET
+  // ============================================================================
+
   const handleRecenter = () => {
-    setUserHasInteracted(false);
+    setUserInteracted(false);
+  };
+
+  // Auto-fit map
+  useEffect(
+    function () {
+      if (!userInteracted && driverLocation && targetForMap) {
+        setTimeout(function () {
+          if (mapRef.current && mapRef.current.fitToCoordinates) {
+            mapRef.current.fitToCoordinates([driverLocation, targetForMap], {
+              edgePadding: { top: 100, right: 50, bottom: 200, left: 50 },
+            });
+          }
+        }, 400);
+      }
+    },
+    [driverLocation, targetForMap, userInteracted],
+  );
+
+  // Animate bottom sheet
+  useEffect(
+    function () {
+      if (!loading && currentTarget) {
+        Animated.spring(sheetAnim, {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 50,
+          friction: 8,
+        }).start();
+      }
+    },
+    [loading, currentTarget],
+  );
+
+  // Google Maps Navigation
+  const openGoogleMaps = () => {
+    if (!targetForMap) return;
+    var url = Platform.select({
+      ios: "maps:0,0?q=" + targetForMap.latitude + "," + targetForMap.longitude,
+      android:
+        "geo:0,0?q=" + targetForMap.latitude + "," + targetForMap.longitude,
+    });
+    Linking.openURL(url).catch(function () {
+      Alert.alert("Error", "Could not open maps app");
+    });
   };
 
   const handleCall = (phone) => {
-    if (phone) {
-      Linking.openURL(`tel:${phone}`);
-    }
-  };
-
-  const handleStartDelivery = () => {
-    if (deliveries.length > 0) {
-      setMode("delivery");
-      setCurrentTarget(deliveries[0]);
-    }
+    if (!phone) return;
+    Linking.openURL("tel:" + phone).catch(function () {
+      Alert.alert("Error", "Could not make call");
+    });
   };
 
   // ============================================================================
@@ -447,163 +760,265 @@ export default function DriverMapScreen({ route, navigation }) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#10B981" />
-        <Text style={styles.loadingText}>Getting your location...</Text>
+        <Text style={styles.loadingText}>Loading delivery...</Text>
       </View>
     );
   }
 
   if (!currentTarget) {
     return (
-      <SafeAreaView style={styles.emptyContainer}>
-        <Text style={styles.emptyEmoji}>✅</Text>
-        <Text style={styles.emptyTitle}>All Deliveries Completed!</Text>
-        <Pressable style={styles.emptyButton} onPress={() => navigation.navigate("Available")}>
-          <Text style={styles.emptyButtonText}>View Available Deliveries</Text>
+      <View style={styles.loadingContainer}>
+        <Text style={styles.emptyEmoji}>📭</Text>
+        <Text style={styles.emptyText}>No active deliveries found</Text>
+        <Pressable style={styles.goBackBtn} onPress={() => navigation.goBack()}>
+          <Text style={styles.goBackBtnText}>Go Back</Text>
         </Pressable>
-      </SafeAreaView>
+      </View>
     );
   }
 
-  const translateY = sheetAnim.interpolate({
+  var translateY = sheetAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [400, 0],
   });
 
-  // Get target location for marker
-  const targetLocation = mode === "pickup"
-    ? currentTarget.restaurant
-      ? { latitude: parseFloat(currentTarget.restaurant.latitude), longitude: parseFloat(currentTarget.restaurant.longitude) }
-      : null
-    : currentTarget.customer
-      ? { latitude: parseFloat(currentTarget.customer.latitude), longitude: parseFloat(currentTarget.customer.longitude) }
-      : null;
-
   return (
     <View style={styles.container}>
-      {/* Map */}
+      {/* MAP */}
       {driverLocation && (
         <FreeMapView
           ref={mapRef}
-          style={styles.map}
           initialRegion={{
             latitude: driverLocation.latitude,
             longitude: driverLocation.longitude,
-            latitudeDelta: 0.02,
-            longitudeDelta: 0.02,
+            latitudeDelta: 0.05,
+            longitudeDelta: 0.05,
           }}
           markers={[
             {
-              id: 'driver',
-              coordinate: {
-                latitude: driverLocation.latitude,
-                longitude: driverLocation.longitude,
-              },
-              type: 'driver',
-              emoji: '🚗',
+              id: "driver",
+              coordinate: driverLocation,
+              type: "driver",
+              emoji: "\uD83D\uDE97",
             },
-            ...(targetLocation ? [{
-              id: 'target',
-              coordinate: targetLocation,
-              type: mode === 'pickup' ? 'restaurant' : 'customer',
-              emoji: mode === 'pickup' ? '🏪' : '📍',
-            }] : []),
+            ...(targetForMap
+              ? [
+                  {
+                    id: "target",
+                    coordinate: targetForMap,
+                    type: mode === "pickup" ? "restaurant" : "customer",
+                    emoji: mode === "pickup" ? "\uD83C\uDFEA" : "\uD83D\uDCCD",
+                  },
+                ]
+              : []),
           ]}
-          polylines={routeCoords.length > 1 ? [{
-            id: 'route',
-            coordinates: routeCoords,
-            strokeColor: mode === 'pickup' ? '#EF4444' : '#10B981',
-            strokeWidth: 4,
-          }] : []}
+          polylines={
+            routeCoords.length > 1
+              ? [
+                  {
+                    id: "route",
+                    coordinates: routeCoords,
+                    strokeColor: mode === "pickup" ? "#EF4444" : "#10B981",
+                    strokeWidth: 4,
+                  },
+                ]
+              : []
+          }
+          onMapPress={() => setUserInteracted(true)}
         />
       )}
 
-      {/* Mode Badge */}
-      <SafeAreaView style={styles.topBadges} edges={["top"]}>
-        <View style={styles.modeBadge}>
-          <Text style={styles.modeBadgeText}>
-            {mode === "pickup" ? "🏪 PICKUP" : "📦 DELIVERY"}
-          </Text>
+      {/* TOP BADGES */}
+      <SafeAreaView style={styles.topContainer} edges={["top"]}>
+        <View style={styles.topBadges}>
+          <Pressable
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backButtonText}>{"← Back"}</Text>
+          </Pressable>
+
+          <View
+            style={[
+              styles.modeBadge,
+              mode === "pickup" ? styles.pickupBadge : styles.deliverBadge,
+            ]}
+          >
+            <Text style={styles.modeBadgeText}>
+              {mode === "pickup" ? "🏪 PICKUP MODE" : "📦 DELIVERY MODE"}
+            </Text>
+          </View>
+
+          <View style={styles.trackingBadge}>
+            <View
+              style={[
+                styles.trackingDot,
+                isTracking && styles.trackingDotActive,
+              ]}
+            />
+            <Text style={styles.trackingText}>
+              {isTracking ? "Live" : "Off"}
+            </Text>
+          </View>
         </View>
 
-        {/* Route Info Badge */}
         {routeInfo && (
-          <View style={styles.routeInfoBadge}>
+          <View style={styles.routeInfoCard}>
             <Text style={styles.routeInfoText}>
-              {routeInfo.distance_km.toFixed(1)} km • {routeInfo.duration_min} min
+              {"📍 " +
+                routeInfo.distance_km +
+                " km  •  ⏱️ ~" +
+                routeInfo.duration_min +
+                " min"}
             </Text>
           </View>
         )}
-
-        <View style={styles.trackingBadge}>
-          <View style={[styles.trackingDot, isTracking && styles.trackingDotActive]} />
-          <Text style={styles.trackingText}>{isTracking ? "Live" : "Off"}</Text>
-        </View>
       </SafeAreaView>
 
-      {/* Recenter Button */}
-      {userHasInteracted && (
+      {/* NAVIGATE BUTTON */}
+      <Pressable style={styles.navigateBtn} onPress={openGoogleMaps}>
+        <Text style={styles.navigateBtnIcon}>🧭</Text>
+        <Text style={styles.navigateBtnText}>Navigate</Text>
+      </Pressable>
+
+      {/* RECENTER */}
+      {userInteracted && (
         <Pressable style={styles.recenterBtn} onPress={handleRecenter}>
-          <Text style={styles.recenterIcon}>🎯</Text>
-          <Text style={styles.recenterText}>Recenter</Text>
+          <Text style={styles.recenterBtnIcon}>🎯</Text>
         </Pressable>
       )}
 
-      {/* Bottom Sheet */}
-      <Animated.View style={[styles.bottomSheet, { transform: [{ translateY }] }]}>
+      {/* BOTTOM SHEET */}
+      <Animated.View
+        style={[
+          styles.bottomSheet,
+          { transform: [{ translateY: translateY }] },
+        ]}
+      >
         <View style={styles.dragHandle} />
 
-        <ScrollView style={styles.sheetContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.sheetScroll}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
           {mode === "pickup" ? (
-            <PickupInfo
-              pickup={currentTarget}
+            <PickupDetails
+              target={currentTarget}
               onPickedUp={handlePickedUp}
               onCall={handleCall}
               updating={updating}
             />
           ) : (
-            <DeliveryInfoCard
-              delivery={currentTarget}
+            <DeliveryDetails
+              target={currentTarget}
               onDelivered={handleDelivered}
               onCall={handleCall}
               updating={updating}
             />
           )}
 
-          {/* Upcoming List */}
-          <View style={styles.upcomingSection}>
-            <Text style={styles.upcomingTitle}>
-              {mode === "pickup"
-                ? `Upcoming Pickups (${Math.max(0, pickups.length - 1)})`
-                : `Upcoming Deliveries (${Math.max(0, deliveries.length - 1)})`}
-            </Text>
-
-            {mode === "pickup" &&
-              pickups.slice(1).map((pickup, index) => (
-                <UpcomingCard
-                  key={pickup.delivery_id}
-                  item={pickup}
-                  index={index + 2}
-                  type="pickup"
-                />
-              ))}
-
-            {mode === "delivery" &&
-              deliveries.slice(1).map((delivery, index) => (
-                <UpcomingCard
-                  key={delivery.delivery_id}
-                  item={delivery}
-                  index={index + 2}
-                  type="delivery"
-                />
-              ))}
-          </View>
-
-          {/* Start Delivery Button */}
-          {mode === "pickup" && pickups.length === 0 && deliveries.length > 0 && (
-            <Pressable style={styles.startDeliveryBtn} onPress={handleStartDelivery}>
-              <Text style={styles.startDeliveryText}>START DELIVERY</Text>
-            </Pressable>
+          {/* UPCOMING PICKUPS */}
+          {mode === "pickup" && pickups.length > 1 && (
+            <View style={styles.upcomingSection}>
+              <Text style={styles.upcomingTitle}>
+                {"Upcoming Pickups (" + (pickups.length - 1) + ")"}
+              </Text>
+              {pickups.slice(1).map(function (p, i) {
+                return (
+                  <Pressable
+                    key={p.delivery_id}
+                    style={styles.upcomingCard}
+                    onPress={() => setCurrentTarget(p)}
+                  >
+                    <View style={styles.upcomingIndex}>
+                      <Text style={styles.upcomingIndexText}>{i + 2}</Text>
+                    </View>
+                    <View style={styles.upcomingInfo}>
+                      <Text style={styles.upcomingName}>
+                        {(p.restaurant && p.restaurant.name) ||
+                          p.restaurantname ||
+                          "Restaurant"}
+                      </Text>
+                      <Text style={styles.upcomingMeta}>
+                        {"#" + (p.order_number || p.delivery_id)}
+                      </Text>
+                    </View>
+                    <View style={styles.upcomingRight}>
+                      {p.distance_km ? (
+                        <Text style={styles.upcomingDist}>
+                          {p.distance_km + " km"}
+                        </Text>
+                      ) : null}
+                      {p.estimated_time_minutes ? (
+                        <Text style={styles.upcomingTime}>
+                          {p.estimated_time_minutes + " min"}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
           )}
+
+          {/* UPCOMING DELIVERIES */}
+          {mode === "deliver" && deliveriesList.length > 1 && (
+            <View style={styles.upcomingSection}>
+              <Text style={styles.upcomingTitle}>
+                {"Upcoming Deliveries (" + (deliveriesList.length - 1) + ")"}
+              </Text>
+              {deliveriesList.slice(1).map(function (d, i) {
+                return (
+                  <Pressable
+                    key={d.delivery_id}
+                    style={styles.upcomingCard}
+                    onPress={() => setCurrentTarget(d)}
+                  >
+                    <View style={styles.upcomingIndex}>
+                      <Text style={styles.upcomingIndexText}>{i + 2}</Text>
+                    </View>
+                    <View style={styles.upcomingInfo}>
+                      <Text style={styles.upcomingName}>
+                        {(d.customer && d.customer.name) ||
+                          d.name ||
+                          "Customer"}
+                      </Text>
+                      <Text style={styles.upcomingMeta}>
+                        {"#" + (d.order_number || d.delivery_id)}
+                      </Text>
+                    </View>
+                    <View style={styles.upcomingRight}>
+                      {d.distance_km ? (
+                        <Text style={styles.upcomingDist}>
+                          {d.distance_km + " km"}
+                        </Text>
+                      ) : null}
+                      {d.estimated_time_minutes ? (
+                        <Text style={styles.upcomingTime}>
+                          {d.estimated_time_minutes + " min"}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+
+          {/* START DELIVERY button – shown once all pickups are done */}
+          {mode === "pickup" &&
+            pickups.length === 0 &&
+            deliveriesList.length > 0 && (
+              <Pressable
+                style={styles.startDeliveryBtn}
+                onPress={handleStartDelivery}
+              >
+                <Text style={styles.startDeliveryBtnText}>
+                  {"🚀 START DELIVERY"}
+                </Text>
+              </Pressable>
+            )}
 
           <View style={{ height: 40 }} />
         </ScrollView>
@@ -613,134 +1028,261 @@ export default function DriverMapScreen({ route, navigation }) {
 }
 
 // ============================================================================
-// SUB COMPONENTS
+// PICKUP DETAILS
 // ============================================================================
 
-function PickupInfo({ pickup, onPickedUp, onCall, updating }) {
-  const { order_number, restaurant, distance_km, estimated_time_minutes } = pickup;
+function PickupDetails({ target, onPickedUp, onCall, updating }) {
+  var restaurant = target.restaurant || {};
+  var orderItems = target.order_items || target.items || [];
 
   return (
-    <View style={styles.infoCard}>
-      <View style={styles.infoHeader}>
+    <View style={styles.detailsWrap}>
+      {/* Block 1: Order number + distance + time */}
+      <View style={styles.orderHeaderCard}>
         <View>
-          <Text style={styles.orderNumber}>Order #{order_number}</Text>
-          <Text style={styles.targetName}>{restaurant?.name}</Text>
+          <Text style={styles.orderHeaderLabel}>ORDER ID</Text>
+          <Text style={styles.orderHeaderValue}>
+            {"#" + (target.order_number || target.delivery_id)}
+          </Text>
         </View>
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{distance_km} km</Text>
+        <View style={styles.orderHeaderBadges}>
+          {target.distance_km ? (
+            <View style={styles.distBadge}>
+              <Text style={styles.distBadgeText}>
+                {"📍 " + target.distance_km + " km"}
+              </Text>
+            </View>
+          ) : null}
+          {target.estimated_time_minutes ? (
+            <View style={styles.distBadge}>
+              <Text style={styles.distBadgeText}>
+                {"⏱ " + target.estimated_time_minutes + " min"}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      {/* Block 2: Restaurant info */}
+      <View style={styles.infoCard}>
+        <View style={styles.infoCardRow}>
+          <View style={styles.infoCardMain}>
+            <Text style={styles.infoCardName}>
+              {restaurant.name || target.restaurantname || "Restaurant"}
+            </Text>
+            <Text style={styles.infoCardAddress}>
+              {restaurant.address || target.restaurantaddress || "No address"}
+            </Text>
           </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{estimated_time_minutes} min</Text>
+          <View style={styles.infoCardActions}>
+            {restaurant.phone || target.restaurant_phone ? (
+              <Pressable
+                style={styles.iconBtn}
+                onPress={() =>
+                  onCall(restaurant.phone || target.restaurant_phone)
+                }
+              >
+                <Text style={styles.iconBtnText}>📞</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </View>
 
-      <Text style={styles.addressText}>{restaurant?.address}</Text>
-
-      {restaurant?.phone && (
-        <Pressable style={styles.callBtn} onPress={() => onCall(restaurant.phone)}>
-          <Text style={styles.callIcon}>📞</Text>
-          <Text style={styles.callText}>{restaurant.phone}</Text>
-        </Pressable>
+      {/* Block 3: Order items */}
+      {orderItems.length > 0 && (
+        <View style={styles.itemsSection}>
+          <Text style={styles.itemsSectionTitle}>{"📦 Order Items"}</Text>
+          <View style={styles.itemsCard}>
+            {orderItems.map(function (item, idx) {
+              var name = item.food_name || item.name || "Item";
+              var qty = item.quantity || 1;
+              return (
+                <View
+                  key={idx}
+                  style={[
+                    styles.itemRow,
+                    idx < orderItems.length - 1 && styles.itemRowBorder,
+                  ]}
+                >
+                  <View style={styles.itemQtyBadge}>
+                    <Text style={styles.itemQty}>{qty + "x"}</Text>
+                  </View>
+                  <View style={styles.itemDetails}>
+                    <Text style={styles.itemNameText}>{name}</Text>
+                    {item.size ? (
+                      <Text style={styles.itemSize}>
+                        {item.size.charAt(0).toUpperCase() + item.size.slice(1)}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </View>
       )}
 
+      {/* Action */}
       <Pressable
-        style={[styles.actionBtn, styles.pickupBtn, updating && styles.actionBtnDisabled]}
+        style={[
+          styles.actionBtn,
+          styles.pickupActionBtn,
+          updating && styles.actionBtnDisabled,
+        ]}
         onPress={onPickedUp}
         disabled={updating}
       >
-        <Text style={styles.actionBtnText}>
-          {updating ? "Updating..." : "MARK AS PICKED UP"}
-        </Text>
+        {updating ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.actionBtnText}>{"✅ Mark as Picked Up"}</Text>
+        )}
       </Pressable>
     </View>
   );
 }
 
-function DeliveryInfoCard({ delivery, onDelivered, onCall, updating }) {
-  const { order_number, customer, pricing, distance_km, estimated_time_minutes, restaurant_name } = delivery;
+// ============================================================================
+// DELIVERY DETAILS
+// ============================================================================
+
+function DeliveryDetails({ target, onDelivered, onCall, updating }) {
+  var customer = target.customer || {};
+  var delivItems = target.items || [];
 
   return (
-    <View style={styles.infoCard}>
-      <View style={styles.infoHeader}>
+    <View style={styles.detailsWrap}>
+      {/* Block 1: Order number + distance + time */}
+      <View style={styles.orderHeaderCard}>
         <View>
-          <Text style={styles.orderNumber}>Order #{order_number}</Text>
-          <Text style={styles.targetName}>{customer?.name}</Text>
+          <Text style={styles.orderHeaderLabel}>ORDER ID</Text>
+          <Text style={styles.orderHeaderValue}>
+            {"#" + (target.order_number || target.delivery_id)}
+          </Text>
         </View>
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{distance_km} km</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{estimated_time_minutes} min</Text>
-          </View>
+        <View style={styles.orderHeaderBadges}>
+          {target.distance_km ? (
+            <View style={styles.distBadge}>
+              <Text style={styles.distBadgeText}>
+                {"📍 " + target.distance_km + " km"}
+              </Text>
+            </View>
+          ) : null}
+          {target.estimated_time_minutes ? (
+            <View style={styles.distBadge}>
+              <Text style={styles.distBadgeText}>
+                {"⏱ " + target.estimated_time_minutes + " min"}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
-      {/* Pricing Box */}
-      <View style={styles.pricingBox}>
-        <Text style={styles.pricingFrom}>From: {restaurant_name}</Text>
-        <View style={styles.pricingGrid}>
-          <View style={styles.pricingItem}>
-            <Text style={styles.pricingLabel}>Subtotal</Text>
-            <Text style={styles.pricingValue}>Rs. {pricing?.subtotal?.toFixed(2)}</Text>
-          </View>
-          <View style={styles.pricingItem}>
-            <Text style={styles.pricingLabel}>Delivery</Text>
-            <Text style={styles.pricingValue}>Rs. {pricing?.delivery_fee?.toFixed(2)}</Text>
-          </View>
-          <View style={styles.pricingItem}>
-            <Text style={styles.pricingLabel}>Service</Text>
-            <Text style={styles.pricingValue}>Rs. {pricing?.service_fee?.toFixed(2)}</Text>
-          </View>
-          <View style={styles.pricingItem}>
-            <Text style={styles.pricingLabel}>Total</Text>
-            <Text style={[styles.pricingValue, styles.totalValue]}>
-              Rs. {pricing?.total?.toFixed(2)}
+      {/* Block 2: Customer info */}
+      <View style={styles.infoCard}>
+        <View style={styles.infoCardRow}>
+          <View style={styles.infoCardMain}>
+            <Text style={styles.infoCardName}>
+              {customer.name || target.name || "Customer"}
             </Text>
+            <Text style={styles.infoCardAddress}>
+              {customer.address || target.delivery_location || "No address"}
+            </Text>
+            {customer.city ? (
+              <Text style={styles.infoCardCity}>{customer.city}</Text>
+            ) : null}
+          </View>
+          <View style={styles.infoCardActions}>
+            {customer.phone || target.phone ? (
+              <Pressable
+                style={styles.iconBtn}
+                onPress={() => onCall(customer.phone || target.phone)}
+              >
+                <Text style={styles.iconBtnText}>📞</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </View>
 
-      <Text style={styles.addressText}>{customer?.address}</Text>
+      {/* Special instructions */}
+      {target.delivery_instructions ? (
+        <View style={styles.instructionsCard}>
+          <Text style={styles.instructionsTitle}>
+            {"📝 Special Instructions"}
+          </Text>
+          <Text style={styles.instructionsText}>
+            {target.delivery_instructions}
+          </Text>
+        </View>
+      ) : null}
 
-      {customer?.phone && (
-        <Pressable style={styles.callBtn} onPress={() => onCall(customer.phone)}>
-          <Text style={styles.callIcon}>📞</Text>
-          <Text style={styles.callText}>{customer.phone}</Text>
-        </Pressable>
+      {/* Block 3: Order items */}
+      {delivItems.length > 0 && (
+        <View style={styles.itemsSection}>
+          <Text style={styles.itemsSectionTitle}>{"📦 Order Items"}</Text>
+          <View style={styles.itemsCard}>
+            {delivItems.map(function (item, idx) {
+              var name = item.food_name || item.name || "Item";
+              var qty = item.quantity || 1;
+              return (
+                <View
+                  key={idx}
+                  style={[
+                    styles.itemRow,
+                    idx < delivItems.length - 1 && styles.itemRowBorder,
+                  ]}
+                >
+                  <View style={styles.itemQtyBadge}>
+                    <Text style={styles.itemQty}>{qty + "x"}</Text>
+                  </View>
+                  <View style={styles.itemDetails}>
+                    <Text style={styles.itemNameText}>{name}</Text>
+                    {item.size ? (
+                      <Text style={styles.itemSize}>
+                        {item.size.charAt(0).toUpperCase() + item.size.slice(1)}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </View>
       )}
 
+      {/* Block 4: Total amount to collect */}
+      <View style={styles.totalAmountCard}>
+        <View>
+          <Text style={styles.totalAmountLabel}>TOTAL AMOUNT</Text>
+          <Text style={styles.totalAmountValue}>
+            {"LKR " +
+              parseFloat(
+                (target.pricing && target.pricing.total) ||
+                  parseFloat(target.total_amount || 0) +
+                    parseFloat(target.delivery_fee || 0),
+              ).toFixed(2)}
+          </Text>
+        </View>
+      </View>
+
+      {/* Action */}
       <Pressable
-        style={[styles.actionBtn, styles.deliverBtn, updating && styles.actionBtnDisabled]}
+        style={[
+          styles.actionBtn,
+          styles.deliverActionBtn,
+          updating && styles.actionBtnDisabled,
+        ]}
         onPress={onDelivered}
         disabled={updating}
       >
-        <Text style={styles.actionBtnText}>
-          {updating ? "Updating..." : "MARK AS DELIVERED"}
-        </Text>
+        {updating ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.actionBtnText}>{"✅ Mark as Delivered"}</Text>
+        )}
       </Pressable>
-    </View>
-  );
-}
-
-function UpcomingCard({ item, index, type }) {
-  const name = type === "pickup" ? item.restaurant?.name : item.customer?.name;
-
-  return (
-    <View style={styles.upcomingCard}>
-      <View style={styles.upcomingIndex}>
-        <Text style={styles.upcomingIndexText}>{index}</Text>
-      </View>
-      <View style={styles.upcomingInfo}>
-        <Text style={styles.upcomingName}>{name}</Text>
-        <Text style={styles.upcomingOrder}>#{item.order_number}</Text>
-      </View>
-      <View style={styles.upcomingStats}>
-        <Text style={styles.upcomingStat}>{item.distance_km} km</Text>
-        <Text style={styles.upcomingStat}>{item.estimated_time_minutes} min</Text>
-      </View>
     </View>
   );
 }
@@ -749,171 +1291,144 @@ function UpcomingCard({ item, index, type }) {
 // STYLES
 // ============================================================================
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F3F4F6",
+var SHADOW = Platform.select({
+  ios: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
   },
-  map: {
-    ...StyleSheet.absoluteFillObject,
+  android: {
+    elevation: 4,
   },
+});
 
-  // Loading
+var styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#F3F4F6" },
+
+  // Loading / Empty
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#fff",
+    backgroundColor: "#F3F4F6",
   },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#6B7280",
-  },
-
-  // Empty State
-  emptyContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    padding: 24,
-  },
-  emptyEmoji: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#374151",
-    marginBottom: 24,
-  },
-  emptyButton: {
+  loadingText: { marginTop: 16, fontSize: 16, color: "#6B7280" },
+  emptyEmoji: { fontSize: 64, marginBottom: 16 },
+  emptyText: { fontSize: 18, color: "#6B7280", marginBottom: 24 },
+  goBackBtn: {
     backgroundColor: "#10B981",
-    paddingHorizontal: 24,
+    paddingHorizontal: 28,
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 14,
   },
-  emptyButtonText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 16,
-  },
+  goBackBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
 
-  // Markers
-  markerContainer: {
-    alignItems: "center",
-  },
-  markerPin: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 3,
-    borderColor: "#fff",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 6,
-  },
-  driverPin: {
-    backgroundColor: "#3B82F6",
-  },
-  restaurantPin: {
-    backgroundColor: "#EF4444",
-  },
-  customerPin: {
-    backgroundColor: "#10B981",
-  },
-  markerEmoji: {
-    fontSize: 20,
-  },
-
-  // Top Badges
-  topBadges: {
+  // Top
+  topContainer: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
+    zIndex: 10,
+  },
+  topBadges: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
+    alignItems: "center",
+    paddingHorizontal: 14,
     paddingTop: 8,
+    gap: 8,
   },
-  modeBadge: {
+  backButton: {
     backgroundColor: "#fff",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    ...SHADOW,
   },
+  backButtonText: { fontSize: 14, fontWeight: "700", color: "#374151" },
+  modeBadge: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    ...SHADOW,
+  },
+  pickupBadge: { backgroundColor: "#FEF3C7" },
+  deliverBadge: { backgroundColor: "#D1FAE5" },
   modeBadgeText: {
     fontSize: 13,
-    fontWeight: "700",
-    color: "#374151",
+    fontWeight: "800",
+    color: "#111827",
+    textAlign: "center",
   },
   trackingBadge: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 24,
     flexDirection: "row",
     alignItems: "center",
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
     gap: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 5,
+    ...SHADOW,
   },
   trackingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#9CA3AF",
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#D1D5DB",
   },
-  trackingDotActive: {
-    backgroundColor: "#10B981",
+  trackingDotActive: { backgroundColor: "#10B981" },
+  trackingText: { fontSize: 12, fontWeight: "700", color: "#374151" },
+
+  // Route Info
+  routeInfoCard: {
+    marginHorizontal: 14,
+    marginTop: 8,
+    backgroundColor: "#fff",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
+    ...SHADOW,
   },
-  trackingText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#374151",
+  routeInfoText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#10B981",
+    textAlign: "center",
   },
 
-  // Recenter Button
-  recenterBtn: {
+  // Navigate / Recenter
+  navigateBtn: {
     position: "absolute",
-    top: 100,
-    right: 16,
-    backgroundColor: "#fff",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 24,
+    bottom: SCREEN_HEIGHT * 0.46 + 60,
+    right: 14,
     flexDirection: "row",
     alignItems: "center",
+    backgroundColor: "#3B82F6",
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: 25,
     gap: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 6,
+    zIndex: 10,
+    ...SHADOW,
   },
-  recenterIcon: {
-    fontSize: 16,
+  navigateBtnIcon: { fontSize: 18 },
+  navigateBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  recenterBtn: {
+    position: "absolute",
+    bottom: SCREEN_HEIGHT * 0.46 + 8,
+    right: 14,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#fff",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
+    ...SHADOW,
   },
-  recenterText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#3B82F6",
-  },
+  recenterBtnIcon: { fontSize: 22 },
 
   // Bottom Sheet
   bottomSheet: {
@@ -921,143 +1436,156 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    maxHeight: SCREEN_HEIGHT * 0.5,
+    height: SCREEN_HEIGHT * 0.46,
     backgroundColor: "#fff",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+      },
+      android: { elevation: 10 },
+    }),
   },
   dragHandle: {
     width: 40,
     height: 4,
-    backgroundColor: "#D1D5DB",
+    backgroundColor: "#E5E7EB",
     borderRadius: 2,
     alignSelf: "center",
-    marginTop: 12,
-    marginBottom: 8,
+    marginTop: 10,
+    marginBottom: 10,
   },
-  sheetContent: {
-    flex: 1,
-    paddingHorizontal: 20,
+  sheetScroll: { flex: 1, paddingHorizontal: 18 },
+
+  // Details
+  detailsWrap: { paddingBottom: 10 },
+  detailsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
   },
+  detailsTitle: { fontSize: 20, fontWeight: "800", color: "#111827" },
+  orderIdBadge: {
+    backgroundColor: "#F3F4F6",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  orderIdText: { fontSize: 13, fontWeight: "700", color: "#6B7280" },
 
   // Info Card
   infoCard: {
-    paddingVertical: 16,
+    backgroundColor: "#F9FAFB",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
   },
-  infoHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 12,
-  },
-  orderNumber: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6B7280",
-    textTransform: "uppercase",
-  },
-  targetName: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#111827",
-    marginTop: 4,
-  },
-  statsRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  statItem: {
-    alignItems: "flex-end",
-  },
-  statValue: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#374151",
-  },
-  addressText: {
-    fontSize: 14,
-    color: "#6B7280",
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  callBtn: {
+  infoCardHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 16,
-  },
-  callIcon: {
-    fontSize: 16,
-  },
-  callText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#3B82F6",
-  },
-
-  // Pricing Box
-  pricingBox: {
-    backgroundColor: "#F9FAFB",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-  },
-  pricingFrom: {
-    fontSize: 12,
-    color: "#6B7280",
     marginBottom: 8,
   },
-  pricingGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+  infoCardEmoji: { fontSize: 18 },
+  infoCardLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#6B7280",
+    letterSpacing: 0.5,
   },
-  pricingItem: {
-    width: "48%",
+  infoCardName: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 4,
   },
-  pricingLabel: {
-    fontSize: 11,
-    color: "#9CA3AF",
+  infoCardAddress: {
+    fontSize: 14,
+    color: "#6B7280",
+    lineHeight: 20,
+    marginBottom: 10,
   },
-  pricingValue: {
+  callBtn: {
+    backgroundColor: "#3B82F6",
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  callBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+
+  // Instructions
+  instructionsCard: {
+    backgroundColor: "#FFFBEB",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+    borderLeftWidth: 4,
+    borderLeftColor: "#F59E0B",
+  },
+  instructionsTitle: {
     fontSize: 14,
     fontWeight: "700",
+    color: "#92400E",
+    marginBottom: 6,
+  },
+  instructionsText: { fontSize: 14, color: "#78350F", lineHeight: 20 },
+
+  // Items
+  itemsSection: { marginBottom: 14 },
+  itemsSectionTitle: {
+    fontSize: 15,
+    fontWeight: "700",
     color: "#374151",
+    marginBottom: 8,
   },
-  totalValue: {
-    color: "#10B981",
-    fontSize: 16,
-  },
+  itemsCard: { backgroundColor: "#F9FAFB", borderRadius: 14, padding: 14 },
+  itemRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8 },
+  itemRowBorder: { borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
+  itemQty: { fontSize: 14, fontWeight: "700", color: "#10B981", width: 36 },
+  itemNameText: { flex: 1, fontSize: 14, color: "#374151" },
+  itemPrice: { fontSize: 14, fontWeight: "700", color: "#111827" },
 
-  // Action Buttons
-  actionBtn: {
-    height: 54,
+  // Pricing
+  pricingCard: {
+    backgroundColor: "#F9FAFB",
     borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
+    padding: 16,
+    marginBottom: 16,
   },
-  pickupBtn: {
-    backgroundColor: "#10B981",
+  pricingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
   },
-  deliverBtn: {
-    backgroundColor: "#10B981",
+  pricingLabel: { fontSize: 14, color: "#6B7280" },
+  pricingValue: { fontSize: 14, color: "#374151", fontWeight: "600" },
+  pricingDivider: {
+    height: 1,
+    backgroundColor: "#E5E7EB",
+    marginVertical: 8,
   },
-  actionBtnDisabled: {
-    opacity: 0.6,
-  },
-  actionBtnText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "800",
-  },
+  pricingTotalLabel: { fontSize: 16, fontWeight: "700", color: "#111827" },
+  pricingTotalValue: { fontSize: 16, fontWeight: "700", color: "#10B981" },
 
-  // Upcoming Section
+  // Action
+  actionBtn: {
+    height: 56,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  pickupActionBtn: { backgroundColor: "#F59E0B" },
+  deliverActionBtn: { backgroundColor: "#10B981" },
+  actionBtnDisabled: { opacity: 0.55 },
+  actionBtnText: { color: "#fff", fontSize: 17, fontWeight: "800" },
+
+  // Upcoming
   upcomingSection: {
     marginTop: 20,
     paddingTop: 16,
@@ -1065,7 +1593,7 @@ const styles = StyleSheet.create({
     borderTopColor: "#E5E7EB",
   },
   upcomingTitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "700",
     color: "#374151",
     marginBottom: 12,
@@ -1083,66 +1611,105 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     backgroundColor: "#E5E7EB",
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
     marginRight: 12,
   },
-  upcomingIndexText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#374151",
-  },
-  upcomingInfo: {
-    flex: 1,
-  },
-  upcomingName: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  upcomingOrder: {
-    fontSize: 11,
-    color: "#6B7280",
-    marginTop: 2,
-  },
-  upcomingStats: {
-    alignItems: "flex-end",
-  },
-  upcomingStat: {
-    fontSize: 11,
-    color: "#6B7280",
-  },
+  upcomingIndexText: { fontSize: 13, fontWeight: "700", color: "#374151" },
+  upcomingInfo: { flex: 1 },
+  upcomingName: { fontSize: 14, fontWeight: "600", color: "#111827" },
+  upcomingMeta: { fontSize: 12, color: "#9CA3AF", marginTop: 2 },
+  upcomingRight: { alignItems: "flex-end" },
+  upcomingDist: { fontSize: 12, fontWeight: "700", color: "#10B981" },
+  upcomingTime: { fontSize: 11, color: "#6B7280", marginTop: 2 },
 
-  // Start Delivery Button
+  // Start Delivery button
   startDeliveryBtn: {
-    height: 54,
-    backgroundColor: "#3B82F6",
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
     marginTop: 16,
+    height: 56,
+    borderRadius: 14,
+    backgroundColor: "#3B82F6",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  startDeliveryText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "800",
+  startDeliveryBtnText: { color: "#fff", fontSize: 17, fontWeight: "800" },
+
+  // Order header card (Block 1 in PickupDetails / DeliveryDetails)
+  orderHeaderCard: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
-  
-  // Route Info Badge
-  routeInfoBadge: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  routeInfoText: {
-    fontSize: 13,
+  orderHeaderLabel: {
+    fontSize: 11,
     fontWeight: "700",
-    color: "#10B981",
+    color: "#6B7280",
+    letterSpacing: 0.5,
+    marginBottom: 2,
   },
+  orderHeaderValue: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  orderHeaderBadges: { flexDirection: "row", gap: 6 },
+  distBadge: {
+    backgroundColor: "#D1FAE5",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  distBadgeText: { fontSize: 12, fontWeight: "700", color: "#065F46" },
+
+  // Info card row layout
+  infoCardRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  infoCardMain: { flex: 1, marginRight: 10 },
+  infoCardCity: { fontSize: 13, color: "#9CA3AF", marginTop: 2 },
+  infoCardActions: { gap: 8 },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#10B981",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  iconBtnText: { fontSize: 18 },
+
+  // Item layout
+  itemQtyBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#D1FAE5",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+  itemDetails: { flex: 1 },
+  itemSize: { fontSize: 12, color: "#9CA3AF", marginTop: 2 },
+
+  // Total amount card
+  totalAmountCard: {
+    backgroundColor: "#F9FAFB",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  totalAmountLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#6B7280",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  totalAmountValue: { fontSize: 24, fontWeight: "800", color: "#10B981" },
 });

@@ -1,45 +1,41 @@
 /**
- * Active Deliveries Screen (React Native)
+ * Active Deliveries Screen (React Native) - ENHANCED VERSION
  *
- * Converted from web version with same logic and styling:
+ * Converted from web version with EXACT same logic and styling:
  * - Full route map overview (Driver → All Restaurants → All Customers)
+ * - Individual pickup/delivery cards with mini maps
  * - Optimized route order using OSRM real driving distances
- * - OSRM routing for segment-by-segment directions
+ * - Movement-based refresh (30m threshold)
  * - Pickup and Deliver modes with auto-switch
  * - Interactive maps with FREE OpenStreetMap tiles
- * - Polyline routes
- * - Skeleton loading with shimmer
+ * - Skeleton loading with shimmer effects
  * - Caching for instant load
- * - Real-time location updates every 3 seconds
+ * - Real-time location updates with watchPosition
  * - Auto-navigate to map page when deliveries available
  */
 
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-} from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
+import * as Location from "expo-location";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
   ActivityIndicator,
-  RefreshControl,
+  Animated,
+  Dimensions,
   Linking,
   Platform,
-  Dimensions,
-  Animated,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FreeMapView from "../../components/maps/FreeMapView";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../../constants/api";
-import * as Location from "expo-location";
-import { getOSRMRoute } from "../../services/mapService";
+import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -49,17 +45,14 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 const CACHE_KEY_ACTIVE = "active_deliveries_cache";
 const CACHE_EXPIRY = 30000; // 30 seconds cache (active deliveries need fresher data)
-const LOCATION_UPDATE_INTERVAL = 3000; // 3 seconds
-const DATA_REFRESH_INTERVAL = 5000; // 5 seconds
+const LIVE_TRACKING_INTERVAL = 3000; // 3 seconds - smooth driver marker updates
+const DATA_REFRESH_THRESHOLD = 100; // Only fetch API data when driver moves 100m+
 
 // Default driver location (Kinniya, Sri Lanka)
 const DEFAULT_DRIVER_LOCATION = {
   latitude: 8.5017,
   longitude: 81.186,
 };
-
-// Carto Voyager tiles (FREE - no API key needed)
-const CARTO_TILE_URL = "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png";
 
 // Marker colors
 const MARKER_COLORS = {
@@ -92,7 +85,7 @@ const saveCacheData = async (data) => {
   try {
     await AsyncStorage.setItem(
       CACHE_KEY_ACTIVE,
-      JSON.stringify({ data, timestamp: Date.now() })
+      JSON.stringify({ data, timestamp: Date.now() }),
     );
   } catch (e) {
     console.warn("Cache save error:", e);
@@ -100,30 +93,11 @@ const saveCacheData = async (data) => {
 };
 
 // ============================================================================
-// OSRM DISTANCE CALCULATOR (Real driving distance via OSRM API)
+// DISTANCE CALCULATOR
 // ============================================================================
 
-/**
- * Get driving distance using OSRM (free routing service)
- * Returns distance in meters
- */
-const getOSRMDistance = async (lat1, lng1, lat2, lng2) => {
-  try {
-    const result = await getOSRMRoute(lat1, lng1, lat2, lng2);
-    if (result.success) {
-      return result.distance_km * 1000; // Convert km to meters
-    }
-    // Fallback to straight-line if OSRM fails
-    return straightLineDistance(lat1, lng1, lat2, lng2);
-  } catch (error) {
-    console.warn('OSRM distance error:', error);
-    return straightLineDistance(lat1, lng1, lat2, lng2);
-  }
-};
-
-// Fallback straight-line distance (only used if OSRM fails)
-const straightLineDistance = (lat1, lng1, lat2, lng2) => {
-  const R = 6371000;
+const getDistanceMeters = (lat1, lng1, lat2, lng2) => {
+  const R = 6371000; // Earth's radius in meters
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
   const a =
@@ -132,8 +106,29 @@ const straightLineDistance = (lat1, lng1, lat2, lng2) => {
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLng / 2) *
       Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+// ============================================================================
+// OSRM DISTANCE CALCULATOR
+// ============================================================================
+
+const getOSRMDistance = async (lat1, lng1, lat2, lng2) => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const url = `https://router.project-osrm.org/route/v1/foot/${lng1},${lat1};${lng2},${lat2}?overview=false`;
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    const data = await response.json();
+    if (data.code === "Ok" && data.routes?.[0]) {
+      return data.routes[0].distance; // meters
+    }
+    return null;
+  } catch (e) {
+    console.warn(`[OSRM] Distance request failed: ${e.message}`);
+    return null;
+  }
 };
 
 // ============================================================================
@@ -176,11 +171,165 @@ const decodePolyline = (encoded) => {
 };
 
 // ============================================================================
+// PICKUP CARD COMPONENT (Matching web version structure)
+// ============================================================================
+
+const PickupCard = ({ pickup, index, isFirst, driverLocation }) => {
+  const navigation = useNavigation();
+
+  const formatDistance = (meters) => {
+    if (!meters) return "Calculating...";
+    return meters < 1000
+      ? `${Math.round(meters)}m`
+      : `${(meters / 1000).toFixed(1)}km`;
+  };
+
+  const formatETA = (seconds) => {
+    if (!seconds) return "Calculating...";
+    const mins = Math.round(seconds / 60);
+    return `~${mins} min${mins !== 1 ? "s" : ""}`;
+  };
+
+  const handleNavigate = () => {
+    navigation.navigate("DriverMap", {
+      deliveryId: pickup.delivery_id,
+      mode: "pickup",
+    });
+  };
+
+  return (
+    <View style={styles.deliveryCard}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle}>
+          {isFirst ? "🎯 Next Pickup" : `Pickup #${index + 1}`}
+        </Text>
+        {isFirst && (
+          <View style={styles.nextBadge}>
+            <Text style={styles.nextBadgeText}>START</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Restaurant Info */}
+      <View style={styles.stopSection}>
+        <View style={styles.stopIcon}>
+          <Text style={styles.stopEmoji}>🏪</Text>
+        </View>
+        <View style={styles.stopDetails}>
+          <Text style={styles.stopTitle}>
+            {pickup.restaurantname || "Unknown Restaurant"}
+          </Text>
+          <Text style={styles.stopAddress}>
+            {pickup.restaurantaddress || "No address"}
+          </Text>
+          {pickup.restaurantDistance && (
+            <Text style={styles.stopMeta}>
+              📍 {formatDistance(pickup.restaurantDistance)}
+            </Text>
+          )}
+        </View>
+      </View>
+
+      {/* Customer Info */}
+      <View style={styles.stopSection}>
+        <View style={styles.stopIcon}>
+          <Text style={styles.stopEmoji}>📍</Text>
+        </View>
+        <View style={styles.stopDetails}>
+          <Text style={styles.stopTitle}>{pickup.name || "Customer"}</Text>
+          <Text style={styles.stopAddress}>
+            {pickup.delivery_location || "No address"}
+          </Text>
+          {pickup.customerDistance && (
+            <Text style={styles.stopMeta}>
+              📍 {formatDistance(pickup.customerDistance)}
+            </Text>
+          )}
+        </View>
+      </View>
+
+      {/* Action Button */}
+      <TouchableOpacity style={styles.startButton} onPress={handleNavigate}>
+        <Text style={styles.startButtonText}>🚗 Start Delivery</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+// ============================================================================
+// DELIVERY CARD COMPONENT (Matching web version structure)
+// ============================================================================
+
+const DeliveryCard = ({ delivery, index, isFirst, driverLocation }) => {
+  const navigation = useNavigation();
+
+  const formatDistance = (meters) => {
+    if (!meters) return "Calculating...";
+    return meters < 1000
+      ? `${Math.round(meters)}m`
+      : `${(meters / 1000).toFixed(1)}km`;
+  };
+
+  const handleNavigate = () => {
+    navigation.navigate("DriverMap", {
+      deliveryId: delivery.delivery_id,
+      mode: "deliver",
+    });
+  };
+
+  return (
+    <View style={styles.deliveryCard}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle}>
+          {isFirst ? "🎯 Next Delivery" : `Delivery #${index + 1}`}
+        </Text>
+        {isFirst && (
+          <View style={styles.nextBadge}>
+            <Text style={styles.nextBadgeText}>START</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Customer Info */}
+      <View style={styles.stopSection}>
+        <View style={styles.stopIcon}>
+          <Text style={styles.stopEmoji}>🏠</Text>
+        </View>
+        <View style={styles.stopDetails}>
+          <Text style={styles.stopTitle}>{delivery.name || "Customer"}</Text>
+          <Text style={styles.stopAddress}>
+            {delivery.delivery_location || "No address"}
+          </Text>
+          {delivery.customerDistance && (
+            <Text style={styles.stopMeta}>
+              📍 {formatDistance(delivery.customerDistance)}
+            </Text>
+          )}
+        </View>
+      </View>
+
+      {/* Action Button */}
+      <TouchableOpacity style={styles.startButton} onPress={handleNavigate}>
+        <Text style={styles.startButtonText}>🚗 Deliver Now</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+// ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
 export default function ActiveDeliveriesScreen({ navigation }) {
+  const isFocused = useIsFocused();
+  const isFocusedRef = useRef(true);
+
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
+
   // Initialize with cached data for instant display
+  const cachedData = useRef(null);
   const [pickups, setPickups] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
   const [mode, setMode] = useState("pickup"); // pickup | deliver
@@ -192,10 +341,12 @@ export default function ActiveDeliveriesScreen({ navigation }) {
   const [fullRouteData, setFullRouteData] = useState(null);
   const [toast, setToast] = useState(null);
 
-  // Refs
-  const locationIntervalRef = useRef(null);
-  const dataFetchIntervalRef = useRef(null);
+  // Refs for location tracking (matching web version)
+  const watchIdRef = useRef(null);
+  const lastLocationRef = useRef(null);
+  const lastFetchLocationRef = useRef(null);
   const isFetchingRef = useRef(false);
+  const hasFetchedInitialRef = useRef(false);
   const toastAnim = useRef(new Animated.Value(0)).current;
 
   // ============================================================================
@@ -208,9 +359,16 @@ export default function ActiveDeliveriesScreen({ navigation }) {
   }, []);
 
   const initScreen = async () => {
-    // Load cached data for instant display
+    const role = await AsyncStorage.getItem("role");
+    if (role !== "driver") {
+      navigation.replace("Login");
+      return;
+    }
+
+    // Load cached data for instant display (matching web version)
     const cached = await loadCachedData();
     if (cached) {
+      cachedData.current = cached;
       setPickups(cached.pickups || []);
       setDeliveries(cached.deliveries || []);
       setMode(cached.mode || "pickup");
@@ -220,74 +378,110 @@ export default function ActiveDeliveriesScreen({ navigation }) {
       setInitialLoading(false);
     }
 
-    // Get location and fetch fresh data
-    await fetchWithLocation(false);
-
-    // Update location every 3 seconds for live map display
-    locationIntervalRef.current = setInterval(() => {
-      updateLocation();
-    }, LOCATION_UPDATE_INTERVAL);
-
-    // Fetch data every 5 seconds (active deliveries need fresher data)
-    dataFetchIntervalRef.current = setInterval(() => {
-      console.log("[DATA REFRESH] Fetching active deliveries...");
-      fetchWithLocation(true);
-    }, DATA_REFRESH_INTERVAL);
+    // Initial fetch
+    await startLocationTracking();
   };
 
   const cleanup = () => {
-    if (locationIntervalRef.current) {
-      clearInterval(locationIntervalRef.current);
-      locationIntervalRef.current = null;
-    }
-    if (dataFetchIntervalRef.current) {
-      clearInterval(dataFetchIntervalRef.current);
-      dataFetchIntervalRef.current = null;
+    if (watchIdRef.current) {
+      watchIdRef.current.remove();
+      watchIdRef.current = null;
     }
   };
 
   // ============================================================================
-  // LOCATION TRACKING
+  // LOCATION TRACKING (Matching web version with watchPosition)
   // ============================================================================
 
-  const getLocation = async () => {
+  const startLocationTracking = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         console.log("[LOCATION] Permission denied, using default");
-        return DEFAULT_DRIVER_LOCATION;
+        const defaultLoc = DEFAULT_DRIVER_LOCATION;
+        lastLocationRef.current = defaultLoc;
+        lastFetchLocationRef.current = defaultLoc;
+        setDriverLocation(defaultLoc);
+        await fetchPickups(defaultLoc, false);
+        hasFetchedInitialRef.current = true;
+        return;
       }
+
+      // Get initial position
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
-      return {
+
+      const loc = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
       };
+
+      lastLocationRef.current = loc;
+      lastFetchLocationRef.current = loc;
+      setDriverLocation(loc);
+      await fetchPickups(loc, false);
+      hasFetchedInitialRef.current = true;
+
+      // Watch position: fires every 3s for smooth live tracking
+      // distanceInterval: 0 so marker updates continuously
+      watchIdRef.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: LIVE_TRACKING_INTERVAL, // 3 seconds
+          distanceInterval: 0, // Always fire for smooth marker updates
+        },
+        (position) => {
+          const newLoc = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          };
+
+          // Always update driver marker on map (smooth live tracking)
+          lastLocationRef.current = newLoc;
+          setDriverLocation(newLoc);
+
+          if (!hasFetchedInitialRef.current) {
+            hasFetchedInitialRef.current = true;
+            lastFetchLocationRef.current = newLoc;
+            fetchPickups(newLoc, false);
+            return;
+          }
+
+          // Only refresh API data when moved 100m+ from last fetch
+          const movedSinceFetch = lastFetchLocationRef.current
+            ? getDistanceMeters(
+                lastFetchLocationRef.current.latitude,
+                lastFetchLocationRef.current.longitude,
+                newLoc.latitude,
+                newLoc.longitude,
+              )
+            : Infinity;
+
+          if (movedSinceFetch >= DATA_REFRESH_THRESHOLD) {
+            // Only trigger API refresh when this tab is focused
+            if (!isFocusedRef.current) return;
+            console.log(
+              `[LOCATION] Moved ${movedSinceFetch.toFixed(0)}m since last fetch (threshold: ${DATA_REFRESH_THRESHOLD}m) → refreshing data`,
+            );
+            lastFetchLocationRef.current = newLoc;
+            fetchPickups(newLoc, true);
+          }
+        },
+      );
+
+      // NO periodic refresh intervals — only movement-based (matching web version)
     } catch (err) {
       console.error("[LOCATION] Error:", err);
-      return DEFAULT_DRIVER_LOCATION;
+      const defaultLoc = DEFAULT_DRIVER_LOCATION;
+      lastLocationRef.current = defaultLoc;
+      setDriverLocation(defaultLoc);
+      await fetchPickups(defaultLoc, false);
     }
   };
 
-  const updateLocation = async () => {
-    const location = await getLocation();
-    console.log(
-      `[LOCATION] Updated: (${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)})`
-    );
-    setDriverLocation(location);
-  };
-
-  const fetchWithLocation = async (isBackgroundRefresh = false) => {
-    if (isFetchingRef.current && isBackgroundRefresh) return;
-
-    const location = await getLocation();
-    setDriverLocation(location);
-    await fetchPickups(location, isBackgroundRefresh);
-  };
-
   // ============================================================================
-  // FETCH DATA
+  // FETCH DATA (Matching web version logic exactly)
   // ============================================================================
 
   const fetchPickups = async (location, isBackgroundRefresh = false) => {
@@ -296,19 +490,13 @@ export default function ActiveDeliveriesScreen({ navigation }) {
 
     try {
       const token = await AsyncStorage.getItem("token");
-      const role = await AsyncStorage.getItem("role");
-
-      if (role !== "driver") {
-        navigation.replace("Login");
-        return;
-      }
 
       if (!location) {
-        // Even without location, check for active deliveries
+        // Even without location, check for active deliveries (matching web)
         try {
-          const fallbackRes = await fetch(
+          const fallbackRes = await rateLimitedFetch(
             `${API_BASE_URL}/driver/deliveries/active`,
-            { headers: { Authorization: `Bearer ${token}` } }
+            { headers: { Authorization: `Bearer ${token}` } },
           );
           if (fallbackRes.ok) {
             const fallbackData = await fallbackRes.json();
@@ -325,11 +513,16 @@ export default function ActiveDeliveriesScreen({ navigation }) {
           console.error("Fallback active check error:", e);
         }
         setInitialLoading(false);
+        isFetchingRef.current = false;
         return;
       }
 
       // Only show skeleton on initial load when no cached data
-      if (!isBackgroundRefresh && pickups.length === 0 && deliveries.length === 0) {
+      if (
+        !isBackgroundRefresh &&
+        pickups.length === 0 &&
+        deliveries.length === 0
+      ) {
         setInitialLoading(true);
       } else {
         setIsRefreshing(true);
@@ -342,7 +535,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
 
       const url = `${API_BASE_URL}/driver/deliveries/pickups?driver_latitude=${location.latitude}&driver_longitude=${location.longitude}`;
 
-      const res = await fetch(url, {
+      const res = await rateLimitedFetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -358,41 +551,44 @@ export default function ActiveDeliveriesScreen({ navigation }) {
           setMode("pickup");
           setDeliveries([]);
 
-          // Build optimized route using OSRM
-          const optimizedData = await buildOptimizedRoute(location, list);
-          setFullRouteData(optimizedData);
+          // Build optimized route in background (non-blocking)
+          if (!isBackgroundRefresh) {
+            buildOptimizedRoute(location, list)
+              .then((optimizedData) => {
+                setFullRouteData(optimizedData);
+              })
+              .catch((err) => {
+                console.error("Route optimization error:", err);
+                // Fallback: build simple route without optimization
+                buildRouteFromPickups(location, list);
+              });
+          }
 
-          // Cache data
+          // Cache data immediately
           await saveCacheData({
             pickups: list,
             deliveries: [],
             mode: "pickup",
             driverLocation: location,
-            fullRouteData: optimizedData,
           });
-
-          // Auto-navigate to map page on initial load (not background refresh)
-          if (!isBackgroundRefresh) {
-            navigation.navigate("DriverMap", {
-              deliveryId: list[0].delivery_id,
-              mode: "pickup",
-            });
-            return;
-          }
         } else {
           // No pickups left → check for deliveries to deliver
           await fetchDeliveriesRoute(location, isBackgroundRefresh);
         }
       } else {
-        console.error("Failed to fetch pickups:", data.message);
+        const errorMsg =
+          data.error || data.message || `HTTP ${res.status}: ${res.statusText}`;
+        console.error("Failed to fetch pickups:", errorMsg, data);
         if (!isBackgroundRefresh && !hasFetchedSuccessfully) {
-          setFetchError(`Failed to load pickups: ${data.message || "Server error"}`);
+          setFetchError(`Failed to load pickups: ${errorMsg}`);
         }
       }
     } catch (e) {
       console.error("Fetch pickups error:", e);
       if (!isBackgroundRefresh && !hasFetchedSuccessfully) {
-        setFetchError(`Network error: ${e.message || "Unable to connect to server"}`);
+        setFetchError(
+          `Network error: ${e.message || "Unable to connect to server"}`,
+        );
       }
     } finally {
       setInitialLoading(false);
@@ -401,12 +597,70 @@ export default function ActiveDeliveriesScreen({ navigation }) {
     }
   };
 
-  const fetchDeliveriesRoute = async (location, isBackgroundRefresh = false) => {
+  // Fetch full route for developer overview
+  const fetchFullRoute = async (location, pickupsList) => {
+    try {
+      const token = await AsyncStorage.getItem("token");
+      const url = `${API_BASE_URL}/driver/deliveries/full-route?driver_latitude=${location.latitude}&driver_longitude=${location.longitude}`;
+
+      const res = await rateLimitedFetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        console.log("📍 [FULL ROUTE] Received full route data:", data);
+        setFullRouteData(data);
+      } else {
+        // If endpoint doesn't exist, build route data from pickups
+        console.log("📍 [FULL ROUTE] Building route from pickups data");
+        buildRouteFromPickups(location, pickupsList);
+      }
+    } catch (e) {
+      console.error("Fetch full route error:", e);
+      buildRouteFromPickups(location, pickupsList);
+    }
+  };
+
+  // Build route data from pickups when full-route endpoint isn't available
+  const buildRouteFromPickups = (location, pickupsList) => {
+    const restaurants = pickupsList.map((p, idx) => ({
+      id: p.delivery_id,
+      order_number: p.order_number,
+      lat: parseFloat(p.restaurant.latitude),
+      lng: parseFloat(p.restaurant.longitude),
+      name: p.restaurant.name,
+      address: p.restaurant.address,
+      label: `R${idx + 1}`,
+    }));
+
+    const customers = pickupsList.map((p, idx) => ({
+      id: p.delivery_id,
+      order_number: p.order_number,
+      lat: parseFloat(p.customer.latitude),
+      lng: parseFloat(p.customer.longitude),
+      name: p.customer.name,
+      address: p.customer.address,
+      label: `C${idx + 1}`,
+    }));
+
+    setFullRouteData({
+      driver_location: location,
+      restaurants,
+      customers,
+      total_deliveries: pickupsList.length,
+    });
+  };
+
+  const fetchDeliveriesRoute = async (
+    location,
+    isBackgroundRefresh = false,
+  ) => {
     try {
       const token = await AsyncStorage.getItem("token");
       const url = `${API_BASE_URL}/driver/deliveries/deliveries-route?driver_latitude=${location.latitude}&driver_longitude=${location.longitude}`;
 
-      const res = await fetch(url, {
+      const res = await rateLimitedFetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -425,17 +679,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
           deliveries: list,
           mode: "deliver",
           driverLocation: location,
-          fullRouteData,
         });
-
-        // Auto-navigate to map page on initial load
-        if (list.length > 0 && !isBackgroundRefresh) {
-          navigation.navigate("DriverMap", {
-            deliveryId: list[0].delivery_id,
-            mode: "deliver",
-          });
-          return;
-        }
 
         // Auto-set first delivery to on_the_way when starting delivering mode
         if (list.length > 0 && list[0].status === "picked_up") {
@@ -449,26 +693,32 @@ export default function ActiveDeliveriesScreen({ navigation }) {
                   Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ status: "on_the_way" }),
-              }
+              },
             );
             // Optimistically reflect status
             setDeliveries((prev) =>
-              prev.map((d, i) => (i === 0 ? { ...d, status: "on_the_way" } : d))
+              prev.map((d, i) =>
+                i === 0 ? { ...d, status: "on_the_way" } : d,
+              ),
             );
           } catch (err) {
             console.error("Failed to auto-set first delivery on-the-way:", err);
           }
         }
       } else {
-        console.error("Failed to fetch deliveries route:", data.message);
+        const errorMsg =
+          data.error || data.message || `HTTP ${res.status}: ${res.statusText}`;
+        console.error("Failed to fetch deliveries route:", errorMsg, data);
         if (!isBackgroundRefresh && !hasFetchedSuccessfully) {
-          setFetchError(`Failed to load deliveries: ${data.message || "Server error"}`);
+          setFetchError(`Failed to load deliveries: ${errorMsg}`);
         }
       }
     } catch (e) {
       console.error("Fetch deliveries route error:", e);
       if (!isBackgroundRefresh && !hasFetchedSuccessfully) {
-        setFetchError(`Network error: ${e.message || "Unable to connect to server"}`);
+        setFetchError(
+          `Network error: ${e.message || "Unable to connect to server"}`,
+        );
       }
     }
   };
@@ -477,109 +727,98 @@ export default function ActiveDeliveriesScreen({ navigation }) {
   // ROUTE OPTIMIZATION (Using OSRM for real driving distances)
   // ============================================================================
 
-  // Optimize restaurant pickup order: based on nearest customer distance using OSRM
-  const getOptimizedRestaurantOrderByShortest = async (pickupsList, driverLoc) => {
+  const getOptimizedRestaurantOrderByShortest = async (
+    pickupsList,
+    driverLoc,
+  ) => {
     if (pickupsList.length <= 1) return pickupsList;
 
     console.log(
-      `📍 [SMART ROUTE] Analyzing ${pickupsList.length} deliveries using OSRM distances...`
+      `📍 [SMART ROUTE] Analyzing ${pickupsList.length} deliveries via OSRM...`,
     );
 
-    // For each restaurant, find driving distance to its customer using OSRM
-    const restaurantCustomerMap = await Promise.all(
+    const enriched = await Promise.all(
       pickupsList.map(async (pickup) => {
-        const distToCustomer = await getOSRMDistance(
-          parseFloat(pickup.restaurant.latitude),
-          parseFloat(pickup.restaurant.longitude),
-          parseFloat(pickup.customer.latitude),
-          parseFloat(pickup.customer.longitude)
-        );
+        const [distToCustomer, distFromDriver] = await Promise.all([
+          getOSRMDistance(
+            parseFloat(pickup.restaurant.latitude),
+            parseFloat(pickup.restaurant.longitude),
+            parseFloat(pickup.customer.latitude),
+            parseFloat(pickup.customer.longitude),
+          ),
+          getOSRMDistance(
+            driverLoc.latitude,
+            driverLoc.longitude,
+            parseFloat(pickup.restaurant.latitude),
+            parseFloat(pickup.restaurant.longitude),
+          ),
+        ]);
 
         return {
           ...pickup,
-          distToOwnCustomer: distToCustomer,
+          distToOwnCustomer: distToCustomer ?? Infinity,
+          distFromDriver: distFromDriver ?? Infinity,
         };
-      })
+      }),
     );
 
-    // Calculate driving distance from driver to each restaurant using OSRM
-    const withDriverDist = await Promise.all(
-      restaurantCustomerMap.map(async (item) => {
-        const distFromDriver = await getOSRMDistance(
-          driverLoc.latitude,
-          driverLoc.longitude,
-          parseFloat(item.restaurant.latitude),
-          parseFloat(item.restaurant.longitude)
-        );
-        return {
-          ...item,
-          distFromDriver,
-        };
-      })
-    );
-
-    // Sort by: restaurant whose customer is farthest from driver should be picked first
-    const sorted = [...withDriverDist].sort((a, b) => {
+    // Sort: restaurant with largest total trip first (far customers first)
+    const sorted = [...enriched].sort((a, b) => {
       const totalA = a.distFromDriver + a.distToOwnCustomer;
       const totalB = b.distFromDriver + b.distToOwnCustomer;
       return totalB - totalA;
     });
 
-    console.log(`📍 [SMART ROUTE] Pickup order (OSRM driving distances):`);
+    console.log(`📍 [SMART ROUTE] Pickup order (OSRM):`);
     sorted.forEach((item, idx) => {
       console.log(
-        `📍 [SMART ROUTE]   ${idx + 1}. ${item.restaurant.name} → ${item.customer.name} (${(item.distToOwnCustomer / 1000).toFixed(2)} km to customer)`
+        `📍 [SMART ROUTE]   ${idx + 1}. ${item.restaurant.name} → ${item.customer.name} (${(item.distToOwnCustomer / 1000).toFixed(2)} km to customer)`,
       );
     });
 
     return sorted;
   };
 
-  // Optimize customer delivery order based on proximity after all pickups using OSRM
   const getOptimizedCustomerOrderByShortest = async (pickupsList) => {
     if (pickupsList.length <= 1) return pickupsList;
 
-    // After all pickups, driver is at the last restaurant
     const lastRestaurant = pickupsList[pickupsList.length - 1].restaurant;
-
     const remaining = [...pickupsList];
     const ordered = [];
     let currentLat = parseFloat(lastRestaurant.latitude);
     let currentLng = parseFloat(lastRestaurant.longitude);
 
     console.log(
-      `📍 [SMART ROUTE] Delivery order (starting from last restaurant: ${lastRestaurant.name}):`
+      `📍 [SMART ROUTE] Delivery order via OSRM (starting from: ${lastRestaurant.name}):`,
     );
 
     while (remaining.length > 0) {
-      let nearestIdx = 0;
-      let nearestDist = Infinity;
-
-      // Get OSRM distances to all remaining customers
       const distances = await Promise.all(
         remaining.map(async (pickup) => {
-          return await getOSRMDistance(
+          const dist = await getOSRMDistance(
             currentLat,
             currentLng,
             parseFloat(pickup.customer.latitude),
-            parseFloat(pickup.customer.longitude)
+            parseFloat(pickup.customer.longitude),
           );
-        })
+          return dist ?? Infinity;
+        }),
       );
 
-      // Find nearest
-      distances.forEach((dist, idx) => {
-        if (dist < nearestDist) {
-          nearestDist = dist;
-          nearestIdx = idx;
+      let nearestIdx = 0;
+      let nearestDist = distances[0];
+      for (let i = 1; i < distances.length; i++) {
+        if (distances[i] < nearestDist) {
+          nearestDist = distances[i];
+          nearestIdx = i;
         }
-      });
+      }
 
       const nearest = remaining[nearestIdx];
       ordered.push(nearest);
 
       console.log(
-        `📍 [SMART ROUTE]   C${ordered.length}. ${nearest.customer.name} (${(nearestDist / 1000).toFixed(2)} km OSRM distance)`
+        `📍 [SMART ROUTE]   C${ordered.length}. ${nearest.customer.name} (${(nearestDist / 1000).toFixed(2)} km from current)`,
       );
 
       currentLat = parseFloat(nearest.customer.latitude);
@@ -594,19 +833,20 @@ export default function ActiveDeliveriesScreen({ navigation }) {
     // STEP 1: Optimize restaurant order using OSRM
     const optimizedRestaurants = await getOptimizedRestaurantOrderByShortest(
       pickupsList,
-      driverLoc
+      driverLoc,
     );
 
     // STEP 2: Optimize customer delivery order using OSRM
-    const optimizedCustomers = await getOptimizedCustomerOrderByShortest(optimizedRestaurants);
+    const optimizedCustomers =
+      await getOptimizedCustomerOrderByShortest(optimizedRestaurants);
 
     console.log(`📍 [FULL ROUTE] ═══════════════════════════════════════════`);
     console.log(`📍 [FULL ROUTE] SMART ROUTE OPTIMIZED ORDER:`);
     console.log(
-      `📍 [FULL ROUTE]   Restaurants: ${optimizedRestaurants.map((p) => p.restaurant.name).join(" → ")}`
+      `📍 [FULL ROUTE]   Restaurants: ${optimizedRestaurants.map((p) => p.restaurant.name).join(" → ")}`,
     );
     console.log(
-      `📍 [FULL ROUTE]   Customers: ${optimizedCustomers.map((p) => p.customer.name).join(" → ")}`
+      `📍 [FULL ROUTE]   Customers: ${optimizedCustomers.map((p) => p.customer.name).join(" → ")}`,
     );
     console.log(`📍 [FULL ROUTE] ═══════════════════════════════════════════`);
 
@@ -646,9 +886,23 @@ export default function ActiveDeliveriesScreen({ navigation }) {
     }
   };
 
+  const fetchWithLocation = useCallback(
+    async (isBackgroundRefresh = false) => {
+      if (isFetchingRef.current && isBackgroundRefresh) return;
+
+      const location = lastLocationRef.current || driverLocation;
+      if (location) {
+        await fetchPickups(location, isBackgroundRefresh);
+      } else {
+        await startLocationTracking();
+      }
+    },
+    [driverLocation],
+  );
+
   const onRefresh = useCallback(() => {
     fetchWithLocation(true);
-  }, []);
+  }, [fetchWithLocation]);
 
   const showToast = (message, type = "success") => {
     setToast({ message, type });
@@ -672,7 +926,6 @@ export default function ActiveDeliveriesScreen({ navigation }) {
   // ============================================================================
 
   const hasActiveDeliveries = pickups.length > 0 || deliveries.length > 0;
-  const currentList = mode === "pickup" ? pickups : deliveries;
 
   return (
     <View style={styles.container}>
@@ -703,21 +956,19 @@ export default function ActiveDeliveriesScreen({ navigation }) {
       <SafeAreaView edges={["top"]} style={styles.header}>
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
-            <Text style={styles.headerTitle}>Active Deliveries</Text>
-            <View style={styles.headerSubRow}>
-              <Text style={styles.headerSubtitle}>
-                {mode === "pickup"
-                  ? `${pickups.length} pickup${pickups.length !== 1 ? "s" : ""} ready`
-                  : `${deliveries.length} deliver${deliveries.length !== 1 ? "ies" : "y"} ready`}
-              </Text>
+            <View style={styles.headerTitleRow}>
+              <Text style={styles.headerTitle}>Active Deliveries</Text>
               {isRefreshing && (
-                <ActivityIndicator
-                  size="small"
-                  color="#10B981"
-                  style={{ marginLeft: 8 }}
-                />
+                <View style={styles.headerSpinner}>
+                  <ActivityIndicator size="small" color="#10B981" />
+                </View>
               )}
             </View>
+            <Text style={styles.headerSubtitle}>
+              {mode === "pickup"
+                ? `${pickups.length} pickup${pickups.length !== 1 ? "s" : ""} ready`
+                : `${deliveries.length} deliver${deliveries.length !== 1 ? "ies" : "y"} ready`}
+            </Text>
             <Text style={styles.modeLabel}>
               Mode: {mode === "pickup" ? "Pick-up" : "Delivering"}
             </Text>
@@ -733,7 +984,10 @@ export default function ActiveDeliveriesScreen({ navigation }) {
 
       {/* Content */}
       {initialLoading ? (
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+        >
           <SkeletonCard />
           <SkeletonCard />
         </ScrollView>
@@ -772,7 +1026,9 @@ export default function ActiveDeliveriesScreen({ navigation }) {
             style={styles.findDeliveriesBtn}
             onPress={() => navigation.navigate("Available")}
           >
-            <Text style={styles.findDeliveriesBtnText}>View Available Deliveries</Text>
+            <Text style={styles.findDeliveriesBtnText}>
+              View Available Deliveries
+            </Text>
           </Pressable>
         </View>
       ) : (
@@ -789,8 +1045,37 @@ export default function ActiveDeliveriesScreen({ navigation }) {
           }
           showsVerticalScrollIndicator={false}
         >
-          {/* Full Route Overview Map */}
-          {mode === "pickup" && pickups.length > 0 && fullRouteData && (
+          {/* Pickup/Delivery Cards List */}
+          {mode === "pickup" && pickups.length > 0 && (
+            <View style={styles.deliveryCardsContainer}>
+              {pickups.map((pickup, idx) => (
+                <PickupCard
+                  key={pickup.delivery_id}
+                  pickup={pickup}
+                  index={idx}
+                  isFirst={idx === 0}
+                  driverLocation={driverLocation}
+                />
+              ))}
+            </View>
+          )}
+
+          {mode === "deliver" && deliveries.length > 0 && (
+            <View style={styles.deliveryCardsContainer}>
+              {deliveries.map((delivery, idx) => (
+                <DeliveryCard
+                  key={delivery.delivery_id}
+                  delivery={delivery}
+                  index={idx}
+                  isFirst={idx === 0}
+                  driverLocation={driverLocation}
+                />
+              ))}
+            </View>
+          )}
+
+          {/* Full Route Overview Map (optional, loads after optimization) */}
+          {mode === "pickup" && pickups.length > 1 && fullRouteData && (
             <FullRouteMap
               driverLocation={driverLocation}
               pickups={pickups}
@@ -816,16 +1101,16 @@ export default function ActiveDeliveriesScreen({ navigation }) {
 }
 
 // ============================================================================
-// FULL ROUTE MAP COMPONENT
+// FULL ROUTE MAP COMPONENT (Matching web version exactly)
 // ============================================================================
 
 function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
   const mapRef = useRef(null);
   const [routeInfo, setRouteInfo] = useState(null);
   const [routePath, setRoutePath] = useState([]);
+  const [optimizedRestaurantOrder, setOptimizedRestaurantOrder] = useState([]);
+  const [optimizedCustomerOrder, setOptimizedCustomerOrder] = useState([]);
   const hasFetchedDirections = useRef(false);
-
-  const { optimizedRestaurants = [], optimizedCustomers = [] } = fullRouteData || {};
 
   // Calculate all coordinates for map fitting
   const allCoordinates = useMemo(() => {
@@ -859,37 +1144,168 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
       return { latitude: 0, longitude: 0 };
     }
     const avgLat =
-      allCoordinates.reduce((sum, c) => sum + c.latitude, 0) / allCoordinates.length;
+      allCoordinates.reduce((sum, c) => sum + c.latitude, 0) /
+      allCoordinates.length;
     const avgLng =
-      allCoordinates.reduce((sum, c) => sum + c.longitude, 0) / allCoordinates.length;
+      allCoordinates.reduce((sum, c) => sum + c.longitude, 0) /
+      allCoordinates.length;
     return { latitude: avgLat, longitude: avgLng };
   };
 
-  // Fetch segment-by-segment route using OSRM
-  const fetchDirections = useCallback(async () => {
+  // Optimize routes using OSRM (matching web version)
+  const optimizeRoutes = useCallback(async () => {
     if (hasFetchedDirections.current) return;
     if (!driverLocation || pickups.length === 0) return;
 
     hasFetchedDirections.current = true;
 
-    // Build waypoints
-    const restOrder = optimizedRestaurants.length > 0 ? optimizedRestaurants : pickups;
-    const custOrder = optimizedCustomers.length > 0 ? optimizedCustomers : pickups;
+    // STEP 1: Optimize restaurant order
+    const optimizedRestaurants = await getOptimizedRestaurantOrderByShortest(
+      pickups,
+      driverLocation,
+    );
+    setOptimizedRestaurantOrder(optimizedRestaurants);
 
+    // STEP 2: Optimize customer delivery order
+    const optimizedCustomers =
+      await getOptimizedCustomerOrderByShortest(optimizedRestaurants);
+    setOptimizedCustomerOrder(optimizedCustomers);
+
+    console.log(`📍 [FULL ROUTE] ═══════════════════════════════════════════`);
+    console.log(`📍 [FULL ROUTE] SMART ROUTE OPTIMIZED ORDER:`);
+    console.log(
+      `📍 [FULL ROUTE]   Restaurants: ${optimizedRestaurants.map((p) => p.restaurant.name).join(" → ")}`,
+    );
+    console.log(
+      `📍 [FULL ROUTE]   Customers: ${optimizedCustomers.map((p) => p.customer.name).join(" → ")}`,
+    );
+    console.log(`📍 [FULL ROUTE] ═══════════════════════════════════════════`);
+
+    // Build waypoints for segment-by-segment routing
     const waypoints = [
       { lat: driverLocation.latitude, lng: driverLocation.longitude },
-      ...restOrder.map((p) => ({
+      ...optimizedRestaurants.map((p) => ({
         lat: parseFloat(p.restaurant.latitude),
         lng: parseFloat(p.restaurant.longitude),
       })),
-      ...custOrder.map((p) => ({
+      ...optimizedCustomers.map((p) => ({
         lat: parseFloat(p.customer.latitude),
         lng: parseFloat(p.customer.longitude),
       })),
     ];
 
+    // Fetch segment-by-segment route (matching web version)
+    await fetchSegmentBySegmentRoute(waypoints);
+  }, [driverLocation, pickups]);
+
+  // Helper function for getting OSRM distance
+  const getOSRMDistance = async (lat1, lng1, lat2, lng2) => {
     try {
-      console.log(`📍 [SEGMENT ROUTE] Starting segment-by-segment route calculation...`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const url = `https://router.project-osrm.org/route/v1/foot/${lng1},${lat1};${lng2},${lat2}?overview=false`;
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      const data = await response.json();
+      if (data.code === "Ok" && data.routes?.[0]) {
+        return data.routes[0].distance;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // Optimize restaurant pickup order
+  const getOptimizedRestaurantOrderByShortest = async (
+    pickupsList,
+    driverLoc,
+  ) => {
+    if (pickupsList.length <= 1) return pickupsList;
+
+    const enriched = await Promise.all(
+      pickupsList.map(async (pickup) => {
+        const [distToCustomer, distFromDriver] = await Promise.all([
+          getOSRMDistance(
+            parseFloat(pickup.restaurant.latitude),
+            parseFloat(pickup.restaurant.longitude),
+            parseFloat(pickup.customer.latitude),
+            parseFloat(pickup.customer.longitude),
+          ),
+          getOSRMDistance(
+            driverLoc.latitude,
+            driverLoc.longitude,
+            parseFloat(pickup.restaurant.latitude),
+            parseFloat(pickup.restaurant.longitude),
+          ),
+        ]);
+
+        return {
+          ...pickup,
+          distToOwnCustomer: distToCustomer ?? Infinity,
+          distFromDriver: distFromDriver ?? Infinity,
+        };
+      }),
+    );
+
+    const sorted = [...enriched].sort((a, b) => {
+      const totalA = a.distFromDriver + a.distToOwnCustomer;
+      const totalB = b.distFromDriver + b.distToOwnCustomer;
+      return totalB - totalA;
+    });
+
+    return sorted;
+  };
+
+  // Optimize customer delivery order
+  const getOptimizedCustomerOrderByShortest = async (pickupsList) => {
+    if (pickupsList.length <= 1) return pickupsList;
+
+    const lastRestaurant = pickupsList[pickupsList.length - 1].restaurant;
+    const remaining = [...pickupsList];
+    const ordered = [];
+    let currentLat = parseFloat(lastRestaurant.latitude);
+    let currentLng = parseFloat(lastRestaurant.longitude);
+
+    while (remaining.length > 0) {
+      const distances = await Promise.all(
+        remaining.map(async (pickup) => {
+          const dist = await getOSRMDistance(
+            currentLat,
+            currentLng,
+            parseFloat(pickup.customer.latitude),
+            parseFloat(pickup.customer.longitude),
+          );
+          return dist ?? Infinity;
+        }),
+      );
+
+      let nearestIdx = 0;
+      let nearestDist = distances[0];
+      for (let i = 1; i < distances.length; i++) {
+        if (distances[i] < nearestDist) {
+          nearestDist = distances[i];
+          nearestIdx = i;
+        }
+      }
+
+      const nearest = remaining[nearestIdx];
+      ordered.push(nearest);
+
+      currentLat = parseFloat(nearest.customer.latitude);
+      currentLng = parseFloat(nearest.customer.longitude);
+      remaining.splice(nearestIdx, 1);
+    }
+
+    return ordered;
+  };
+
+  // Fetch segment-by-segment route (matching web version exactly)
+  const fetchSegmentBySegmentRoute = async (waypoints) => {
+    try {
+      console.log(
+        `📍 [SEGMENT ROUTE] Starting segment-by-segment route calculation...`,
+      );
       console.log(`📍 [SEGMENT ROUTE] Total waypoints: ${waypoints.length}`);
 
       const allRouteSegments = [];
@@ -901,7 +1317,7 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
         const from = waypoints[i];
         const to = waypoints[i + 1];
 
-        const segmentUrl = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson&steps=true`;
+        const segmentUrl = `https://router.project-osrm.org/route/v1/foot/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson&steps=true`;
 
         try {
           const controller = new AbortController();
@@ -932,15 +1348,17 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
             totalDuration += route.duration;
 
             console.log(
-              `📍 [SEGMENT ${i + 1}/${waypoints.length - 1}] ✓ ${(route.distance / 1000).toFixed(2)} km, ${Math.ceil(route.duration / 60)} min`
+              `📍 [SEGMENT ${i + 1}/${waypoints.length - 1}] ✓ ${(route.distance / 1000).toFixed(2)} km, ${Math.ceil(route.duration / 60)} min`,
             );
           } else {
-            console.warn(`📍 [SEGMENT ${i + 1}] Failed to get route, using straight line`);
+            console.warn(
+              `📍 [SEGMENT ${i + 1}] Failed to get route, using straight line`,
+            );
             allRouteSegments.push({ latitude: from.lat, longitude: from.lng });
             allRouteSegments.push({ latitude: to.lat, longitude: to.lng });
           }
 
-          // Small delay between requests
+          // Small delay between requests to avoid rate limiting
           if (i < waypoints.length - 2) {
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
@@ -956,30 +1374,44 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
         setRouteInfo({
           totalDistance: (totalDistance / 1000).toFixed(2),
           totalDuration: Math.ceil(totalDuration / 60),
+          optimizedRestaurants: optimizedRestaurantOrder,
+          optimizedCustomers: optimizedCustomerOrder,
+          selectedMode: "OSRM_FOOT_SEGMENTS",
         });
 
-        console.log("📍 [SEGMENT ROUTE] ═══════════════════════════════════════════");
+        console.log(
+          "📍 [SEGMENT ROUTE] ═══════════════════════════════════════════",
+        );
         console.log("📍 [SEGMENT ROUTE] Route calculation complete:");
-        console.log(`📍 [SEGMENT ROUTE]   Total distance: ${(totalDistance / 1000).toFixed(2)} km`);
-        console.log(`📍 [SEGMENT ROUTE]   Total duration: ${Math.ceil(totalDuration / 60)} min`);
-        console.log("📍 [SEGMENT ROUTE] ═══════════════════════════════════════════");
+        console.log(
+          `📍 [SEGMENT ROUTE]   Total distance: ${(totalDistance / 1000).toFixed(2)} km`,
+        );
+        console.log(
+          `📍 [SEGMENT ROUTE]   Total duration: ${Math.ceil(totalDuration / 60)} min`,
+        );
+        console.log(
+          `📍 [SEGMENT ROUTE]   Path points: ${allRouteSegments.length}`,
+        );
+        console.log(
+          "📍 [SEGMENT ROUTE] ═══════════════════════════════════════════",
+        );
       }
     } catch (error) {
       console.error("Failed to fetch segment routes:", error);
     }
-  }, [driverLocation, pickups, optimizedRestaurants, optimizedCustomers]);
+  };
 
   // Reset when pickups change
   useEffect(() => {
     hasFetchedDirections.current = false;
   }, [pickups.length]);
 
-  // Trigger route fetch
+  // Trigger route optimization
   useEffect(() => {
     if (driverLocation && pickups.length > 0 && !hasFetchedDirections.current) {
-      fetchDirections();
+      optimizeRoutes();
     }
-  }, [driverLocation, pickups, fetchDirections]);
+  }, [driverLocation, pickups, optimizeRoutes]);
 
   // Fit map to markers
   useEffect(() => {
@@ -993,8 +1425,30 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
     }
   }, [allCoordinates]);
 
-  const restOrder = optimizedRestaurants.length > 0 ? optimizedRestaurants : pickups;
-  const custOrder = optimizedCustomers.length > 0 ? optimizedCustomers : pickups;
+  const restOrder =
+    optimizedRestaurantOrder.length > 0 ? optimizedRestaurantOrder : pickups;
+  const custOrder =
+    optimizedCustomerOrder.length > 0 ? optimizedCustomerOrder : pickups;
+
+  // Open Google Maps with navigation to coordinates
+  const openGoogleMaps = (latitude, longitude, label) => {
+    const scheme = Platform.select({
+      ios: "maps:0,0?q=",
+      android: "geo:0,0?q=",
+    });
+    const latLng = `${latitude},${longitude}`;
+    const labelEncoded = encodeURIComponent(label);
+    const url = Platform.select({
+      ios: `${scheme}${latLng}(${labelEncoded})`,
+      android: `${scheme}${latLng}(${labelEncoded})`,
+    });
+
+    Linking.openURL(url).catch((err) => {
+      // Fallback to web Google Maps if native app fails
+      const webUrl = `https://www.google.com/maps/search/?api=1&query=${latLng}`;
+      Linking.openURL(webUrl);
+    });
+  };
 
   return (
     <View style={styles.fullRouteCard}>
@@ -1002,8 +1456,8 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
       <View style={styles.fullRouteHeader}>
         <Text style={styles.fullRouteTitle}>🗺️ Full Route Overview</Text>
         <Text style={styles.fullRouteSubtitle}>
-          Driver → {pickups.length} Restaurant{pickups.length > 1 ? "s" : ""} → {pickups.length}{" "}
-          Customer{pickups.length > 1 ? "s" : ""}
+          Driver → {pickups.length} Restaurant{pickups.length > 1 ? "s" : ""} →{" "}
+          {pickups.length} Customer{pickups.length > 1 ? "s" : ""}
         </Text>
       </View>
 
@@ -1011,11 +1465,15 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
       {routeInfo && (
         <View style={styles.fullRouteStats}>
           <View style={styles.fullRouteStat}>
-            <Text style={styles.fullRouteStatValue}>{routeInfo.totalDistance}</Text>
+            <Text style={styles.fullRouteStatValue}>
+              {routeInfo.totalDistance}
+            </Text>
             <Text style={styles.fullRouteStatLabel}>km Total</Text>
           </View>
           <View style={styles.fullRouteStat}>
-            <Text style={styles.fullRouteStatValue}>{routeInfo.totalDuration}</Text>
+            <Text style={styles.fullRouteStatValue}>
+              {routeInfo.totalDuration}
+            </Text>
             <Text style={styles.fullRouteStatLabel}>min ETA</Text>
           </View>
           <View style={styles.fullRouteStat}>
@@ -1036,106 +1494,225 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
             longitudeDelta: 0.1,
           }}
           markers={[
-            ...(driverLocation ? [{
-              id: 'driver',
-              coordinate: {
-                latitude: driverLocation.latitude,
-                longitude: driverLocation.longitude,
-              },
-              type: 'driver',
-              emoji: '🚗',
-              title: 'D',
-            }] : []),
-            ...restOrder.filter(p => p.restaurant).map((pickup, idx) => ({
-              id: `r-${pickup.delivery_id}`,
-              coordinate: {
-                latitude: parseFloat(pickup.restaurant.latitude),
-                longitude: parseFloat(pickup.restaurant.longitude),
-              },
-              type: 'restaurant',
-              emoji: '🏪',
-              title: `R${idx + 1}`,
-            })),
-            ...custOrder.filter(p => p.customer).map((pickup, idx) => ({
-              id: `c-${pickup.delivery_id}`,
-              coordinate: {
-                latitude: parseFloat(pickup.customer.latitude),
-                longitude: parseFloat(pickup.customer.longitude),
-              },
-              type: 'customer',
-              emoji: '📍',
-              title: `C${idx + 1}`,
-            })),
+            ...(driverLocation
+              ? [
+                  {
+                    id: "driver",
+                    coordinate: {
+                      latitude: driverLocation.latitude,
+                      longitude: driverLocation.longitude,
+                    },
+                    type: "driver",
+                    emoji: "🚗",
+                    title: "D",
+                  },
+                ]
+              : []),
+            ...restOrder
+              .filter((p) => p.restaurant)
+              .map((pickup, idx) => ({
+                id: `r-${pickup.delivery_id}`,
+                coordinate: {
+                  latitude: parseFloat(pickup.restaurant.latitude),
+                  longitude: parseFloat(pickup.restaurant.longitude),
+                },
+                type: "restaurant",
+                emoji: "🏪",
+                title: `R${idx + 1}`,
+              })),
+            ...custOrder
+              .filter((p) => p.customer)
+              .map((pickup, idx) => ({
+                id: `c-${pickup.delivery_id}`,
+                coordinate: {
+                  latitude: parseFloat(pickup.customer.latitude),
+                  longitude: parseFloat(pickup.customer.longitude),
+                },
+                type: "customer",
+                emoji: "📍",
+                title: `C${idx + 1}`,
+              })),
           ]}
-          polylines={routePath.length > 1 ? [{
-            id: 'route',
-            coordinates: routePath,
-            strokeColor: MARKER_COLORS.route,
-            strokeWidth: 5,
-          }] : []}
+          polylines={
+            routePath.length > 1
+              ? [
+                  {
+                    id: "route",
+                    coordinates: routePath,
+                    strokeColor: MARKER_COLORS.route,
+                    strokeWidth: 5,
+                  },
+                ]
+              : []
+          }
         />
       </View>
 
-      {/* Ordered Stops List */}
-      <View style={styles.stopsContainer}>
-        <Text style={styles.stopsTitle}>📋 Ordered Stops</Text>
-
-        {/* Driver Starting Point */}
-        <View style={[styles.stopItem, styles.stopItemDriver]}>
-          <View style={[styles.stopMarker, { backgroundColor: MARKER_COLORS.driver }]}>
-            <Text style={styles.stopMarkerText}>D</Text>
-          </View>
-          <View style={styles.stopContent}>
-            <Text style={styles.stopName}>Your Location (Starting Point)</Text>
-            <Text style={styles.stopAddress}>Driver Position</Text>
-          </View>
+      {/* Start Navigation Button */}
+      {restOrder.length > 0 && (
+        <View style={styles.startNavigationContainer}>
+          <Pressable
+            style={styles.startNavigationBtn}
+            onPress={() => {
+              const firstStop = restOrder[0];
+              openGoogleMaps(
+                parseFloat(firstStop.restaurant.latitude),
+                parseFloat(firstStop.restaurant.longitude),
+                firstStop.restaurant.name,
+              );
+            }}
+          >
+            <Text style={styles.startNavigationIcon}>🧭</Text>
+            <Text style={styles.startNavigationText}>
+              Start Navigation to First Stop
+            </Text>
+          </Pressable>
         </View>
+      )}
 
-        {/* Restaurant Pickups */}
-        {restOrder.map((pickup, idx) => (
-          <View key={`stop-r-${idx}`} style={[styles.stopItem, styles.stopItemRestaurant]}>
-            <View style={[styles.stopMarker, { backgroundColor: MARKER_COLORS.restaurant }]}>
-              <Text style={styles.stopMarkerText}>R{idx + 1}</Text>
+      {/* Ordered Stops List (matching web version) */}
+      {routeInfo &&
+        routeInfo.optimizedRestaurants &&
+        routeInfo.optimizedCustomers && (
+          <View style={styles.stopsContainer}>
+            <Text style={styles.stopsTitle}>📋 Ordered Stops</Text>
+
+            {/* Driver Starting Point */}
+            <View style={[styles.stopItem, styles.stopItemDriver]}>
+              <View
+                style={[
+                  styles.stopMarker,
+                  { backgroundColor: MARKER_COLORS.driver },
+                ]}
+              >
+                <Text style={styles.stopMarkerText}>D</Text>
+              </View>
+              <View style={styles.stopContent}>
+                <Text style={styles.stopName}>
+                  Your Location (Starting Point)
+                </Text>
+                <Text style={styles.stopAddress}>Driver Position</Text>
+              </View>
             </View>
-            <View style={styles.stopContent}>
-              <Text style={styles.stopName}>🍽️ {pickup.restaurant?.name}</Text>
-              <Text style={styles.stopAddress}>{pickup.restaurant?.address}</Text>
-              <Text style={styles.stopOrder}>Order #{pickup.order_number}</Text>
-            </View>
+
+            {/* Restaurant Pickups */}
+            {routeInfo.optimizedRestaurants.map((pickup, idx) => (
+              <View
+                key={`stop-r-${idx}`}
+                style={[styles.stopItem, styles.stopItemRestaurant]}
+              >
+                <View
+                  style={[
+                    styles.stopMarker,
+                    { backgroundColor: MARKER_COLORS.restaurant },
+                  ]}
+                >
+                  <Text style={styles.stopMarkerText}>R{idx + 1}</Text>
+                </View>
+                <View style={styles.stopContent}>
+                  <Text style={styles.stopName}>
+                    🍽️ {pickup.restaurant?.name}
+                  </Text>
+                  <Text style={styles.stopAddress}>
+                    {pickup.restaurant?.address}
+                  </Text>
+                  <Text style={styles.stopOrder}>
+                    Order #{pickup.order_number}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.navigateBtn}
+                  onPress={() =>
+                    openGoogleMaps(
+                      parseFloat(pickup.restaurant.latitude),
+                      parseFloat(pickup.restaurant.longitude),
+                      pickup.restaurant.name,
+                    )
+                  }
+                >
+                  <Text style={styles.navigateBtnIcon}>🧭</Text>
+                </Pressable>
+              </View>
+            ))}
+
+            {/* Customer Deliveries */}
+            {routeInfo.optimizedCustomers.map((pickup, idx) => (
+              <View
+                key={`stop-c-${idx}`}
+                style={[styles.stopItem, styles.stopItemCustomer]}
+              >
+                <View
+                  style={[
+                    styles.stopMarker,
+                    { backgroundColor: MARKER_COLORS.customer },
+                  ]}
+                >
+                  <Text style={styles.stopMarkerText}>C{idx + 1}</Text>
+                </View>
+                <View style={styles.stopContent}>
+                  <Text style={styles.stopName}>
+                    👤 {pickup.customer?.name}
+                  </Text>
+                  <Text style={styles.stopAddress}>
+                    {pickup.customer?.address}
+                  </Text>
+                  <Text style={styles.stopOrder}>
+                    Order #{pickup.order_number}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.navigateBtn}
+                  onPress={() =>
+                    openGoogleMaps(
+                      parseFloat(pickup.customer.latitude),
+                      parseFloat(pickup.customer.longitude),
+                      pickup.customer.name,
+                    )
+                  }
+                >
+                  <Text style={styles.navigateBtnIcon}>🧭</Text>
+                </Pressable>
+              </View>
+            ))}
           </View>
-        ))}
+        )}
 
-        {/* Customer Deliveries */}
-        {custOrder.map((pickup, idx) => (
-          <View key={`stop-c-${idx}`} style={[styles.stopItem, styles.stopItemCustomer]}>
-            <View style={[styles.stopMarker, { backgroundColor: MARKER_COLORS.customer }]}>
-              <Text style={styles.stopMarkerText}>C{idx + 1}</Text>
-            </View>
-            <View style={styles.stopContent}>
-              <Text style={styles.stopName}>👤 {pickup.customer?.name}</Text>
-              <Text style={styles.stopAddress}>{pickup.customer?.address}</Text>
-              <Text style={styles.stopOrder}>Order #{pickup.order_number}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      {/* Legend */}
+      {/* Legend (matching web version) */}
       <View style={styles.legend}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: MARKER_COLORS.driver }]} />
+          <View
+            style={[
+              styles.legendDot,
+              { backgroundColor: MARKER_COLORS.driver },
+            ]}
+          />
           <Text style={styles.legendText}>Driver (D)</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: MARKER_COLORS.restaurant }]} />
+          <View
+            style={[
+              styles.legendDot,
+              { backgroundColor: MARKER_COLORS.restaurant },
+            ]}
+          />
           <Text style={styles.legendText}>Restaurant (R)</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: MARKER_COLORS.customer }]} />
+          <View
+            style={[
+              styles.legendDot,
+              { backgroundColor: MARKER_COLORS.customer },
+            ]}
+          />
           <Text style={styles.legendText}>Customer (C)</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendLine, { backgroundColor: MARKER_COLORS.route }]} />
+          <View
+            style={[
+              styles.legendLine,
+              { backgroundColor: MARKER_COLORS.route },
+            ]}
+          />
           <Text style={styles.legendText}>Route Path</Text>
         </View>
       </View>
@@ -1144,7 +1721,7 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
 }
 
 // ============================================================================
-// SKELETON CARD COMPONENT
+// SKELETON CARD COMPONENT (Matching web version with shimmer)
 // ============================================================================
 
 function SkeletonCard() {
@@ -1163,7 +1740,7 @@ function SkeletonCard() {
           duration: 1500,
           useNativeDriver: true,
         }),
-      ])
+      ]),
     ).start();
   }, []);
 
@@ -1189,10 +1766,16 @@ function SkeletonCard() {
           />
           <View style={styles.skeletonLines}>
             <Animated.View
-              style={[styles.skeletonLine, { width: 120, opacity: shimmerOpacity }]}
+              style={[
+                styles.skeletonLine,
+                { width: 120, opacity: shimmerOpacity },
+              ]}
             />
             <Animated.View
-              style={[styles.skeletonLine, { width: 180, marginTop: 6, opacity: shimmerOpacity }]}
+              style={[
+                styles.skeletonLine,
+                { width: 180, marginTop: 6, opacity: shimmerOpacity },
+              ]}
             />
           </View>
         </View>
@@ -1212,14 +1795,16 @@ function SkeletonCard() {
         </View>
 
         {/* Button */}
-        <Animated.View style={[styles.skeletonButton, { opacity: shimmerOpacity }]} />
+        <Animated.View
+          style={[styles.skeletonButton, { opacity: shimmerOpacity }]}
+        />
       </View>
     </View>
   );
 }
 
 // ============================================================================
-// STYLES
+// STYLES (Matching web version design)
 // ============================================================================
 
 const styles = StyleSheet.create({
@@ -1273,19 +1858,24 @@ const styles = StyleSheet.create({
   headerLeft: {
     flex: 1,
   },
+  headerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   headerTitle: {
     fontSize: 22,
     fontWeight: "800",
     color: "#111827",
   },
-  headerSubRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 2,
+  headerSpinner: {
+    width: 16,
+    height: 16,
   },
   headerSubtitle: {
     fontSize: 14,
     color: "#6B7280",
+    marginTop: 2,
   },
   modeLabel: {
     fontSize: 12,
@@ -1313,7 +1903,7 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
   },
 
-  // Empty State
+  // Empty State (matching web version)
   emptyContainer: {
     flex: 1,
     alignItems: "center",
@@ -1349,7 +1939,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // Error State
+  // Error State (matching web version)
   errorContainer: {
     flex: 1,
     alignItems: "center",
@@ -1396,7 +1986,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // Fixed Bottom
+  // Fixed Bottom (matching web version)
   fixedBottom: {
     position: "absolute",
     bottom: 0,
@@ -1433,7 +2023,7 @@ const styles = StyleSheet.create({
   },
 
   // ============================================================================
-  // FULL ROUTE MAP STYLES
+  // FULL ROUTE MAP STYLES (Matching web version)
   // ============================================================================
 
   fullRouteCard: {
@@ -1494,37 +2084,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Map Markers
-  mapMarker: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 3,
-    borderColor: "#fff",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  driverMarker: {
-    backgroundColor: MARKER_COLORS.driver,
-  },
-  restaurantMarker: {
-    backgroundColor: MARKER_COLORS.restaurant,
-  },
-  customerMarker: {
-    backgroundColor: MARKER_COLORS.customer,
-  },
-  mapMarkerText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-
-  // Stops List
+  // Stops List (matching web version)
   stopsContainer: {
     padding: 16,
     borderTopWidth: 1,
@@ -1590,8 +2150,55 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 4,
   },
+  navigateBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#3B82F6",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  navigateBtnIcon: {
+    fontSize: 22,
+  },
 
-  // Legend
+  // Start Navigation Button
+  startNavigationContainer: {
+    padding: 16,
+    backgroundColor: "#F9FAFB",
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+  },
+  startNavigationBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#3B82F6",
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    gap: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  startNavigationIcon: {
+    fontSize: 20,
+  },
+  startNavigationText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  // Legend (matching web version)
   legend: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1623,7 +2230,7 @@ const styles = StyleSheet.create({
   },
 
   // ============================================================================
-  // SKELETON STYLES
+  // SKELETON STYLES (Matching web version with shimmer)
   // ============================================================================
 
   skeletonCard: {
@@ -1707,5 +2314,96 @@ const styles = StyleSheet.create({
     height: 52,
     backgroundColor: "#A7F3D0",
     borderRadius: 14,
+  },
+
+  // =========== DELIVERY CARD STYLES ===========
+  deliveryCardsContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  deliveryCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  nextBadge: {
+    backgroundColor: "#10B981",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  nextBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  stopSection: {
+    flexDirection: "row",
+    marginBottom: 14,
+  },
+  stopIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F3F4F6",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  stopEmoji: {
+    fontSize: 20,
+  },
+  stopDetails: {
+    flex: 1,
+  },
+  stopTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+    marginBottom: 4,
+  },
+  stopAddress: {
+    fontSize: 14,
+    color: "#6B7280",
+    marginBottom: 4,
+  },
+  stopMeta: {
+    fontSize: 13,
+    color: "#9CA3AF",
+  },
+  startButton: {
+    backgroundColor: "#10B981",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 6,
+  },
+  startButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
   },
 });

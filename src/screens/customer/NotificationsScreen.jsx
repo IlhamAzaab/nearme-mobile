@@ -1,14 +1,8 @@
-import React, { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  Pressable,
-  ActivityIndicator,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useEffect, useState } from "react";
+import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import SkeletonBlock from "../../components/common/SkeletonBlock";
 import { API_BASE_URL } from "../../constants/api";
 
 export default function NotificationsScreen({ navigation }) {
@@ -23,7 +17,7 @@ export default function NotificationsScreen({ navigation }) {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem("token");
-      
+
       const res = await fetch(`${API_BASE_URL}/customer/notifications`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -39,10 +33,13 @@ export default function NotificationsScreen({ navigation }) {
   const markAsRead = async (notificationId) => {
     try {
       const token = await AsyncStorage.getItem("token");
-      await fetch(`${API_BASE_URL}/customer/notifications/${notificationId}/read`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await fetch(
+        `${API_BASE_URL}/customer/notifications/${notificationId}/read`,
+        {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
       // Refresh list
       fetchNotifications();
     } catch (error) {
@@ -52,9 +49,37 @@ export default function NotificationsScreen({ navigation }) {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#10b981" />
-      </View>
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={{ width: 40 }} />
+          <Text style={styles.headerTitle}>Notifications</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={{ padding: 16, gap: 12 }}>
+          {[1, 2, 3, 4, 5].map((i) => (
+            <View
+              key={i}
+              style={{
+                backgroundColor: "#fff",
+                borderRadius: 14,
+                padding: 14,
+                flexDirection: "row",
+                gap: 12,
+                alignItems: "center",
+              }}
+            >
+              <SkeletonBlock width={40} height={40} borderRadius={20} />
+              <View style={{ flex: 1, gap: 6 }}>
+                <SkeletonBlock width="60%" height={14} borderRadius={6} />
+                <SkeletonBlock width="90%" height={12} borderRadius={6} />
+                <SkeletonBlock width="30%" height={10} borderRadius={6} />
+              </View>
+              <SkeletonBlock width={8} height={8} borderRadius={4} />
+            </View>
+          ))}
+        </View>
+      </SafeAreaView>
     );
   }
 

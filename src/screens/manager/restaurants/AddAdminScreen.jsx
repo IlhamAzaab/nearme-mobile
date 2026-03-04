@@ -1,78 +1,191 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import api from '../../../services/api';
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation, useRoute } from "@react-navigation/native";
+import { useState } from "react";
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import ManagerDrawer from "../../../components/manager/ManagerDrawer";
+import ManagerHeader from "../../../components/manager/ManagerHeader";
+import { API_URL } from "../../../config/env";
 
-/**
- * AddAdminScreen - Add a new restaurant admin
- */
-const AddAdminScreen = ({ navigation }) => {
-  const [form, setForm] = useState({
-    fullName: '',
-    email: '',
-    phone: '',
-    restaurantName: '',
-  });
-  const [submitting, setSubmitting] = useState(false);
+const ADMIN_DRAWER_ITEMS = [
+  {
+    route: "AdminPayments",
+    label: "Admin Payments",
+    icon: "wallet-outline",
+    tabTarget: "Admins",
+  },
+  { route: "AddAdmin", label: "Add Admin", icon: "person-add-outline" },
+  {
+    route: "AdminManagement",
+    label: "Admin Management",
+    icon: "people-outline",
+  },
+  {
+    route: "RestaurantManagement",
+    label: "Restaurant Management",
+    icon: "restaurant-outline",
+  },
+  {
+    route: "PendingRestaurants",
+    label: "Pending Restaurants",
+    icon: "time-outline",
+  },
+];
 
-  const handleChange = (key, value) => setForm({ ...form, [key]: value });
+const AddAdminScreen = () => {
+  const navigation = useNavigation();
+  const route = useRoute();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (!form.fullName || !form.email || !form.phone || !form.restaurantName) {
-      Alert.alert('Error', 'Please fill in all required fields');
+    if (!email.trim()) {
+      Alert.alert("Error", "Email is required.");
       return;
     }
-    setSubmitting(true);
+    setLoading(true);
     try {
-      await api.post('/manager/admins', form);
-      Alert.alert('Success', 'Restaurant admin added', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
-    } catch (error) {
-      Alert.alert('Error', error.response?.data?.message || 'Failed to add admin');
+      const token = await AsyncStorage.getItem("token");
+      const res = await fetch(`${API_URL}/manager/add-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        Alert.alert("Error", data?.message || "Failed to create admin");
+      } else {
+        Alert.alert(
+          "Success",
+          `Admin created successfully. A temporary password has been sent to ${email}.`,
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                setEmail("");
+              },
+            },
+          ],
+        );
+      }
+    } catch (err) {
+      Alert.alert("Error", "Network error. Please try again.");
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>Add Restaurant Admin</Text>
-
-        <Text style={styles.label}>Full Name *</Text>
-        <TextInput style={styles.input} value={form.fullName} onChangeText={(v) => handleChange('fullName', v)} placeholder="Admin full name" />
-
-        <Text style={styles.label}>Email *</Text>
-        <TextInput style={styles.input} value={form.email} onChangeText={(v) => handleChange('email', v)} placeholder="admin@example.com" keyboardType="email-address" autoCapitalize="none" />
-
-        <Text style={styles.label}>Phone *</Text>
-        <TextInput style={styles.input} value={form.phone} onChangeText={(v) => handleChange('phone', v)} placeholder="+251..." keyboardType="phone-pad" />
-
-        <Text style={styles.label}>Restaurant Name *</Text>
-        <TextInput style={styles.input} value={form.restaurantName} onChangeText={(v) => handleChange('restaurantName', v)} placeholder="Restaurant name" />
-
-        <TouchableOpacity
-          style={[styles.submitBtn, submitting && styles.disabled]}
-          onPress={handleSubmit}
-          disabled={submitting}
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <ManagerHeader
+        title="Add Admin"
+        showBack
+        onMenuPress={() => setDrawerOpen(true)}
+      />
+      <ManagerDrawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        sectionTitle="Restaurant & Admin"
+        items={ADMIN_DRAWER_ITEMS}
+        activeRoute={route.name}
+        navigation={navigation}
+      />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.submitBtnText}>{submitting ? 'Adding...' : 'Add Admin'}</Text>
-        </TouchableOpacity>
-      </ScrollView>
+          <View style={styles.card}>
+            <Text style={styles.label}>Email Address</Text>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="admin@restaurant.com"
+              placeholderTextColor="#94A3B8"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+
+            <TouchableOpacity
+              style={[styles.submitBtn, loading && { opacity: 0.6 }]}
+              onPress={handleSubmit}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="person-add-outline"
+                size={18}
+                color="#fff"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.submitText}>
+                {loading ? "Creating..." : "Create Admin"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 20 },
-  title: { fontSize: 22, fontWeight: '800', color: '#1a1a1a', marginBottom: 24 },
-  label: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6, marginTop: 14 },
-  input: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 14, fontSize: 15, borderWidth: 1, borderColor: '#E5E7EB' },
-  submitBtn: { backgroundColor: '#3B82F6', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 32 },
-  disabled: { opacity: 0.6 },
-  submitBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  container: { flex: 1, backgroundColor: "#F8FAFC" },
+  scroll: { padding: 16 },
+  title: { fontSize: 22, fontWeight: "800", color: "#111827", marginBottom: 4 },
+  subtitle: {
+    fontSize: 13,
+    color: "#6B7280",
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 8 },
+  input: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: "#111827",
+    marginBottom: 16,
+  },
+  submitBtn: {
+    backgroundColor: "#4F46E5",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  submitText: { color: "#fff", fontSize: 14, fontWeight: "700" },
 });
 
 export default AddAdminScreen;

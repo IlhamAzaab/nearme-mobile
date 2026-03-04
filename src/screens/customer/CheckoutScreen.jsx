@@ -1,28 +1,39 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Location from "expo-location";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
   ActivityIndicator,
   Alert,
-  ScrollView,
-  TextInput,
-  Modal,
-  Image,
   Dimensions,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import SkeletonBlock from "../../components/common/SkeletonBlock";
 import FreeMapView from "../../components/maps/FreeMapView";
-import * as Location from "expo-location";
 import { API_BASE_URL } from "../../constants/api";
+import { useOrders } from "../../context/OrderContext";
+import pushNotificationService from "../../services/pushNotificationService";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 // ============================================================================
 // ORDER SUCCESS SCREEN COMPONENT (Image-like UI)
 // ============================================================================
-function OrderSuccessScreen({ order, cart, position, address, navigation, formatPrice }) {
+function OrderSuccessScreen({
+  order,
+  cart,
+  position,
+  address,
+  navigation,
+  formatPrice,
+}) {
   const [viewOrderExpanded, setViewOrderExpanded] = useState(false);
 
   const restaurant = cart?.restaurant || {};
@@ -42,21 +53,27 @@ function OrderSuccessScreen({ order, cart, position, address, navigation, format
           }}
           scrollEnabled={false}
           zoomEnabled={false}
-          markers={[{
-            id: 'delivery',
-            coordinate: {
-              latitude: parseFloat(position?.latitude) || 7.8731,
-              longitude: parseFloat(position?.longitude) || 80.7718,
+          markers={[
+            {
+              id: "delivery",
+              coordinate: {
+                latitude: parseFloat(position?.latitude) || 7.8731,
+                longitude: parseFloat(position?.longitude) || 80.7718,
+              },
+              type: "location-pin",
             },
-            type: 'delivery',
-            emoji: '📍',
-          }]}
+          ]}
         />
 
         {/* Back Button */}
         <Pressable
           style={successStyles.backButton}
-          onPress={() => navigation.navigate("MainTabs", { screen: "Home" })}
+          onPress={() =>
+            navigation.navigate("MainTabs", {
+              screen: "Home",
+              params: { screen: "HomeMain" },
+            })
+          }
         >
           <Text style={successStyles.backButtonText}>←</Text>
         </Pressable>
@@ -113,7 +130,9 @@ function OrderSuccessScreen({ order, cart, position, address, navigation, format
                 </View>
                 <View style={successStyles.orderRow}>
                   <Text style={successStyles.orderLabel}>Items</Text>
-                  <Text style={successStyles.orderValue}>{order.items_count || items.length}</Text>
+                  <Text style={successStyles.orderValue}>
+                    {order.items_count || items.length}
+                  </Text>
                 </View>
                 <View style={successStyles.orderRow}>
                   <Text style={successStyles.orderLabel}>Est. Delivery</Text>
@@ -123,8 +142,17 @@ function OrderSuccessScreen({ order, cart, position, address, navigation, format
                 </View>
                 <View style={successStyles.divider} />
                 <View style={successStyles.orderRow}>
-                  <Text style={[successStyles.orderLabel, { fontWeight: "700" }]}>Total</Text>
-                  <Text style={[successStyles.orderValue, { fontWeight: "900", color: "#10B981" }]}>
+                  <Text
+                    style={[successStyles.orderLabel, { fontWeight: "700" }]}
+                  >
+                    Total
+                  </Text>
+                  <Text
+                    style={[
+                      successStyles.orderValue,
+                      { fontWeight: "900", color: "#10B981" },
+                    ]}
+                  >
                     {formatPrice(order.total_amount)}
                   </Text>
                 </View>
@@ -133,8 +161,13 @@ function OrderSuccessScreen({ order, cart, position, address, navigation, format
                 {items.length > 0 && (
                   <View style={successStyles.itemsList}>
                     {items.map((item, index) => (
-                      <View key={item.id || index} style={successStyles.itemRow}>
-                        <Text style={successStyles.itemQty}>{item.quantity}x</Text>
+                      <View
+                        key={item.id || index}
+                        style={successStyles.itemRow}
+                      >
+                        <Text style={successStyles.itemQty}>
+                          {item.quantity}x
+                        </Text>
                         <Text style={successStyles.itemName} numberOfLines={1}>
                           {item.food_name}
                         </Text>
@@ -166,7 +199,9 @@ function OrderSuccessScreen({ order, cart, position, address, navigation, format
                 </View>
               )}
               <Text style={successStyles.restaurantName} numberOfLines={1}>
-                {restaurant.restaurant_name || order.restaurant_name || "Restaurant"}
+                {restaurant.restaurant_name ||
+                  order.restaurant_name ||
+                  "Restaurant"}
               </Text>
             </View>
           </View>
@@ -175,14 +210,27 @@ function OrderSuccessScreen({ order, cart, position, address, navigation, format
           <View style={successStyles.buttonsContainer}>
             <Pressable
               style={successStyles.trackButton}
-              onPress={() => navigation.navigate("OrderTracking", { orderId: order.id })}
+              onPress={() =>
+                navigation.navigate("MainTabs", {
+                  screen: "Orders",
+                  params: {
+                    screen: "OrderTracking",
+                    params: { orderId: order.id },
+                  },
+                })
+              }
             >
               <Text style={successStyles.trackButtonText}>Track Order</Text>
             </Pressable>
 
             <Pressable
               style={successStyles.homeButton}
-              onPress={() => navigation.navigate("MainTabs", { screen: "Home" })}
+              onPress={() =>
+                navigation.navigate("MainTabs", {
+                  screen: "Home",
+                  params: { screen: "HomeMain" },
+                })
+              }
             >
               <Text style={successStyles.homeButtonText}>Back to Home</Text>
             </Pressable>
@@ -489,7 +537,11 @@ async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
 
     if (data.code === "Ok" && data.routes?.length) {
       const r = data.routes[0];
-      return { success: true, distance: r.distance / 1000, duration: r.duration / 60 };
+      return {
+        success: true,
+        distance: r.distance / 1000,
+        duration: r.duration / 60,
+      };
     }
     return { success: false, error: "No route found" };
   } catch (e) {
@@ -500,6 +552,7 @@ async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
 export default function CheckoutScreen({ route, navigation }) {
   const { cartId } = route.params || {};
   const mapRef = useRef(null);
+  const { addNewOrder } = useOrders();
 
   // Cart + profile
   const [cart, setCart] = useState(null);
@@ -565,7 +618,10 @@ export default function CheckoutScreen({ route, navigation }) {
 
   useEffect(() => {
     if (!cartId) {
-      navigation.navigate("MainTabs", { screen: "Cart" });
+      navigation.navigate("MainTabs", {
+        screen: "Cart",
+        params: { screen: "CartMain" },
+      });
       return;
     }
     fetchCheckoutData();
@@ -585,7 +641,7 @@ export default function CheckoutScreen({ route, navigation }) {
         Alert.alert(
           "Permission Denied",
           "Please enable location permission to use this feature",
-          [{ text: "OK" }]
+          [{ text: "OK" }],
         );
         setFetchingLocation(false);
         return;
@@ -605,11 +661,14 @@ export default function CheckoutScreen({ route, navigation }) {
 
       // Animate map to new location
       if (mapRef.current) {
-        mapRef.current.animateToRegion({
-          ...newPosition,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        }, 1000);
+        mapRef.current.animateToRegion(
+          {
+            ...newPosition,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+          },
+          1000,
+        );
       }
 
       // Try to get address from coordinates (reverse geocoding)
@@ -625,7 +684,7 @@ export default function CheckoutScreen({ route, navigation }) {
           if (geocode.street) addressParts.push(geocode.street);
           if (geocode.district) addressParts.push(geocode.district);
           if (geocode.subregion) addressParts.push(geocode.subregion);
-          
+
           const newAddress = addressParts.join(", ") || geocode.name || "";
           const newCity = geocode.city || geocode.region || "";
 
@@ -647,7 +706,11 @@ export default function CheckoutScreen({ route, navigation }) {
   // ✅ route calc when customer position / restaurant changes
   useEffect(() => {
     const run = async () => {
-      if (!position || !cart?.restaurant?.latitude || !cart?.restaurant?.longitude) {
+      if (
+        !position ||
+        !cart?.restaurant?.latitude ||
+        !cart?.restaurant?.longitude
+      ) {
         setRouteInfo(null);
         return;
       }
@@ -657,10 +720,11 @@ export default function CheckoutScreen({ route, navigation }) {
         position.latitude,
         position.longitude,
         parseFloat(cart.restaurant.latitude),
-        parseFloat(cart.restaurant.longitude)
+        parseFloat(cart.restaurant.longitude),
       );
 
-      if (result.success) setRouteInfo({ distance: result.distance, duration: result.duration });
+      if (result.success)
+        setRouteInfo({ distance: result.distance, duration: result.duration });
       else setRouteInfo(null);
 
       setRouteLoading(false);
@@ -692,18 +756,26 @@ export default function CheckoutScreen({ route, navigation }) {
 
       // web போல parallel calls
       const [cartRes, profileRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/cart`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_BASE_URL}/cart/customer-profile`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE_URL}/cart`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API_BASE_URL}/cart/customer-profile`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
       ]);
 
       const cartData = await cartRes.json().catch(() => ({}));
       const profileData = await profileRes.json().catch(() => ({}));
 
-      if (!cartRes.ok) throw new Error(cartData.message || "Failed to fetch cart");
-      if (!profileRes.ok) throw new Error(profileData.message || "Failed to fetch profile");
+      if (!cartRes.ok)
+        throw new Error(cartData.message || "Failed to fetch cart");
+      if (!profileRes.ok)
+        throw new Error(profileData.message || "Failed to fetch profile");
 
       // cartId match (string vs number fix)
-      const selected = (cartData.carts || []).find((c) => String(c.id) === String(cartId));
+      const selected = (cartData.carts || []).find(
+        (c) => String(c.id) === String(cartId),
+      );
       if (!selected) throw new Error("Cart not found");
 
       setCart(selected);
@@ -727,7 +799,11 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
-  const saveAddressAndLocation = async ({ newAddress, newCity, newPosition }) => {
+  const saveAddressAndLocation = async ({
+    newAddress,
+    newCity,
+    newPosition,
+  }) => {
     try {
       setSavingAddress(true);
       const token = await AsyncStorage.getItem("token");
@@ -762,12 +838,15 @@ export default function CheckoutScreen({ route, navigation }) {
 
   const handlePlaceOrder = async () => {
     try {
-      if (!phone || !address || !position) throw new Error("Please fill address & location");
+      if (!phone || !address || !position)
+        throw new Error("Please fill address & location");
       if (!cart) throw new Error("Cart missing");
 
       const subtotal = Number(cart.cart_total) || 0;
-      if (subtotal < MINIMUM_SUBTOTAL) throw new Error(`Minimum order amount is Rs. ${MINIMUM_SUBTOTAL}`);
-      if (!routeInfo) throw new Error("Please wait for delivery fee calculation");
+      if (subtotal < MINIMUM_SUBTOTAL)
+        throw new Error(`Minimum order amount is Rs. ${MINIMUM_SUBTOTAL}`);
+      if (!routeInfo)
+        throw new Error("Please wait for delivery fee calculation");
 
       setPlacing(true);
       setError("");
@@ -795,7 +874,48 @@ export default function CheckoutScreen({ route, navigation }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to place order");
 
-      setOrderSuccess(data.order);
+      const placedOrder = data.order;
+
+      // Add to centralized order state for real-time sync
+      if (placedOrder) {
+        addNewOrder(placedOrder);
+      }
+
+      // Send local push notification
+      try {
+        await pushNotificationService.scheduleLocalNotification(
+          "Order Placed Successfully 🎉",
+          `Your order from ${placedOrder?.restaurant_name || "the restaurant"} has been placed! Track it in Active Orders.`,
+          { type: "order_placed", orderId: placedOrder?.id, screen: "Orders" },
+        );
+      } catch (notifErr) {
+        console.log("Notification send error:", notifErr);
+      }
+
+      // Navigate instantly to Order Tracking (no overlay, no delay)
+      navigation.navigate("MainTabs", {
+        screen: "Orders",
+        params: {
+          screen: "OrderTracking",
+          params: {
+            orderId: placedOrder.id,
+            orderNumber: placedOrder.order_number || "",
+            order: placedOrder,
+            address: address,
+            restaurantName:
+              placedOrder.restaurant_name ||
+              cart?.restaurant_name ||
+              "Restaurant",
+            totalAmount: placedOrder.total_amount || 0,
+            items: (cart?.items || []).map((item) => ({
+              name: item.name || item.food_name,
+              quantity: item.quantity,
+              price: item.unit_price || item.price,
+              image: item.image_url,
+            })),
+          },
+        },
+      });
     } catch (e) {
       setError(e.message || "Place order failed");
     } finally {
@@ -803,11 +923,14 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
-  const subtotal = useMemo(() => (cart ? Number(cart.cart_total) || 0 : 0), [cart]);
+  const subtotal = useMemo(
+    () => (cart ? Number(cart.cart_total) || 0 : 0),
+    [cart],
+  );
   const serviceFee = useMemo(() => calculateServiceFee(subtotal), [subtotal]);
   const deliveryFee = useMemo(
     () => (routeInfo ? calculateDeliveryFee(routeInfo.distance) : null),
-    [routeInfo]
+    [routeInfo],
   );
 
   const isSubtotalValid = subtotal >= MINIMUM_SUBTOTAL;
@@ -826,9 +949,96 @@ export default function CheckoutScreen({ route, navigation }) {
   // ✅ Loading / Error
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.muted}>Loading checkout...</Text>
+      <View style={{ flex: 1, backgroundColor: "#F8FAFC" }}>
+        {/* Map placeholder */}
+        <SkeletonBlock width="100%" height={200} borderRadius={0} />
+        <View style={{ padding: 16, gap: 14 }}>
+          {/* Delivery info card skeleton */}
+          <View
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 16,
+              padding: 16,
+              gap: 14,
+            }}
+          >
+            {[1, 2, 3].map((i) => (
+              <View
+                key={i}
+                style={{ flexDirection: "row", gap: 12, alignItems: "center" }}
+              >
+                <SkeletonBlock width={36} height={36} borderRadius={18} />
+                <View style={{ flex: 1, gap: 4 }}>
+                  <SkeletonBlock width="30%" height={11} borderRadius={4} />
+                  <SkeletonBlock width="80%" height={14} borderRadius={6} />
+                </View>
+              </View>
+            ))}
+          </View>
+          {/* Order details skeleton */}
+          <View
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 16,
+              padding: 16,
+              gap: 12,
+            }}
+          >
+            <SkeletonBlock width="40%" height={16} borderRadius={6} />
+            <View
+              style={{ flexDirection: "row", gap: 10, alignItems: "center" }}
+            >
+              <SkeletonBlock width={40} height={40} borderRadius={20} />
+              <SkeletonBlock width="55%" height={14} borderRadius={6} />
+            </View>
+            {[1, 2].map((i) => (
+              <View
+                key={i}
+                style={{ flexDirection: "row", gap: 10, alignItems: "center" }}
+              >
+                <SkeletonBlock width={48} height={48} borderRadius={10} />
+                <View style={{ flex: 1, gap: 4 }}>
+                  <SkeletonBlock width="65%" height={14} borderRadius={6} />
+                  <SkeletonBlock width="35%" height={12} borderRadius={6} />
+                </View>
+                <SkeletonBlock width={50} height={14} borderRadius={6} />
+              </View>
+            ))}
+            <View
+              style={{
+                height: 1,
+                backgroundColor: "#F1F5F9",
+                marginVertical: 4,
+              }}
+            />
+            {[1, 2, 3].map((i) => (
+              <View
+                key={i}
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                }}
+              >
+                <SkeletonBlock width="35%" height={13} borderRadius={6} />
+                <SkeletonBlock width={60} height={13} borderRadius={6} />
+              </View>
+            ))}
+          </View>
+          {/* Payment method skeleton */}
+          <View
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 16,
+              padding: 16,
+              gap: 10,
+            }}
+          >
+            <SkeletonBlock width="45%" height={16} borderRadius={6} />
+            <SkeletonBlock width="100%" height={48} borderRadius={12} />
+          </View>
+          {/* Place order button skeleton */}
+          <SkeletonBlock width="100%" height={52} borderRadius={14} />
+        </View>
       </View>
     );
   }
@@ -851,7 +1061,15 @@ export default function CheckoutScreen({ route, navigation }) {
       <View style={[styles.page, styles.center]}>
         <Text style={styles.errTitle}>Error</Text>
         <Text style={styles.errText}>{error}</Text>
-        <Pressable onPress={() => navigation.navigate("MainTabs", { screen: "Cart" })} style={styles.primaryBtn}>
+        <Pressable
+          onPress={() =>
+            navigation.navigate("MainTabs", {
+              screen: "Cart",
+              params: { screen: "CartMain" },
+            })
+          }
+          style={styles.primaryBtn}
+        >
           <Text style={styles.primaryText}>Back to Cart</Text>
         </Pressable>
       </View>
@@ -862,7 +1080,12 @@ export default function CheckoutScreen({ route, navigation }) {
     <View style={styles.page}>
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
         {/* ✅ Map */}
-        <View style={[styles.mapWrap, isMapEditMode ? { height: 280 } : { height: 200 }]}>
+        <View
+          style={[
+            styles.mapWrap,
+            isMapEditMode ? { height: 280 } : { height: 200 },
+          ]}
+        >
           <FreeMapView
             ref={mapRef}
             style={{ flex: 1 }}
@@ -872,21 +1095,27 @@ export default function CheckoutScreen({ route, navigation }) {
               latitudeDelta: 0.01,
               longitudeDelta: 0.01,
             }}
-            scrollEnabled={isMapEditMode}
-            zoomEnabled={isMapEditMode}
+            scrollEnabled={true}
+            zoomEnabled={true}
             showsUserLocation={true}
             onPress={(e) => {
               if (!isMapEditMode) return;
               const { latitude, longitude } = e.nativeEvent.coordinate;
               setPosition({ latitude, longitude });
             }}
-            markers={[{
-              id: 'position',
-              coordinate: position,
-              type: 'delivery',
-              emoji: '📍',
-            }]}
+            markers={[
+              {
+                id: "position",
+                coordinate: position,
+                type: "location-pin",
+              },
+            ]}
           />
+
+          {/* Back Button - Top Left */}
+          <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={22} color="#111827" />
+          </Pressable>
 
           {/* Find My Location Button */}
           <Pressable
@@ -929,15 +1158,29 @@ export default function CheckoutScreen({ route, navigation }) {
           </Pressable>
         </View>
 
-        {/* ✅ Address card */}
+        {/* ✅ Delivery Info - Address, Phone, ETA in one block */}
         <View style={styles.card}>
+          {/* Address Row */}
           <View style={styles.rowBetween}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Delivery Address</Text>
-              <Text style={styles.value}>{address || "Add delivery address"}</Text>
-              {!!city && <Text style={styles.muted}>{city}</Text>}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                flex: 1,
+                gap: 10,
+              }}
+            >
+              <View style={styles.infoIcon}>
+                <Ionicons name="location-outline" size={18} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Delivery Address</Text>
+                <Text style={styles.value} numberOfLines={2}>
+                  {address || "Add delivery address"}
+                </Text>
+                {!!city && <Text style={styles.muted}>{city}</Text>}
+              </View>
             </View>
-
             <Pressable
               onPress={() => {
                 setEditAddress(address);
@@ -949,20 +1192,176 @@ export default function CheckoutScreen({ route, navigation }) {
               <Text style={{ fontSize: 16 }}>✏️</Text>
             </Pressable>
           </View>
+
+          <View style={styles.infoDivider} />
+
+          {/* Phone Row */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={styles.infoIcon}>
+              <Ionicons name="call-outline" size={18} color="#10B981" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Phone Number</Text>
+              <Text style={styles.value}>{phone || "No phone number"}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoDivider} />
+
+          {/* Estimated Delivery Row */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={styles.infoIcon}>
+              <Ionicons name="time-outline" size={18} color="#10B981" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Estimated Delivery</Text>
+              <Text style={styles.value}>
+                {routeLoading
+                  ? "Calculating..."
+                  : routeInfo
+                    ? `~${Math.ceil(routeInfo.duration) + 15} mins`
+                    : "—"}
+              </Text>
+            </View>
+          </View>
         </View>
 
-        {/* ✅ Phone */}
+        {/* ✅ Order Details - Food items */}
         <View style={styles.card}>
-          <Text style={styles.label}>Phone Number</Text>
-          <Text style={styles.value}>{phone || "No phone number"}</Text>
-        </View>
+          <Text style={styles.sectionTitle}>Order Details</Text>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 12,
+            }}
+          >
+            {cart?.restaurant?.logo_url ? (
+              <Image
+                source={{ uri: cart.restaurant.logo_url }}
+                style={{ width: 32, height: 32, borderRadius: 16 }}
+              />
+            ) : (
+              <View
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: "#F0FDF4",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text
+                  style={{ fontSize: 14, fontWeight: "700", color: "#10B981" }}
+                >
+                  {(cart?.restaurant?.restaurant_name || "R").charAt(0)}
+                </Text>
+              </View>
+            )}
+            <Text
+              style={{ fontSize: 14, fontWeight: "700", color: "#0F172A" }}
+              numberOfLines={1}
+            >
+              {cart?.restaurant?.restaurant_name || "Restaurant"}
+            </Text>
+          </View>
 
-        {/* ✅ Estimated */}
-        <View style={styles.card}>
-          <Text style={styles.label}>Estimated Delivery</Text>
-          <Text style={styles.value}>
-            {routeLoading ? "Calculating..." : routeInfo ? `~${Math.ceil(routeInfo.duration) + 15} mins` : "—"}
-          </Text>
+          {(cart?.items || []).map((item, index) => (
+            <View key={item.id || index}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 8,
+                }}
+              >
+                {item.image_url ? (
+                  <Image
+                    source={{ uri: item.image_url }}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 8,
+                      marginRight: 10,
+                    }}
+                  />
+                ) : (
+                  <View
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 8,
+                      marginRight: 10,
+                      backgroundColor: "#F1F5F9",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Ionicons
+                      name="fast-food-outline"
+                      size={20}
+                      color="#94A3B8"
+                    />
+                  </View>
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: "600",
+                      color: "#0F172A",
+                    }}
+                    numberOfLines={1}
+                  >
+                    {item.food_name || item.name}
+                  </Text>
+                  {item.size && item.size !== "regular" && (
+                    <Text style={{ fontSize: 12, color: "#64748B" }}>
+                      Size: {item.size}
+                    </Text>
+                  )}
+                </View>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "700",
+                      color: "#0F172A",
+                    }}
+                  >
+                    {formatPrice((item.unit_price || 0) * (item.quantity || 1))}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: "#64748B" }}>
+                    {item.quantity}x {formatPrice(item.unit_price)}
+                  </Text>
+                </View>
+              </View>
+              {index < (cart?.items || []).length - 1 && (
+                <View
+                  style={{
+                    height: 1,
+                    backgroundColor: "#F1F5F9",
+                    marginVertical: 2,
+                  }}
+                />
+              )}
+            </View>
+          ))}
+
+          <View style={styles.divider} />
+          <View
+            style={{ flexDirection: "row", justifyContent: "space-between" }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: "600", color: "#64748B" }}>
+              {(cart?.items || []).reduce((s, it) => s + (it.quantity || 0), 0)}{" "}
+              item(s)
+            </Text>
+            <Text style={{ fontSize: 14, fontWeight: "700", color: "#0F172A" }}>
+              {formatPrice(subtotal)}
+            </Text>
+          </View>
         </View>
 
         {/* ✅ Price summary */}
@@ -972,18 +1371,29 @@ export default function CheckoutScreen({ route, navigation }) {
           <Row label="Subtotal" value={formatPrice(subtotal)} />
           <Row
             label={`Delivery fee${routeInfo ? ` (${routeInfo.distance.toFixed(1)} km)` : ""}`}
-            value={routeLoading ? "..." : deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
+            value={
+              routeLoading
+                ? "..."
+                : deliveryFee !== null
+                  ? formatPrice(deliveryFee)
+                  : "--"
+            }
           />
           <Row label="Service fee" value={formatPrice(serviceFee)} />
 
           <View style={styles.divider} />
-          <Row label="Total" value={finalTotal !== null ? formatPrice(finalTotal) : "--"} isBold />
+          <Row
+            label="Total"
+            value={finalTotal !== null ? formatPrice(finalTotal) : "--"}
+            isBold
+          />
         </View>
 
         {!isSubtotalValid && (
           <View style={styles.warn}>
             <Text style={styles.warnText}>
-              Minimum order: Rs. {MINIMUM_SUBTOTAL}. Add Rs. {(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more.
+              Minimum order: Rs. {MINIMUM_SUBTOTAL}. Add Rs.{" "}
+              {(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more.
             </Text>
           </View>
         )}
@@ -999,32 +1409,60 @@ export default function CheckoutScreen({ route, navigation }) {
       <View style={styles.bottomBar}>
         <Pressable
           onPress={handlePlaceOrder}
-          disabled={!isSubtotalValid || deliveryFee === null || routeLoading || placing || !phone || !address}
+          disabled={
+            !isSubtotalValid ||
+            deliveryFee === null ||
+            routeLoading ||
+            placing ||
+            !phone ||
+            !address
+          }
           style={[
             styles.cta,
-            (!isSubtotalValid || deliveryFee === null || routeLoading || placing || !phone || !address) && styles.ctaDisabled,
+            (!isSubtotalValid ||
+              deliveryFee === null ||
+              routeLoading ||
+              placing ||
+              !phone ||
+              !address) &&
+              styles.ctaDisabled,
           ]}
         >
-          <Text style={[styles.ctaText, (!isSubtotalValid || deliveryFee === null || routeLoading || placing || !phone || !address) && { color: "#86EFAC" }]}>
+          <Text
+            style={[
+              styles.ctaText,
+              (!isSubtotalValid ||
+                deliveryFee === null ||
+                routeLoading ||
+                placing ||
+                !phone ||
+                !address) && { color: "#86EFAC" },
+            ]}
+          >
             {placing
               ? "Placing..."
               : routeLoading
-              ? "Calculating..."
-              : !isSubtotalValid
-              ? `Add Rs. ${(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more`
-              : finalTotal !== null
-              ? `Place Order • ${formatPrice(finalTotal)}`
-              : "Place Order"}
+                ? "Calculating..."
+                : !isSubtotalValid
+                  ? `Add Rs. ${(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more`
+                  : finalTotal !== null
+                    ? `Place Order • ${formatPrice(finalTotal)}`
+                    : "Place Order"}
           </Text>
         </Pressable>
 
-        <Text style={styles.tiny}>By placing this order, you agree to our terms.</Text>
+        <Text style={styles.tiny}>
+          By placing this order, you agree to our terms.
+        </Text>
       </View>
 
       {/* ✅ Address Modal */}
       <Modal transparent visible={showAddressModal} animationType="slide">
         <View style={styles.modalWrap}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setShowAddressModal(false)} />
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setShowAddressModal(false)}
+          />
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Edit Delivery Address</Text>
 
@@ -1038,7 +1476,12 @@ export default function CheckoutScreen({ route, navigation }) {
             />
 
             <Text style={styles.inputLabel}>City</Text>
-            <TextInput value={editCity} onChangeText={setEditCity} placeholder="Enter city" style={styles.input} />
+            <TextInput
+              value={editCity}
+              onChangeText={setEditCity}
+              placeholder="Enter city"
+              style={styles.input}
+            />
 
             <Pressable
               disabled={savingAddress}
@@ -1056,10 +1499,15 @@ export default function CheckoutScreen({ route, navigation }) {
               }}
               style={[styles.primaryBtn, savingAddress && { opacity: 0.7 }]}
             >
-              <Text style={styles.primaryText}>{savingAddress ? "Saving..." : "Save"}</Text>
+              <Text style={styles.primaryText}>
+                {savingAddress ? "Saving..." : "Save"}
+              </Text>
             </Pressable>
 
-            <Pressable onPress={() => setShowAddressModal(false)} style={styles.outlineBtn}>
+            <Pressable
+              onPress={() => setShowAddressModal(false)}
+              style={styles.outlineBtn}
+            >
               <Text style={styles.outlineText}>Cancel</Text>
             </Pressable>
           </View>
@@ -1072,13 +1520,17 @@ export default function CheckoutScreen({ route, navigation }) {
 function Row({ label, value, isBold }) {
   return (
     <View style={styles.rowBetween}>
-      <Text style={[styles.rowLabel, isBold && { fontWeight: "900" }]}>{label}</Text>
-      <Text style={[styles.rowValue, isBold && { fontWeight: "900" }]}>{value}</Text>
+      <Text style={[styles.rowLabel, isBold && { fontWeight: "900" }]}>
+        {label}
+      </Text>
+      <Text style={[styles.rowValue, isBold && { fontWeight: "900" }]}>
+        {value}
+      </Text>
     </View>
   );
 }
 
-const GREEN = "#16A34A";     // main
+const GREEN = "#16A34A"; // main
 const GREEN_DARK = "#0F7A34";
 const GREEN_SOFT = "#DCFCE7";
 const TEXT = "#111827";
@@ -1086,7 +1538,12 @@ const MUTED = "#6B7280";
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#F9FAFB" },
-  center: { alignItems: "center", justifyContent: "center", padding: 18, gap: 10 },
+  center: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    gap: 10,
+  },
 
   muted: { color: MUTED },
 
@@ -1156,6 +1613,23 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 13,
   },
+  backBtn: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    zIndex: 10,
+  },
   mapBtn: {
     position: "absolute",
     right: 12,
@@ -1180,9 +1654,19 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: MUTED },
   value: { marginTop: 2, fontSize: 15, fontWeight: "900", color: TEXT },
 
-  sectionTitle: { fontSize: 14, fontWeight: "900", color: TEXT, marginBottom: 10 },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: TEXT,
+    marginBottom: 10,
+  },
 
-  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  rowBetween: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
   rowLabel: { color: MUTED },
   rowValue: { color: TEXT, fontWeight: "800" },
 
@@ -1195,6 +1679,19 @@ const styles = StyleSheet.create({
     backgroundColor: GREEN_SOFT,
     alignItems: "center",
     justifyContent: "center",
+  },
+  infoIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#F0FDF4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  infoDivider: {
+    height: 1,
+    backgroundColor: "#F1F5F9",
+    marginVertical: 12,
   },
 
   warn: {
@@ -1288,14 +1785,22 @@ const styles = StyleSheet.create({
   },
 
   modalWrap: { flex: 1, justifyContent: "flex-end" },
-  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.45)" },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
   modalCard: {
     backgroundColor: "#fff",
     padding: 16,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
   },
-  modalTitle: { fontSize: 16, fontWeight: "900", color: TEXT, marginBottom: 10 },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: TEXT,
+    marginBottom: 10,
+  },
   inputLabel: { color: MUTED, fontSize: 12, marginTop: 10, marginBottom: 6 },
   input: {
     borderWidth: 1,

@@ -1,49 +1,94 @@
+import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-// Tab Screens
 import CartScreen from "../screens/customer/CartScreen";
+import FoodDetailScreen from "../screens/customer/FoodDetailScreen";
 import HomeScreen from "../screens/customer/HomeScreen";
+import NotificationsScreen from "../screens/customer/NotificationsScreen";
+import OrderTrackingScreen from "../screens/customer/OrderTrackingScreen";
 import OrdersScreen from "../screens/customer/OrdersScreen";
 import ProfileScreen from "../screens/customer/ProfileScreen";
+import RestaurantFoodsScreen from "../screens/customer/RestaurantFoodsScreen";
 
 const Tab = createBottomTabNavigator();
+const HomeStack = createNativeStackNavigator();
+const OrdersStack = createNativeStackNavigator();
+const CartStack = createNativeStackNavigator();
 
-function TabIcon({ label, focused, badge }) {
-  // Modern icon mapping
-  const getIcon = () => {
-    switch (label) {
-      case "Home":
-        return focused ? "🏡" : "🏠";
-      case "Orders":
-        return focused ? "📋" : "📄";
-      case "Cart":
-        return focused ? "🛍️" : "🛒";
-      case "Profile":
-        return focused ? "👨" : "👤";
-      default:
-        return "⚫";
-    }
-  };
+/* ── Nested stacks so the tab bar stays visible on all screens ── */
 
+function HomeStackScreen() {
   return (
-    <View style={styles.iconWrap}>
-      <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
-        <Text style={[styles.iconEmoji, focused && styles.iconEmojiActive]}>
-          {getIcon()}
-        </Text>
-      </View>
+    <HomeStack.Navigator
+      screenOptions={{ headerShown: false, animation: "slide_from_bottom" }}
+    >
+      <HomeStack.Screen name="HomeMain" component={HomeScreen} />
+      <HomeStack.Screen
+        name="RestaurantFoods"
+        component={RestaurantFoodsScreen}
+      />
+      <HomeStack.Screen name="FoodDetail" component={FoodDetailScreen} />
+      <HomeStack.Screen name="OrderTracking" component={OrderTrackingScreen} />
+      <HomeStack.Screen name="Notifications" component={NotificationsScreen} />
+    </HomeStack.Navigator>
+  );
+}
 
-      <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
+function OrdersStackScreen() {
+  return (
+    <OrdersStack.Navigator
+      screenOptions={{ headerShown: false, animation: "slide_from_bottom" }}
+    >
+      <OrdersStack.Screen name="OrdersMain" component={OrdersScreen} />
+      <OrdersStack.Screen
+        name="RestaurantFoods"
+        component={RestaurantFoodsScreen}
+      />
+      <OrdersStack.Screen name="FoodDetail" component={FoodDetailScreen} />
+      <OrdersStack.Screen
+        name="OrderTracking"
+        component={OrderTrackingScreen}
+      />
+      <OrdersStack.Screen
+        name="Notifications"
+        component={NotificationsScreen}
+      />
+    </OrdersStack.Navigator>
+  );
+}
+
+function CartStackScreen() {
+  return (
+    <CartStack.Navigator
+      screenOptions={{ headerShown: false, animation: "slide_from_bottom" }}
+    >
+      <CartStack.Screen name="CartMain" component={CartScreen} />
+      <CartStack.Screen
+        name="RestaurantFoods"
+        component={RestaurantFoodsScreen}
+      />
+      <CartStack.Screen name="FoodDetail" component={FoodDetailScreen} />
+      <CartStack.Screen name="OrderTracking" component={OrderTrackingScreen} />
+      <CartStack.Screen name="Notifications" component={NotificationsScreen} />
+    </CartStack.Navigator>
+  );
+}
+
+function TabIcon({ label, iconName, focused }) {
+  return (
+    <View style={styles.tabIconContainer}>
+      <Ionicons
+        name={iconName}
+        size={24}
+        color={focused ? "#1db95b" : "#9ca3af"}
+        style={styles.tabIcon}
+      />
+      <Text style={[styles.tabLabel, focused && styles.tabLabelFocused]}>
         {label}
       </Text>
-
-      {!!badge && badge > 0 && (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{badge > 9 ? "9+" : badge}</Text>
-        </View>
-      )}
     </View>
   );
 }
@@ -53,53 +98,69 @@ export default function CustomerTabs() {
 
   return (
     <Tab.Navigator
-      initialRouteName="Home"
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
+        tabBarActiveTintColor: "#1db95b",
+        tabBarInactiveTintColor: "#9ca3af",
+        animation: "fade",
         tabBarStyle: {
           ...styles.tabBar,
-          height: 60 + insets.bottom,
+          height: 64 + insets.bottom,
           paddingBottom: insets.bottom,
+          paddingTop: 8,
         },
       }}
     >
       <Tab.Screen
         name="Home"
-        component={HomeScreen}
+        component={HomeStackScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Home" focused={focused} />
+            <TabIcon
+              label="Home"
+              iconName={focused ? "home" : "home-outline"}
+              focused={focused}
+            />
           ),
         }}
       />
-
       <Tab.Screen
         name="Orders"
-        component={OrdersScreen}
+        component={OrdersStackScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Orders" focused={focused} />
+            <TabIcon
+              label="Orders"
+              iconName={focused ? "receipt" : "receipt-outline"}
+              focused={focused}
+            />
           ),
         }}
       />
-
       <Tab.Screen
         name="Cart"
-        component={CartScreen}
+        component={CartStackScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Cart" focused={focused} />
+            <TabIcon
+              label="Cart"
+              iconName={focused ? "cart" : "cart-outline"}
+              focused={focused}
+            />
           ),
         }}
       />
-
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Profile" focused={focused} />
+            <TabIcon
+              label="Profile"
+              iconName={focused ? "person" : "person-outline"}
+              focused={focused}
+            />
           ),
         }}
       />
@@ -109,51 +170,31 @@ export default function CustomerTabs() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: "#EEF2F7",
+    borderTopColor: "#f3f4f6",
     backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: -4 },
     elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
   },
-  iconWrap: { width: 70, alignItems: "center", justifyContent: "center" },
-  iconContainer: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
+  tabIconContainer: {
+    width: 65,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "transparent",
+    paddingVertical: 4,
   },
-  iconContainerActive: {
-    backgroundColor: "#ECFDF5",
+  tabIcon: {
+    marginBottom: 4,
   },
-  iconEmoji: { fontSize: 22, opacity: 0.6 },
-  iconEmojiActive: { opacity: 1 },
-  iconLabel: {
-    marginTop: 2,
+  tabLabel: {
     fontSize: 11,
-    color: "#9CA3AF",
+    color: "#9ca3af",
+    fontWeight: "600",
+  },
+  tabLabelFocused: {
+    color: "#1db95b",
     fontWeight: "700",
   },
-  iconLabelActive: { color: "#10b981", fontWeight: "800" },
-
-  badge: {
-    position: "absolute",
-    top: -2,
-    right: 8,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 5,
-    borderRadius: 999,
-    backgroundColor: "#10b981",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#fff",
-  },
-  badgeText: { color: "#fff", fontSize: 10, fontWeight: "900" },
 });
