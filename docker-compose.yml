@@ -14,11 +14,11 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     ports:
-      - "8081:8081"     # Metro bundler
-      - "8082:8082"     # Expo DevTools (SDK 54+)
-      - "19000:19000"   # Expo dev server
-      - "19001:19001"   # Expo dev tools
-      - "19002:19002"   # Expo web interface
+      - "8081:8081" # Metro bundler
+      - "8082:8082" # Expo DevTools (SDK 54+)
+      - "19000:19000" # Expo dev server
+      - "19001:19001" # Expo dev tools
+      - "19002:19002" # Expo web interface
     volumes:
       # Mount source code for live reload (hot reload)
       - ./src:/app/src
