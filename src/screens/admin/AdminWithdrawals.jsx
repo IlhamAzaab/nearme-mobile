@@ -204,7 +204,7 @@ export default function AdminWithdrawals() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#22c55e"]} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#06C168"]} />
         }
       >
         {/* Header */}
@@ -472,7 +472,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 24,
     borderWidth: 1,
-    borderColor: "#bbf7d0",
+    borderColor: "#9EEBBE",
     marginBottom: 16,
   },
   balanceLabel: {
@@ -521,7 +521,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   statValueGreen: {
-    color: "#16a34a",
+    color: "#06C168",
   },
 
   // Progress Card
@@ -556,7 +556,7 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: "100%",
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     borderRadius: 5,
   },
   progressFooter: {
@@ -567,7 +567,7 @@ const styles = StyleSheet.create({
   progressReceived: {
     fontSize: 10,
     fontWeight: "600",
-    color: "#16a34a",
+    color: "#06C168",
   },
   progressPending: {
     fontSize: 10,
@@ -649,7 +649,7 @@ const styles = StyleSheet.create({
   },
   paymentIcon: {
     fontSize: 18,
-    color: "#16a34a",
+    color: "#06C168",
   },
   paymentInfo: {
     flex: 1,
@@ -728,7 +728,7 @@ const styles = StyleSheet.create({
   modalAmountLabel: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#16a34a",
+    color: "#06C168",
     letterSpacing: 1,
     marginBottom: 4,
   },
@@ -747,7 +747,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
   },
   modalStatusText: {
     fontSize: 12,
@@ -851,7 +851,7 @@ const styles = StyleSheet.create({
   proofImageOpen: {
     fontSize: 10,
     fontWeight: "600",
-    color: "#16a34a",
+    color: "#06C168",
   },
 
   // Skeleton Loading
@@ -863,7 +863,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   skeletonDark: {
-    backgroundColor: "#bbf7d0",
+    backgroundColor: "#9EEBBE",
   },
   skeletonBalanceCard: {
     backgroundColor: "#dcfce7",

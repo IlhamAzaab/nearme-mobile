@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useMemo, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   Image,
@@ -13,6 +14,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Svg, { G, Path } from "react-native-svg";
+import { useNotifications } from "../../app/providers/NotificationProvider";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
 import { API_BASE_URL } from "../../constants/api";
 import {
@@ -49,7 +52,7 @@ function VerifiedBadge({ size = 17 }) {
             width: size * 0.88,
             height: size * 0.88,
             borderRadius: size * 0.23,
-            backgroundColor: "#1db95b",
+            backgroundColor: "#06C168",
             transform: [{ rotate: `${deg}deg` }],
           }}
         />
@@ -67,15 +70,15 @@ function VerifiedBadge({ size = 17 }) {
 // ✅ Circular category images with fallback
 const CATEGORY_IMAGES = {
   kothu:
-    "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=200&h=200&fit=crop",
+    "https://images.unsplash.com/photo-1512058564366-18510be2db19?w=200&h=200&fit=crop",
   friedrice:
     "https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=200&h=200&fit=crop",
   biryani:
     "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=200&h=200&fit=crop",
   parotta:
-    "https://images.unsplash.com/photo-1604152135912-04a022e23696?w=200&h=200&fit=crop",
+    "https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=200&h=200&fit=crop",
   shorteats:
-    "https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?w=200&h=200&fit=crop",
+    "https://images.unsplash.com/photo-1601050690597-df0568f70950?w=200&h=200&fit=crop",
 };
 const CATEGORY_EMOJI = {
   kothu: "🍜",
@@ -121,7 +124,7 @@ export default function HomeScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState("restaurant"); // restaurant | food
   const [selectedCategory, setSelectedCategory] = useState(null);
 
-  const [unreadCount, setUnreadCount] = useState(0);
+  const { unreadCount, markAllReadForCustomer } = useNotifications();
   const [cartCount, setCartCount] = useState(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
@@ -144,33 +147,16 @@ export default function HomeScreen({ navigation }) {
 
       if (token && role === "customer") {
         setIsLoggedIn(true);
-        fetchNotificationCount(token);
         fetchCartCount(token);
       }
     };
     init();
   }, []);
 
-  const fetchNotificationCount = async (token) => {
+  const fetchCartCount = async (tokenArg) => {
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/customer/notifications?limit=100`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
-      const data = await res.json().catch(() => ({}));
-      const unread = (data.notifications || []).filter(
-        (n) => !n.is_read,
-      ).length;
-      setUnreadCount(unread);
-    } catch (err) {
-      console.log("Fetch notifications error:", err?.message);
-    }
-  };
-
-  const fetchCartCount = async (token) => {
-    try {
+      const token = tokenArg || (await AsyncStorage.getItem("token"));
+      if (!token) return;
       const res = await fetch(`${API_BASE_URL}/cart`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -189,6 +175,15 @@ export default function HomeScreen({ navigation }) {
       console.log("Fetch cart error:", err?.message);
     }
   };
+
+  // Refresh cart count every time HomeScreen gains focus
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) {
+        fetchCartCount();
+      }
+    }, [isLoggedIn]),
+  );
 
   // Fetch all restaurants (no search filter, we'll do fuzzy search client-side)
   const fetchRestaurants = async () => {
@@ -279,11 +274,18 @@ export default function HomeScreen({ navigation }) {
           {/* Logo & Delivery Info */}
           <View style={styles.logoSection}>
             <View style={styles.logoBox}>
-              <Text style={styles.logoIcon}>N</Text>
-            </View>
-            <View style={styles.deliveryInfo}>
-              <Text style={styles.deliverLabel}></Text>
-              <Text style={styles.deliverAddress}></Text>
+              <Svg width={40} height={40} viewBox="1650 1600 2750 2050">
+                <G transform="translate(0,6000) scale(1,-1)" stroke="none">
+                  <Path
+                    fill="#000000"
+                    d="M2392 3486 c-24 -6 -40 -15 -36 -19 4 -4 2 -7 -3 -7 -18 0 -78 -63 -92 -98 -7 -17 -18 -32 -23 -32 -5 0 -7 -4 -4 -9 4 -5 1 -11 -4 -13 -6 -2 -12 -10 -13 -18 -1 -8 -22 -51 -46 -95 -25 -44 -44 -82 -43 -85 0 -3 -5 -12 -12 -20 -7 -8 -24 -37 -37 -65 -13 -27 -27 -52 -31 -55 -4 -3 -32 -53 -61 -110 -88 -170 -131 -252 -160 -301 -25 -43 -26 -47 -10 -53 10 -4 92 -6 183 -5 161 2 260 17 260 39 0 6 7 10 17 10 9 0 14 2 11 6 -3 3 8 20 26 38 17 19 51 73 76 121 54 104 61 117 80 141 13 16 13 17 0 9 -8 -4 -6 2 6 16 11 13 33 51 49 84 32 67 69 105 102 105 25 0 93 -37 93 -52 0 -5 4 -7 9 -4 5 3 11 -1 15 -9 3 -8 12 -15 21 -15 8 0 15 -3 15 -8 0 -4 18 -18 39 -32 22 -13 37 -29 34 -34 -4 -6 -3 -8 1 -4 5 4 25 -4 46 -17 27 -17 40 -21 48 -13 6 6 19 12 29 13 18 2 74 25 83 35 3 3 21 13 40 22 59 29 195 91 200 92 3 1 31 15 64 31 53 27 110 74 112 93 2 14 18 47 41 84 13 21 23 45 23 53 0 9 5 13 10 10 6 -3 10 1 10 9 0 8 11 35 24 60 l24 46 -26 -7 c-15 -3 -64 -25 -109 -48 -45 -23 -93 -45 -107 -49 -14 -3 -26 -11 -26 -17 0 -6 -4 -7 -10 -4 -5 3 -10 2 -10 -3 0 -5 -24 -17 -54 -26 -30 -10 -60 -24 -67 -32 -6 -8 -18 -14 -27 -14 -8 0 -39 -13 -68 -30 -50 -28 -54 -29 -83 -14 -17 9 -28 20 -25 26 4 6 -2 8 -16 3 -15 -5 -20 -4 -16 3 4 6 -21 30 -56 53 -35 24 -69 49 -76 56 -7 7 -17 13 -21 13 -4 0 -17 8 -29 18 -54 45 -63 52 -71 52 -4 0 -16 9 -26 20 -10 11 -21 17 -25 15 -5 -3 -10 -2 -12 2 -17 40 -169 63 -256 39z"
+                  />
+                  <Path
+                    fill="#000000"
+                    d="M3768 3488 c-16 -5 -28 -14 -28 -19 0 -5 -6 -9 -13 -9 -7 0 -18 -12 -24 -27 -16 -37 -104 -197 -112 -203 -3 -3 -33 -58 -65 -123 -33 -66 -70 -134 -83 -153 -12 -19 -23 -41 -23 -49 0 -8 -4 -15 -9 -15 -5 0 -13 -10 -17 -22 -3 -13 -14 -32 -23 -42 -11 -13 -12 -17 -2 -11 8 4 1 -12 -16 -36 -17 -24 -38 -62 -49 -84 -10 -22 -23 -43 -28 -47 -6 -4 -7 -8 -2 -8 5 0 2 -8 -6 -17 -24 -29 -59 -104 -53 -113 3 -5 87 -8 188 -7 171 2 185 4 232 27 47 23 95 61 95 76 0 3 10 20 22 37 12 17 23 37 24 44 1 6 13 27 27 45 36 49 43 63 26 53 -11 -7 -11 -5 1 9 18 23 82 138 146 264 26 50 51 92 57 92 6 0 8 3 4 6 -3 4 5 27 20 53 42 76 71 128 100 179 31 52 38 92 20 104 -17 11 -376 8 -409 -4z"
+                  />
+                </G>
+              </Svg>
             </View>
           </View>
 
@@ -292,27 +294,31 @@ export default function HomeScreen({ navigation }) {
             <Ionicons
               name="search"
               size={26}
-              color="#fff"
+              color="#06C168"
               style={styles.searchIcon}
             />
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholder="Search..."
-              placeholderTextColor="rgba(255,255,255,0.6)"
+              placeholderTextColor="rgba(6,193,104,0.6)"
               style={styles.searchInput}
             />
           </View>
 
           {/* Notifications */}
           <Pressable
-            onPress={() => navigation.navigate("Notifications")}
+            onPress={() => {
+              // Fire-and-forget: immediately acknowledge and sync seen IDs.
+              markAllReadForCustomer();
+              navigation.navigate("Notifications");
+            }}
             style={({ pressed }) => [
               styles.bellBtn,
               pressed && { opacity: 0.85 },
             ]}
           >
-            <Ionicons name="notifications" size={22} color="#10B981" />
+            <Ionicons name="notifications" size={22} color="#06C168" />
             {unreadCount > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>
@@ -331,9 +337,6 @@ export default function HomeScreen({ navigation }) {
         {/* Categories */}
         <View style={styles.sectionRow}>
           <Text style={styles.sectionTitle}>Category</Text>
-          <Pressable>
-            <Text style={styles.sectionLink}>See All</Text>
-          </Pressable>
         </View>
 
         <ScrollView
@@ -508,7 +511,7 @@ export default function HomeScreen({ navigation }) {
                             <Ionicons
                               name="restaurant"
                               size={18}
-                              color="#10b981"
+                              color="#06C168"
                             />
                           </View>
                         )}
@@ -641,7 +644,7 @@ export default function HomeScreen({ navigation }) {
           onPress={() => navigation.navigate("Cart")}
           style={({ pressed }) => [styles.fabCart, pressed && { opacity: 0.9 }]}
         >
-          <Text style={styles.fabText}>🛒 {cartCount} items →</Text>
+          <Text style={styles.fabText}>🛒 {cartCount} item{cartCount !== 1 ? "s" : ""} →</Text>
         </Pressable>
       )}
     </SafeAreaView>
@@ -680,24 +683,14 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   logoBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: "#10b981/10",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(16, 185, 129, 0.1)",
+    overflow: "hidden",
   },
-  logoIcon: { fontSize: 20 },
-  deliveryInfo: { flexShrink: 0 },
-  deliverLabel: {
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 1.5,
-    color: "#94A3B8",
-    textTransform: "uppercase",
-  },
-  deliverAddress: { fontSize: 13, fontWeight: "700", color: "#1E293B" },
 
   bellBtn: {
     width: 42,
@@ -708,7 +701,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     position: "relative",
     borderWidth: 2,
-    borderColor: "#10B981",
+    borderColor: "#06C168",
     flexShrink: 0,
   },
   badge: {
@@ -731,15 +724,17 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#10B981",
+    backgroundColor: "#FFFFFF",
     borderRadius: 999,
     paddingHorizontal: 14,
     height: 44,
+    borderWidth: 2,
+    borderColor: "#06C168",
   },
   searchIcon: { marginRight: 10 },
   searchInput: {
     flex: 1,
-    color: "#fff",
+    color: "#06C168",
     fontSize: 14,
     fontWeight: "600",
     paddingVertical: 0,
@@ -759,7 +754,7 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     letterSpacing: -0.5,
   },
-  sectionLink: { color: "#10b981", fontWeight: "800", fontSize: 13 },
+  sectionLink: { color: "#06C168", fontWeight: "800", fontSize: 13 },
 
   catRow: { gap: 16, paddingVertical: 8, marginBottom: 8 },
   catCard: {
@@ -790,8 +785,8 @@ const styles = StyleSheet.create({
   },
   catIconBoxActive: {
     borderWidth: 3,
-    borderColor: "#10b981",
-    shadowColor: "#10b981",
+    borderColor: "#06C168",
+    shadowColor: "#06C168",
     shadowOpacity: 0.3,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -808,7 +803,7 @@ const styles = StyleSheet.create({
     borderRadius: 36,
   },
   catText: { fontSize: 13, fontWeight: "700", color: "#64748B" },
-  catTextActive: { color: "#10b981" },
+  catTextActive: { color: "#06C168" },
 
   toggleRow: {
     flexDirection: "row",
@@ -829,8 +824,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   toggleActive: {
-    backgroundColor: "#10b981",
-    shadowColor: "#10b981",
+    backgroundColor: "#06C168",
+    shadowColor: "#06C168",
     shadowOpacity: 0.25,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
@@ -905,7 +900,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#10b981",
+    backgroundColor: "#06C168",
   },
   restaurantName: {
     color: "#0F172A",
@@ -915,7 +910,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   restaurantCuisine: {
-    color: "#10b981",
+    color: "#06C168",
     fontSize: 12,
     fontWeight: "600",
     marginTop: 2,
@@ -972,11 +967,11 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 16,
     left: 16,
-    backgroundColor: "#10b981",
+    backgroundColor: "#06C168",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    shadowColor: "#10b981",
+    shadowColor: "#06C168",
     shadowOpacity: 0.3,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
@@ -1078,7 +1073,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     letterSpacing: -0.3,
   },
-  foodSub: { color: "#10b981", marginTop: 4, fontSize: 12, fontWeight: "600" },
+  foodSub: { color: "#06C168", marginTop: 4, fontSize: 12, fontWeight: "600" },
   foodRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1107,11 +1102,11 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 16,
     bottom: 24,
-    backgroundColor: "#10b981",
+    backgroundColor: "#06C168",
     borderRadius: 999,
     paddingHorizontal: 20,
     paddingVertical: 14,
-    shadowColor: "#10b981",
+    shadowColor: "#06C168",
     shadowOpacity: 0.35,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },

@@ -684,7 +684,7 @@ export default function RestaurantDetail() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
   },
   header: {
     flexDirection: 'row',
@@ -699,13 +699,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
     justifyContent: 'center',
     alignItems: 'center',
   },
   backButtonText: {
     fontSize: 24,
-    color: '#16a34a',
+    color: '#06C168',
   },
   headerTitleContainer: {
     flex: 1,
@@ -714,7 +714,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#16a34a',
+    color: '#06C168',
   },
   headerSubtitle: {
     fontSize: 12,
@@ -724,7 +724,7 @@ const styles = StyleSheet.create({
   editButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderRadius: 8,
   },
   editButtonText: {
@@ -758,7 +758,7 @@ const styles = StyleSheet.create({
   saveButton: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderRadius: 10,
     minWidth: 120,
     alignItems: 'center',
@@ -961,7 +961,7 @@ const styles = StyleSheet.create({
   },
   mapContainerEditing: {
     borderWidth: 2,
-    borderColor: '#22c55e',
+    borderColor: '#06C168',
   },
   map: {
     flex: 1,

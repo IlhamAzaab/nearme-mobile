@@ -102,7 +102,7 @@ const styles = StyleSheet.create({
   scroll: { padding: 20 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   orderId: { fontSize: 20, fontWeight: '800', color: '#1a1a1a' },
-  status: { fontSize: 14, fontWeight: '600', color: '#10B981', backgroundColor: '#ECFDF5', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  status: { fontSize: 14, fontWeight: '600', color: '#06C168', backgroundColor: '#E6F9EE', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
   section: { marginBottom: 20 },
   sectionTitle: { fontSize: 14, fontWeight: '600', color: '#6B7280', marginBottom: 8 },
   restaurantName: { fontSize: 16, fontWeight: '700', color: '#1a1a1a' },

@@ -1,22 +1,26 @@
-import React from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
 import AuthNavigator from './AuthNavigator';
 import CustomerStack from './CustomerStack';
 import DriverNavigator from './DriverNavigator';
 import ManagerNavigator from './ManagerNavigator';
 import AdminNavigator from './AdminNavigator';
+import SplashScreen from '../screens/SplashScreen';
 import { useAuth } from '../app/providers/AuthProvider';
+
+const SPLASH_MIN_MS = 2200; // show splash for at least 2.2s (covers animation)
 
 export default function RootNavigator() {
   const { isAuthenticated, userRole, isLoading } = useAuth();
+  const [splashDone, setSplashDone] = useState(false);
 
-  // Show loading spinner while checking auth state
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#10b981" />
-      </View>
-    );
+  useEffect(() => {
+    const timer = setTimeout(() => setSplashDone(true), SPLASH_MIN_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Show splash while auth is loading OR minimum time hasn't elapsed
+  if (isLoading || !splashDone) {
+    return <SplashScreen />;
   }
 
   // Handle routing based on authentication and user role
@@ -39,12 +43,3 @@ export default function RootNavigator() {
   // Otherwise show Auth screens
   return <AuthNavigator />;
 }
-
-const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-});

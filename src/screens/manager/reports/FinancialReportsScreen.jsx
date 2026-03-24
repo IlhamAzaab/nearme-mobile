@@ -139,14 +139,14 @@ const FinancialReportsScreen = () => {
                 <View
                   style={[
                     styles.heroStat,
-                    { backgroundColor: "#ECFDF5", borderColor: "#A7F3D0" },
+                    { backgroundColor: "#E6F9EE", borderColor: "#86E5AF" },
                   ]}
                 >
                   <Text
                     style={{
                       fontSize: 9,
                       fontWeight: "700",
-                      color: "#059669",
+                      color: "#06C168",
                       textTransform: "uppercase",
                     }}
                   >
@@ -156,7 +156,7 @@ const FinancialReportsScreen = () => {
                     style={{
                       fontSize: 18,
                       fontWeight: "800",
-                      color: "#065F46",
+                      color: "#04553C",
                       marginTop: 2,
                     }}
                   >
@@ -329,8 +329,8 @@ const FinancialReportsScreen = () => {
                 {
                   label: "Food Commission",
                   value: s.total_commission,
-                  color: "#6EE7B7",
-                  dot: "#6EE7B7",
+                  color: "#56D68A",
+                  dot: "#56D68A",
                 },
                 {
                   label: "Service Fees",
@@ -485,8 +485,8 @@ const FinancialReportsScreen = () => {
                   icon: "cash-outline",
                   label: "Cash",
                   value: s.cash_collected,
-                  bg: "#ECFDF5",
-                  color: "#059669",
+                  bg: "#E6F9EE",
+                  color: "#06C168",
                 },
                 {
                   icon: "card-outline",
@@ -680,7 +680,7 @@ const styles = StyleSheet.create({
   heroValue: {
     fontSize: 34,
     fontWeight: "900",
-    color: "#065F46",
+    color: "#04553C",
     marginVertical: 4,
   },
   heroGrid: { flexDirection: "row", gap: 8, marginTop: 10, width: "100%" },

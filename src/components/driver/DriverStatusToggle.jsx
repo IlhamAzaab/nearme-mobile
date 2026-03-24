@@ -17,8 +17,8 @@ const DriverStatusToggle = ({ isOnline = false, onToggle, disabled = false }) =>
         value={isOnline}
         onValueChange={onToggle}
         disabled={disabled}
-        trackColor={{ false: '#D1D5DB', true: '#86EFAC' }}
-        thumbColor={isOnline ? '#10B981' : '#9CA3AF'}
+        trackColor={{ false: '#D1D5DB', true: '#6EDE9A' }}
+        thumbColor={isOnline ? '#06C168' : '#9CA3AF'}
       />
     </View>
   );
@@ -34,14 +34,14 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginVertical: 8,
   },
-  online: { backgroundColor: '#ECFDF5' },
+  online: { backgroundColor: '#E6F9EE' },
   offline: { backgroundColor: '#F3F4F6' },
   content: { flexDirection: 'row', alignItems: 'center' },
   indicator: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
-  indicatorOnline: { backgroundColor: '#10B981' },
+  indicatorOnline: { backgroundColor: '#06C168' },
   indicatorOffline: { backgroundColor: '#9CA3AF' },
   text: { fontSize: 16, fontWeight: '600' },
-  textOnline: { color: '#059669' },
+  textOnline: { color: '#06C168' },
   textOffline: { color: '#6B7280' },
 });
 

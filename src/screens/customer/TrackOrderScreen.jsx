@@ -95,7 +95,7 @@ const styles = StyleSheet.create({
   etaDistance: { fontSize: 13, color: '#9A3412', marginTop: 4 },
   orderInfo: { marginTop: 16 },
   restaurantName: { fontSize: 16, fontWeight: '700', color: '#1a1a1a' },
-  driverInfo: { marginTop: 12, backgroundColor: '#F0FDF4', padding: 12, borderRadius: 10 },
+  driverInfo: { marginTop: 12, backgroundColor: '#EDFBF2', padding: 12, borderRadius: 10 },
   driverLabel: { fontSize: 12, color: '#166534' },
   driverName: { fontSize: 15, fontWeight: '700', color: '#166534', marginTop: 2 },
 });

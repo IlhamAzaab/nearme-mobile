@@ -1,4 +1,4 @@
-ï»¿import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -110,8 +110,8 @@ export default function OnboardingStep5Screen({ navigation }) {
             <Switch
               value={confirmRead}
               onValueChange={setConfirmRead}
-              trackColor={{ false: "#d1d5db", true: "#86efac" }}
-              thumbColor={confirmRead ? "#1db95b" : "#f4f4f5"}
+              trackColor={{ false: "#d1d5db", true: "#6EDE9A" }}
+              thumbColor={confirmRead ? "#06C168" : "#f4f4f5"}
             />
             <Text style={s.checkLabel}>
               I have read and understood the entire contract
@@ -121,8 +121,8 @@ export default function OnboardingStep5Screen({ navigation }) {
             <Switch
               value={contractAccepted}
               onValueChange={setContractAccepted}
-              trackColor={{ false: "#d1d5db", true: "#86efac" }}
-              thumbColor={contractAccepted ? "#1db95b" : "#f4f4f5"}
+              trackColor={{ false: "#d1d5db", true: "#6EDE9A" }}
+              thumbColor={contractAccepted ? "#06C168" : "#f4f4f5"}
             />
             <Text style={s.checkLabel}>
               I agree to the terms and conditions of the driver agreement
@@ -164,66 +164,66 @@ Version 1.0.0 - Effective Date: ${new Date().toLocaleDateString()}
 This Driver Partnership Agreement ("Agreement") is entered into between NearMe Platform ("Company") and you ("Driver"). By accepting this agreement, you agree to provide transportation and delivery services through the NearMe platform.
 
 2. Driver Requirements
-â€¢ Must be at least 21 years of age
-â€¢ Possess a valid Sri Lankan driving license
-â€¢ Maintain valid vehicle insurance and revenue license
-â€¢ Vehicle must pass safety and quality standards
-â€¢ Must pass background verification checks
+• Must be at least 21 years of age
+• Possess a valid Sri Lankan driving license
+• Maintain valid vehicle insurance and revenue license
+• Vehicle must pass safety and quality standards
+• Must pass background verification checks
 
 3. Driver Responsibilities
-â€¢ Provide safe, courteous, and professional delivery services
-â€¢ Maintain vehicle in good working condition
-â€¢ Comply with all traffic laws and regulations
-â€¢ Keep all documents valid and up to date
-â€¢ Accept delivery requests within reasonable timeframes
-â€¢ Treat customers with respect and professionalism
-â€¢ Report any incidents or accidents immediately
+• Provide safe, courteous, and professional delivery services
+• Maintain vehicle in good working condition
+• Comply with all traffic laws and regulations
+• Keep all documents valid and up to date
+• Accept delivery requests within reasonable timeframes
+• Treat customers with respect and professionalism
+• Report any incidents or accidents immediately
 
 4. Payment Terms
-â€¢ Company will collect payment from customers on behalf of Driver
-â€¢ Driver will receive weekly payment transfers to registered bank account
-â€¢ Platform commission: 15% of total fare
-â€¢ Driver receives 85% of total fare after commission
-â€¢ Payment processing time: 2-3 business days
-â€¢ Minimum payout threshold: LKR 1,000
+• Company will collect payment from customers on behalf of Driver
+• Driver will receive weekly payment transfers to registered bank account
+• Platform commission: 15% of total fare
+• Driver receives 85% of total fare after commission
+• Payment processing time: 2-3 business days
+• Minimum payout threshold: LKR 1,000
 
 5. Insurance and Liability
-â€¢ Driver must maintain comprehensive vehicle insurance
-â€¢ Driver is responsible for any damages or injuries during service
-â€¢ Company is not liable for accidents during delivery
-â€¢ Driver must report all incidents within 24 hours
+• Driver must maintain comprehensive vehicle insurance
+• Driver is responsible for any damages or injuries during service
+• Company is not liable for accidents during delivery
+• Driver must report all incidents within 24 hours
 
 6. Data and Privacy
-â€¢ Company will collect and store Driver's personal and vehicle information
-â€¢ Data will be used for verification, payment, and service improvement
-â€¢ Driver information will not be shared with third parties without consent
-â€¢ Customer data must be kept confidential
+• Company will collect and store Driver's personal and vehicle information
+• Data will be used for verification, payment, and service improvement
+• Driver information will not be shared with third parties without consent
+• Customer data must be kept confidential
 
 7. Account Suspension and Termination
-â€¢ Company may suspend account for policy violations
-â€¢ Repeated customer complaints may lead to deactivation
-â€¢ Either party may terminate with 7 days notice
-â€¢ Fraudulent activity results in immediate termination
-â€¢ Outstanding payments will be settled within 30 days of termination
+• Company may suspend account for policy violations
+• Repeated customer complaints may lead to deactivation
+• Either party may terminate with 7 days notice
+• Fraudulent activity results in immediate termination
+• Outstanding payments will be settled within 30 days of termination
 
 8. Quality Standards
-â€¢ Maintain minimum 4.0 star rating
-â€¢ Accept at least 80% of delivery requests
-â€¢ Complete deliveries without cancellations
-â€¢ Vehicle must be clean and presentable
-â€¢ Driver must dress professionally
+• Maintain minimum 4.0 star rating
+• Accept at least 80% of delivery requests
+• Complete deliveries without cancellations
+• Vehicle must be clean and presentable
+• Driver must dress professionally
 
 9. Code of Conduct
-â€¢ No discrimination based on race, religion, gender, or disability
-â€¢ No harassment or inappropriate behavior
-â€¢ No unauthorized use of customer information
-â€¢ No driving under influence of alcohol or drugs
-â€¢ No smoking in vehicle during service
+• No discrimination based on race, religion, gender, or disability
+• No harassment or inappropriate behavior
+• No unauthorized use of customer information
+• No driving under influence of alcohol or drugs
+• No smoking in vehicle during service
 
 10. Dispute Resolution
-â€¢ Any disputes will first be resolved through mediation
-â€¢ Unresolved disputes will be handled under Sri Lankan law
-â€¢ Jurisdiction: Courts of Colombo, Sri Lanka
+• Any disputes will first be resolved through mediation
+• Unresolved disputes will be handled under Sri Lankan law
+• Jurisdiction: Courts of Colombo, Sri Lanka
 
 11. Updates to Agreement
 Company reserves the right to update this agreement. Drivers will be notified of changes 30 days in advance. Continued use of the platform constitutes acceptance of updated terms.
@@ -238,7 +238,7 @@ By clicking "Submit Application", you acknowledge that you have read, understood
 `;
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#1db95b" },
+  container: { flex: 1, backgroundColor: "#06C168" },
   scroll: { flexGrow: 1, padding: 20 },
   title: {
     fontSize: 26,
@@ -282,7 +282,7 @@ const s = StyleSheet.create({
   },
   checkLabel: { flex: 1, fontSize: 13, color: "#374151", lineHeight: 18 },
   submitBtn: {
-    backgroundColor: "#1db95b",
+    backgroundColor: "#06C168",
     borderRadius: 12,
     paddingVertical: 15,
     alignItems: "center",

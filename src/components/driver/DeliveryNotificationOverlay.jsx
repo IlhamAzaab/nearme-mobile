@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
   },
   label: { fontSize: 14, color: '#6B7280', flex: 1 },
   value: { fontSize: 14, fontWeight: '600', color: '#1a1a1a', flex: 2, textAlign: 'right' },
-  earnings: { color: '#10B981', fontSize: 16 },
+  earnings: { color: '#06C168', fontSize: 16 },
   actions: { flexDirection: 'row', gap: 12 },
   rejectBtn: {
     flex: 1,
@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: '#10B981',
+    backgroundColor: '#06C168',
     alignItems: 'center',
   },
   acceptText: { color: '#fff', fontWeight: '700', fontSize: 16 },

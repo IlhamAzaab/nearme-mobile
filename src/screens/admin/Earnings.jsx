@@ -229,7 +229,7 @@ export default function Earnings() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={["#22c55e"]}
+            colors={["#06C168"]}
           />
         }
       >
@@ -366,14 +366,14 @@ export default function Earnings() {
               >
                 <Defs>
                   <LinearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                    <Stop offset="0" stopColor="#22c55e" stopOpacity="0.3" />
-                    <Stop offset="1" stopColor="#22c55e" stopOpacity="0" />
+                    <Stop offset="0" stopColor="#06C168" stopOpacity="0.3" />
+                    <Stop offset="1" stopColor="#06C168" stopOpacity="0" />
                   </LinearGradient>
                 </Defs>
                 <Path d={chartFillPath} fill="url(#chartGradient)" />
                 <Path
                   d={chartPath}
-                  stroke="#22c55e"
+                  stroke="#06C168"
                   strokeWidth={3}
                   strokeLinecap="round"
                   fill="none"
@@ -503,7 +503,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: "#dcfce7",
     borderWidth: 2,
-    borderColor: "#22c55e",
+    borderColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#16a34a",
+    color: "#06C168",
   },
   headerTextContainer: {
     marginLeft: 12,
@@ -534,12 +534,12 @@ const styles = StyleSheet.create({
   withdrawButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 12,
     gap: 6,
-    shadowColor: "#22c55e",
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
@@ -560,7 +560,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     borderWidth: 1,
-    borderColor: "#bbf7d0",
+    borderColor: "#9EEBBE",
     marginBottom: 16,
   },
   revenueHeader: {
@@ -581,7 +581,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   changeBadgePositive: {
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
   },
   changeBadgeNegative: {
     backgroundColor: "#ef4444",
@@ -617,9 +617,9 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
   },
   periodButtonActive: {
-    backgroundColor: "#22c55e",
-    borderColor: "#22c55e",
-    shadowColor: "#22c55e",
+    backgroundColor: "#06C168",
+    borderColor: "#06C168",
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
@@ -661,7 +661,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   metricValueGreen: {
-    color: "#16a34a",
+    color: "#06C168",
   },
   metricSubtext: {
     fontSize: 12,
@@ -747,7 +747,7 @@ const styles = StyleSheet.create({
   viewAllText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#16a34a",
+    color: "#06C168",
   },
   emptyOrders: {
     backgroundColor: "#fff",
@@ -783,7 +783,7 @@ const styles = StyleSheet.create({
   },
   orderIcon: {
     fontSize: 18,
-    color: "#16a34a",
+    color: "#06C168",
   },
   orderInfo: {
     flex: 1,
@@ -814,7 +814,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginTop: 4,
     borderWidth: 1,
-    borderColor: "#bbf7d0",
+    borderColor: "#9EEBBE",
   },
   completedBadgeText: {
     fontSize: 10,
@@ -860,7 +860,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   skeletonDark: {
-    backgroundColor: "#bbf7d0",
+    backgroundColor: "#9EEBBE",
   },
   skeletonHeader: {
     flexDirection: "row",

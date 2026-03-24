@@ -1423,7 +1423,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 50,
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
@@ -1486,7 +1486,7 @@ const styles = StyleSheet.create({
   socketConnected: {
     backgroundColor: "#DCFCE7",
     borderWidth: 1,
-    borderColor: "#BBF7D0",
+    borderColor: "#9EEBBE",
   },
   socketDisconnected: {
     backgroundColor: "#FEE2E2",
@@ -1500,7 +1500,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   socketDotConnected: {
-    backgroundColor: "#22C55E",
+    backgroundColor: "#06C168",
   },
   socketDotDisconnected: {
     backgroundColor: "#EF4444",
@@ -1914,7 +1914,7 @@ const styles = StyleSheet.create({
 
   // Bonus Box
   bonusBox: {
-    backgroundColor: "#F0FDF4",
+    backgroundColor: "#EDFBF2",
     borderWidth: 2,
     borderColor: "#13ec37",
     borderStyle: "dashed",
@@ -2163,7 +2163,7 @@ const styles = StyleSheet.create({
   },
   skeletonButton: {
     height: 56,
-    backgroundColor: "#BBF7D0",
+    backgroundColor: "#9EEBBE",
     borderRadius: 28,
   },
 });

@@ -136,7 +136,7 @@ const DriverPaymentsScreen = () => {
           <Text
             style={[
               styles.amount,
-              { color: item.withdrawal_balance > 0 ? "#DC2626" : "#059669" },
+              { color: item.withdrawal_balance > 0 ? "#DC2626" : "#06C168" },
             ]}
           >
             Rs.{item.withdrawal_balance?.toFixed(2)}
@@ -188,14 +188,14 @@ const DriverPaymentsScreen = () => {
           <View
             style={[
               styles.summaryCard,
-              { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" },
+              { backgroundColor: "#EDFBF2", borderColor: "#9EEBBE" },
             ]}
           >
             <View style={styles.summaryIconRow}>
-              <Ionicons name="card-outline" size={16} color="#22C55E" />
+              <Ionicons name="card-outline" size={16} color="#06C168" />
               <Text style={styles.summaryLabel}>Paid Today</Text>
             </View>
-            <Text style={[styles.summaryValue, { color: "#16A34A" }]}>
+            <Text style={[styles.summaryValue, { color: "#06C168" }]}>
               Rs.{summary.paid_today?.toFixed(2)}
             </Text>
             <Text style={styles.summaryNote}>Transfers completed today</Text>
@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: -2,
     right: -2,
-    backgroundColor: "#22C55E",
+    backgroundColor: "#06C168",
     borderRadius: 8,
     padding: 2,
   },
@@ -336,7 +336,7 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   name: { fontSize: 13, fontWeight: "700", color: "#111816", flexShrink: 1 },
   verifiedTag: {
-    backgroundColor: "#F0FDF4",
+    backgroundColor: "#EDFBF2",
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 6,
@@ -344,7 +344,7 @@ const styles = StyleSheet.create({
   verifiedTagText: {
     fontSize: 8,
     fontWeight: "700",
-    color: "#16A34A",
+    color: "#06C168",
     textTransform: "uppercase",
   },
   meta: { fontSize: 11, color: "#6B7280", marginTop: 2 },

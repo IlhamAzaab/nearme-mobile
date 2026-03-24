@@ -36,8 +36,10 @@ import {
   View,
 } from "react-native";
 import Svg, { Circle, Ellipse, Path, Rect } from "react-native-svg";
+import OSMMapView from "../../components/maps/OSMMapView";
+import LiveDriverMap from "../../components/maps/LiveDriverMap";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
-import FreeMapView from "../../components/maps/FreeMapView";
+import OrderPlacedBackground from "../../components/customer/OrderPlacedBackground";
 import { API_BASE_URL } from "../../constants/api";
 
 const { width: SW, height: SH } = Dimensions.get("window");
@@ -47,93 +49,152 @@ const { width: SW, height: SH } = Dimensions.get("window");
 // =============================================================================
 
 const PROGRESS_STEPS = [
-  { key: "received", label: "Received" },
-  { key: "accepted", label: "Accepted" },
-  { key: "picked_up", label: "Picked Up" },
-  { key: "on_the_way", label: "On the Way" },
-  { key: "delivered", label: "Delivered" },
+  { key: "placed",  },
+  { key: "pending",  },
+  { key: "accepted", },
+  { key: "picked_up",  },
+  { key: "on_the_way",  },
+  { key: "delivered",  },
 ];
 
 const STEP_INDEX = {
-  placed: -1,
-  pending: 0,
-  received: 0,
-  accepted: 1,
-  picked_up: 2,
-  on_the_way: 3,
-  delivered: 4,
+  placed: 0,
+  pending: 1,
+  received: 1,
+  preparing: 1,
+  ready: 1,
+  accepted: 2,
+  driver_accepted: 2,
+  driver_assigned: 2,
+  picked_up: 3,
+  on_the_way: 4,
+  delivered: 5,
 };
 
 /** Statuses that show the cooking animation overlay */
-const COOKING_STATUSES = new Set(["placed", "pending", "received"]);
+const COOKING_STATUSES = new Set(["placed", "pending", "received", "preparing", "ready"]);
+
+/** Statuses that show the live map (pending → on_the_way) */
+const MAP_STATUSES = new Set(["pending", "received", "preparing", "ready", "accepted", "driver_accepted", "driver_assigned", "picked_up", "on_the_way"]);
+const PREPARING_MAP_STATUSES = new Set(["pending", "received", "preparing"]);
+
+function createTopArcRoute(start, end, steps = 32) {
+  const midLat = (start.latitude + end.latitude) / 2;
+  const midLng = (start.longitude + end.longitude) / 2;
+
+  const latSpan = Math.abs(start.latitude - end.latitude);
+  const lngSpan = Math.abs(start.longitude - end.longitude);
+  const arcLift = Math.max(latSpan, lngSpan) * 0.34;
+  const control = {
+    latitude: midLat + arcLift,
+    longitude: midLng,
+  };
+
+  const points = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const oneMinusT = 1 - t;
+    points.push({
+      latitude:
+        oneMinusT * oneMinusT * start.latitude +
+        2 * oneMinusT * t * control.latitude +
+        t * t * end.latitude,
+      longitude:
+        oneMinusT * oneMinusT * start.longitude +
+        2 * oneMinusT * t * control.longitude +
+        t * t * end.longitude,
+    });
+  }
+  return points;
+}
 
 const STATUS_TEXT = {
   placed: {
     title: "Order Placed!",
-    subtitle: "We've received your order and notifying the restaurant.",
+    subtitle: "We've received your order",
+    eta: "Waiting for restaurant...",
   },
   pending: {
-    title: "Preparing your order...",
-    subtitle: "The restaurant is cooking your meal with care.",
+    title: "Preparing Your Order",
+    subtitle: "The restaurant is cooking your meal",
+    eta: "5-15 mins",
   },
   received: {
-    title: "Preparing your order...",
-    subtitle: "The restaurant is cooking your meal with care.",
+    title: "Preparing Your Order",
+    subtitle: "The restaurant is cooking your meal",
+    eta: "5-15 mins",
+  },
+  preparing: {
+    title: "Preparing Your Order",
+    subtitle: "The restaurant is cooking your meal",
+    eta: "5-15 mins",
+  },
+  ready: {
+    title: "Order Ready",
+    subtitle: "Your order is ready for pickup",
+    eta: "Driver arriving soon",
   },
   accepted: {
-    title: "Driver on the way!",
-    subtitle: "A driver is heading to pick up your order.",
+    title: "Driver Accepted",
+    subtitle: "A driver has accepted your order",
+    eta: "Calculating...",
+  },
+  driver_accepted: {
+    title: "Driver Accepted",
+    subtitle: "A driver has accepted your order",
+    eta: "Calculating...",
+  },
+  driver_assigned: {
+    title: "Driver Assigned",
+    subtitle: "A driver has been assigned to your order",
+    eta: "Calculating...",
   },
   picked_up: {
-    title: "Order picked up!",
-    subtitle: "Your driver has your food and is on the way.",
+    title: "Order Picked Up",
+    subtitle: "Driver has picked up your order",
+    eta: "Calculating...",
   },
   on_the_way: {
-    title: "Almost there!",
-    subtitle: "Your driver is heading to your location.",
+    title: "On The Way",
+    subtitle: "Your order is heading to you",
+    eta: "Calculating...",
   },
   delivered: {
-    title: "Order Delivered!",
-    subtitle: "Enjoy your meal! Thank you for ordering with NearMe.",
+    title: "Delivered!",
+    subtitle: "Enjoy your meal",
+    eta: "Delivered",
   },
 };
 
+const STATUS_MESSAGES = {
+  placed: "Your order has been placed successfully. We're notifying the restaurant.",
+  pending: "Your delicious meal is being prepared with care.",
+  received: "Your delicious meal is being prepared with care.",
+  preparing: "Your delicious meal is being prepared with care.",
+  ready: "Your order is ready and waiting for pickup.",
+  accepted: "Your driver is on the way to pick up your order.",
+  driver_accepted: "Your driver is on the way to pick up your order.",
+  driver_assigned: "A driver has been assigned and is heading to the restaurant.",
+  picked_up: "Your order is now with the driver and on the way.",
+  on_the_way: "Your driver is on the way to your location.",
+  delivered: "Your order has been delivered. Bon app\u00e9tit!",
+};
+
+const STATUS_SVG_PATHS = {
+  placed: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  pending: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
+  received: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
+  preparing: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
+  ready: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  accepted: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
+  driver_accepted: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
+  driver_assigned: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
+  picked_up: "M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z",
+  on_the_way: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
+  delivered: "M20 6L9 17l-5-5",
+};
+
 const POLL_INTERVAL = 2000;
-
-// =============================================================================
-// POLYLINE DECODER (OSRM encoded polyline → coordinates)
-// =============================================================================
-
-function decodePolyline(encoded) {
-  const coordinates = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-
-  while (index < encoded.length) {
-    let b,
-      shift = 0,
-      result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    lat += (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-
-    shift = 0;
-    result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    lng += (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-
-    coordinates.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
-  }
-  return coordinates;
-}
 
 /** Format ETA as clock time (e.g. "12:30 PM") */
 function getFormattedETA(minMinutes, maxMinutes) {
@@ -153,31 +214,23 @@ function getFormattedETA(minMinutes, maxMinutes) {
 
 /* ─── Animated Segment (progress bar fill) ─── */
 const AnimatedSegment = React.memo(({ active, done }) => {
-  const fillAnim = useRef(new Animated.Value(0)).current;
+  const shimmer = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (active) {
-      fillAnim.setValue(0);
+      shimmer.setValue(0);
       const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(fillAnim, {
-            toValue: 1,
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: false,
-          }),
-          Animated.timing(fillAnim, {
-            toValue: 0,
-            duration: 1200,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: false,
-          }),
-        ]),
+        Animated.timing(shimmer, {
+          toValue: 1,
+          duration: 1400,
+          easing: Easing.linear,
+          useNativeDriver: false,
+        }),
       );
       loop.start();
       return () => loop.stop();
     } else {
-      fillAnim.setValue(0);
+      shimmer.setValue(0);
     }
   }, [active]);
 
@@ -186,17 +239,23 @@ const AnimatedSegment = React.memo(({ active, done }) => {
   }
 
   if (active) {
-    const width = fillAnim.interpolate({
+    const left = shimmer.interpolate({
       inputRange: [0, 1],
-      outputRange: ["15%", "100%"],
-    });
-    const opacity = fillAnim.interpolate({
-      inputRange: [0, 0.5, 1],
-      outputRange: [0.5, 1, 1],
+      outputRange: ["-40%", "100%"],
     });
     return (
-      <View style={st.progressSeg}>
-        <Animated.View style={[st.progressFill, { width, opacity }]} />
+      <View style={[st.progressSeg, { backgroundColor: "#B8F0D0" }]}>
+        <Animated.View
+          style={[
+            st.progressFill,
+            {
+              width: "40%",
+              left,
+              backgroundColor: "#06C168",
+              borderRadius: 3,
+            },
+          ]}
+        />
       </View>
     );
   }
@@ -204,222 +263,475 @@ const AnimatedSegment = React.memo(({ active, done }) => {
   return <View style={st.progressSeg} />;
 });
 
-/* ─── Progress Bar (5 segments) ─── */
+/* ─── Progress Bar (6 segments + labels, matching web) ─── */
 const ProgressBar = React.memo(({ stepIndex }) => (
   <View style={st.progressContainer}>
     <View style={st.progressTrack}>
       {PROGRESS_STEPS.map((step, i) => (
-        <AnimatedSegment
-          key={step.key}
-          done={i < stepIndex}
-          active={i === stepIndex}
-        />
+        <AnimatedSegment key={step.key} done={i < stepIndex} active={i === stepIndex} />
+      ))}
+    </View>
+    <View style={st.progressLabelRow}>
+      {PROGRESS_STEPS.map((step, i) => (
+        <Text key={step.key} style={[st.progressLabel, i <= stepIndex && st.progressLabelActive]} numberOfLines={1}>
+          {step.label}
+        </Text>
       ))}
     </View>
   </View>
 ));
 
-/* ─── Placed Progress Bar (1 segment pulsing) ─── */
-const PlacedProgressBar = React.memo(() => (
-  <View style={st.progressContainer}>
-    <View style={st.progressTrack}>
-      <AnimatedSegment done={false} active={true} />
-    </View>
-  </View>
-));
+/* ─── Floating Food Icons (web-matching background decoration) ─── */
+const FOOD_ICONS = ["🍔", "🍕", "🛵", "🥡", "🍜", "🍗"];
+const ICON_POSITIONS = [
+  { top: "15%", left: "10%" },
+  { top: "25%", right: "15%" },
+  { top: "10%", left: "50%" },
+  { top: "35%", right: "30%" },
+  { top: "40%", left: "20%" },
+  { top: "20%", left: "70%" },
+];
+const FloatingFoodIcons = React.memo(() => {
+  const anims = useRef(FOOD_ICONS.map(() => new Animated.Value(0))).current;
+  useEffect(() => {
+    anims.forEach((anim, i) => {
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 800),
+          Animated.timing(anim, { toValue: 1, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0, duration: 2500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ]),
+      ).start();
+    });
+  }, []);
+  return (
+    <>
+      {FOOD_ICONS.map((icon, i) => {
+        const ty = anims[i].interpolate({ inputRange: [0, 1], outputRange: [0, -20] });
+        const op = anims[i].interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.3, 0.55, 0.3] });
+        return (
+          <Animated.Text key={i} style={[st.floatingIcon, ICON_POSITIONS[i], { transform: [{ translateY: ty }], opacity: op }]}>
+            {icon}
+          </Animated.Text>
+        );
+      })}
+    </>
+  );
+});
 
-/* ─── Cooking Animation (overlay on map for preparing statuses) ─── */
-const CookingAnimation = React.memo(() => {
-  const steam1 = useRef(new Animated.Value(0)).current;
-  const steam2 = useRef(new Animated.Value(0)).current;
-  const steam3 = useRef(new Animated.Value(0)).current;
-  const pepperShake = useRef(new Animated.Value(0)).current;
+/* ─── Status Icon Bubble (white circle + SVG + 3 pulse rings, web-matching) ─── */
+const StatusIconBubble = React.memo(({ status }) => {
+  const ring1 = useRef(new Animated.Value(0)).current;
+  const ring2 = useRef(new Animated.Value(0)).current;
+  const ring3 = useRef(new Animated.Value(0)).current;
+  const isDelivered = status === "delivered";
 
   useEffect(() => {
-    const makeSteam = (anim, delay) =>
+    if (isDelivered) return;
+    const makeRing = (anim, delay) =>
       Animated.loop(
         Animated.sequence([
           Animated.delay(delay),
-          Animated.timing(anim, {
-            toValue: 1,
-            duration: 2200,
-            easing: Easing.out(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(anim, {
-            toValue: 0,
-            duration: 0,
-            useNativeDriver: true,
-          }),
+          Animated.timing(anim, { toValue: 1, duration: 2000, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
         ]),
       );
-    makeSteam(steam1, 0).start();
-    makeSteam(steam2, 700).start();
-    makeSteam(steam3, 1400).start();
+    makeRing(ring1, 0).start();
+    makeRing(ring2, 660).start();
+    makeRing(ring3, 1320).start();
+  }, [isDelivered]);
 
-    // Pepper shaker shaking
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pepperShake, {
-          toValue: 1,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pepperShake, {
-          toValue: -1,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pepperShake, {
-          toValue: 0.5,
-          duration: 120,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pepperShake, {
-          toValue: -0.5,
-          duration: 120,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pepperShake, {
-          toValue: 0,
-          duration: 100,
-          useNativeDriver: true,
-        }),
-        Animated.delay(2000),
-      ]),
-    ).start();
-  }, []);
-
-  const steamStyle = (anim, xOff) => ({
+  const ringStyle = (anim) => ({
     position: "absolute",
-    bottom: 78,
-    alignSelf: "center",
-    marginLeft: xOff,
-    opacity: anim.interpolate({
-      inputRange: [0, 0.15, 0.65, 1],
-      outputRange: [0, 0.75, 0.25, 0],
-    }),
-    transform: [
-      {
-        translateY: anim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, -55],
-        }),
-      },
-      {
-        scale: anim.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [0.4, 0.85, 1.3],
-        }),
-      },
-    ],
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 2,
+    borderColor: "#06C168",
+    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] }) }],
+    opacity: anim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0.8, 0.2, 0] }),
   });
 
-  const pepperRotate = pepperShake.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: ["-8deg", "0deg", "8deg"],
-  });
+  const svgPath = STATUS_SVG_PATHS[status] || STATUS_SVG_PATHS.placed;
 
   return (
-    <View style={st.cookingOverlay}>
-      {/* Semi-transparent backdrop */}
-      <View style={st.cookingBackdrop} />
-
-      <View style={st.cookingScene}>
-        {/* Steam wisps */}
-        <Animated.View style={steamStyle(steam1, -14)}>
-          <Svg width={16} height={40} viewBox="0 0 16 40">
-            <Path
-              d="M8 40 Q2 28 8 20 Q14 12 8 0"
-              stroke="rgba(255,255,255,0.55)"
-              strokeWidth="2.5"
-              fill="none"
-              strokeLinecap="round"
-            />
-          </Svg>
-        </Animated.View>
-        <Animated.View style={steamStyle(steam2, 10)}>
-          <Svg width={16} height={40} viewBox="0 0 16 40">
-            <Path
-              d="M8 40 Q14 28 8 20 Q2 12 8 0"
-              stroke="rgba(255,255,255,0.45)"
-              strokeWidth="2"
-              fill="none"
-              strokeLinecap="round"
-            />
-          </Svg>
-        </Animated.View>
-        <Animated.View style={steamStyle(steam3, -2)}>
-          <Svg width={16} height={40} viewBox="0 0 16 40">
-            <Path
-              d="M6 40 Q3 30 10 22 Q15 14 7 0"
-              stroke="rgba(255,255,255,0.4)"
-              strokeWidth="2"
-              fill="none"
-              strokeLinecap="round"
-            />
-          </Svg>
-        </Animated.View>
-
-        {/* Pan + food SVG */}
-        <Svg width={140} height={80} viewBox="0 0 140 80">
-          {/* Flame under pan */}
-          <Path
-            d="M28 72 Q33 56 37 64 Q41 52 47 66 Q51 56 55 64 Q59 52 63 66 Q67 56 72 72"
-            fill="#F59E0B"
-            opacity="0.85"
-          />
-          <Path
-            d="M34 72 Q37 60 42 66 Q46 56 51 68 Q55 58 59 66 Q63 56 67 72"
-            fill="#EF4444"
-            opacity="0.65"
-          />
-
-          {/* Pan body */}
-          <Ellipse cx="50" cy="54" rx="40" ry="17" fill="#4B5563" />
-          <Ellipse cx="50" cy="50" rx="36" ry="14" fill="#6B7280" />
-
-          {/* Food items */}
-          <Circle cx="36" cy="47" r="5.5" fill="#FDE68A" />
-          <Circle cx="50" cy="45" r="5" fill="#EF4444" />
-          <Circle cx="63" cy="48" r="4" fill="#34D399" />
-          <Rect x="41" y="42" width="9" height="4.5" rx="2" fill="#D97706" />
-
-          {/* Pan handle */}
-          <Rect x="86" y="48" width="44" height="7" rx="3.5" fill="#9CA3AF" />
-          <Rect x="88" y="49.5" width="40" height="4" rx="2" fill="#6B7280" />
+    <View style={st.statusBubbleWrap}>
+      {isDelivered ? (
+        <View style={st.successRing} />
+      ) : (
+        <>
+          <Animated.View style={ringStyle(ring1)} />
+          <Animated.View style={ringStyle(ring2)} />
+          <Animated.View style={ringStyle(ring3)} />
+        </>
+      )}
+      <View style={[st.statusIconCircle, isDelivered && st.statusIconCircleSuccess]}>
+        <Svg width={40} height={40} viewBox="0 0 24 24" fill="none" stroke={isDelivered ? "#fff" : "#06C168"} strokeWidth="2">
+          <Path d={svgPath} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
-
-        {/* Pepper shaker */}
-        <Animated.View
-          style={[st.pepperShaker, { transform: [{ rotate: pepperRotate }] }]}
-        >
-          <Svg width={28} height={48} viewBox="0 0 28 48">
-            {/* Cap */}
-            <Rect x="8" y="0" width="12" height="6" rx="2" fill="#9CA3AF" />
-            {/* Holes */}
-            <Circle cx="12" cy="3" r="1" fill="#6B7280" />
-            <Circle cx="16" cy="3" r="1" fill="#6B7280" />
-            {/* Neck */}
-            <Rect x="10" y="6" width="8" height="4" fill="#D1D5DB" />
-            {/* Body */}
-            <Rect x="6" y="10" width="16" height="32" rx="4" fill="#E5E7EB" />
-            <Rect x="8" y="12" width="12" height="28" rx="3" fill="#F3F4F6" />
-            {/* Label */}
-            <Rect x="9" y="20" width="10" height="10" rx="2" fill="#D1D5DB" />
-            <Circle cx="14" cy="25" r="2" fill="#9CA3AF" />
-            {/* Dots falling */}
-            <Circle cx="11" cy="46" r="1" fill="#D97706" opacity="0.5" />
-            <Circle cx="17" cy="47" r="0.8" fill="#D97706" opacity="0.3" />
-          </Svg>
-        </Animated.View>
       </View>
     </View>
   );
 });
 
+/* ─── Restaurant Info Card (web-matching: circular logo + name + chevron) ─── */
+const RestaurantCard = React.memo(({ data }) => {
+  const [logoError, setLogoError] = React.useState(false);
+  const logoUri =
+    data.restaurantLogoUrl ||
+    data.order?.restaurant_logo_url ||
+    data.order?.restaurant_logo ||
+    data.order?.restaurant?.logo_url ||
+    data.order?.restaurant?.logo;
+  return (
+    <View style={st.restaurantCard}>
+      <View style={st.restaurantLogoWrap}>
+        {logoUri && !logoError ? (
+          <Image source={{ uri: logoUri }} style={st.restaurantLogoImg} resizeMode="cover" onError={() => setLogoError(true)} />
+        ) : (
+          <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#06C168" strokeWidth="1.5">
+            <Path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        )}
+      </View>
+      <View style={st.restaurantInfo}>
+        <Text style={st.restaurantNameTxt} numberOfLines={1}>{data.restaurantName || "Restaurant"}</Text>
+        {data.order?.cuisine && <Text style={st.restaurantSubtitleTxt} numberOfLines={1}>{data.order.cuisine}</Text>}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+    </View>
+  );
+});
+
+/* ─── Order Summary Card: Restaurant + Total always visible, View Details dropdown ─── */
+const OrderSummaryCard = React.memo(({ data, expanded, onToggle }) => {
+  const [logoError, setLogoError] = React.useState(false);
+  const logoUri =
+    data.restaurantLogoUrl ||
+    data.order?.restaurant_logo_url ||
+    data.order?.restaurant_logo ||
+    data.order?.restaurant?.logo_url ||
+    data.order?.restaurant?.logo;
+  const initial = (data.restaurantName || "R").charAt(0).toUpperCase();
+  const items = data.items || [];
+  const spinAnim = useRef(new Animated.Value(expanded ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(spinAnim, {
+      toValue: expanded ? 1 : 0,
+      duration: 250,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: true,
+    }).start();
+  }, [expanded]);
+
+  const chevronRotate = spinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "180deg"],
+  });
+
+  return (
+    <View style={st.summaryCard}>
+      {/* ── Always visible: Restaurant row ── */}
+      <View style={st.summaryRestaurantSection}>
+        <View style={st.summaryRestaurantLogoWrap}>
+          {logoUri && !logoError ? (
+            <Image
+              source={{ uri: logoUri }}
+              style={st.summaryRestaurantLogo}
+              resizeMode="cover"
+              onError={() => setLogoError(true)}
+            />
+          ) : (
+            <View style={st.summaryRestaurantLogoFallback}>
+              <Text style={st.summaryRestaurantLogoInitial}>{initial}</Text>
+            </View>
+          )}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={st.summaryRestaurantName} numberOfLines={1}>{data.restaurantName || "Restaurant"}</Text>
+          {data.orderNumber ? <Text style={st.summaryOrderNum}>Order #{data.orderNumber}</Text> : null}
+        </View>
+      </View>
+
+      <View style={st.summaryDivider} />
+
+      {/* ── Always visible: Total row ── */}
+      <View style={st.summaryTotalSection}>
+        <Text style={st.summaryTotalLabel}>TOTAL</Text>
+        <Text style={st.summaryTotalVal}>LKR {parseFloat(data.totalAmount || 0).toFixed(2)}</Text>
+      </View>
+
+      <View style={st.summaryDivider} />
+
+      {/* ── View Details toggle ── */}
+      <Pressable style={st.viewDetailsRow} onPress={onToggle}>
+        <Ionicons name="document-text-outline" size={16} color="#6B7280" />
+        <Text style={st.viewDetailsText}>View Details</Text>
+        <Animated.View style={{ transform: [{ rotate: chevronRotate }] }}>
+          <Ionicons name="chevron-down" size={18} color="#9CA3AF" />
+        </Animated.View>
+      </Pressable>
+
+      {/* ── Expanded details ── */}
+      {expanded && (
+        <View style={st.detailsExpanded}>
+          {/* Ordered Items */}
+          {items.length > 0 && (
+            <View style={st.detailBlock}>
+              <Text style={st.detailBlockLabel}>ORDERED ITEMS</Text>
+              <View style={st.detailItemsBox}>
+                {items.map((item, idx) => {
+                  const itemName = item.food_name || item.name || item.menu_item_name || "Item";
+                  const qty = item.quantity || 1;
+                  const size = item.size || item.variation || item.variant || "";
+                  return (
+                    <View
+                      key={item.id || idx}
+                      style={[st.orderedItemRow, idx < items.length - 1 && st.detailItemBorder]}
+                    >
+                      <Text style={st.orderedItemName}>{qty}x {itemName}</Text>
+                      {size ? <Text style={st.orderedItemSize}>{size}</Text> : null}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
+});
+
+/* ─── Animated Info Message (web-matching: italic bold green 3D emerge) ─── */
+const InfoMessage = React.memo(({ status }) => {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 3000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0, duration: 3000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    ).start();
+  }, []);
+  const scale = anim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.6, 1, 0.6] });
+  const op = anim.interpolate({ inputRange: [0, 0.25, 0.75, 1], outputRange: [0.3, 1, 1, 0.3] });
+  return (
+    <View style={st.infoMsgContainer}>
+      <Animated.Text style={[st.infoMsgText, { transform: [{ scale }], opacity: op }]}>
+        {STATUS_MESSAGES[status] || ""}
+      </Animated.Text>
+    </View>
+  );
+});
+
+/* ─── Scooter Delivery Animation (driver is coming / on the way) ─── */
+const ScooterAnimation = React.memo(({ status }) => {
+  const scooterPos = useRef(new Animated.Value(0)).current;
+  const bounce = useRef(new Animated.Value(0)).current;
+  const pulseRing = useRef(new Animated.Value(0)).current;
+  const foodFloat = useRef(new Animated.Value(0)).current;
+
+  const progress = status === "accepted" ? 0.2 : status === "picked_up" ? 0.5 : 0.78;
+
+  useEffect(() => {
+    Animated.spring(scooterPos, {
+      toValue: progress,
+      friction: 8,
+      tension: 35,
+      useNativeDriver: true,
+    }).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounce, { toValue: -6, duration: 350, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(bounce, { toValue: 2, duration: 250, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(bounce, { toValue: 0, duration: 300, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseRing, { toValue: 1, duration: 1500, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulseRing, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ]),
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(foodFloat, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(foodFloat, { toValue: 0, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    ).start();
+  }, [progress]);
+
+  const roadW = SW - 90;
+  const scooterTX = scooterPos.interpolate({ inputRange: [0, 1], outputRange: [0, roadW - 50] });
+  const ringScale = pulseRing.interpolate({ inputRange: [0, 1], outputRange: [1, 2.2] });
+  const ringOp = pulseRing.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0.5, 0.15, 0] });
+  const floatY = foodFloat.interpolate({ inputRange: [0, 1], outputRange: [0, -10] });
+
+  return (
+    <View style={st.scooterScene}>
+      {/* Floating food items */}
+      <Animated.View style={[st.floatingFood, { left: SW * 0.15, top: 10, transform: [{ translateY: floatY }] }]}>
+        <Text style={{ fontSize: 22 }}>🍕</Text>
+      </Animated.View>
+      <Animated.View style={[st.floatingFood, { right: SW * 0.2, top: 20, transform: [{ translateY: Animated.multiply(floatY, -1) }] }]}>
+        <Text style={{ fontSize: 18 }}>🍔</Text>
+      </Animated.View>
+      <Animated.View style={[st.floatingFood, { left: SW * 0.4, top: 5, transform: [{ translateY: floatY }] }]}>
+        <Text style={{ fontSize: 16 }}>🌮</Text>
+      </Animated.View>
+
+      {/* Road */}
+      <View style={st.roadPath}>
+        <View style={st.roadBg} />
+        <View style={st.roadCenter}>
+          {Array.from({ length: 14 }).map((_, i) => (
+            <View key={i} style={st.roadDash} />
+          ))}
+        </View>
+      </View>
+
+      {/* Restaurant marker */}
+      <View style={[st.heroMarker, { left: 24 }]}>
+        <View style={st.heroMarkerCircle}>
+          <Text style={{ fontSize: 20 }}>🍳</Text>
+        </View>
+        <View style={st.heroMarkerDot} />
+      </View>
+
+      {/* Home marker */}
+      <View style={[st.heroMarker, { right: 24 }]}>
+        <Animated.View style={[st.heroMarkerPulse, { transform: [{ scale: ringScale }], opacity: ringOp }]} />
+        <View style={[st.heroMarkerCircle, { backgroundColor: "#fff" }]}>
+          <Text style={{ fontSize: 20 }}>🏠</Text>
+        </View>
+        <View style={st.heroMarkerDot} />
+      </View>
+
+      {/* Animated Scooter */}
+      <Animated.View style={[st.scooterWrap, { transform: [{ translateX: scooterTX }, { translateY: bounce }] }]}>
+        <View style={st.speedLines}>
+          <View style={[st.speedLine, { width: 14, opacity: 0.5 }]} />
+          <View style={[st.speedLine, { width: 10, opacity: 0.35 }]} />
+          <View style={[st.speedLine, { width: 7, opacity: 0.2 }]} />
+        </View>
+        <View style={st.scooterBubble}>
+          <Text style={{ fontSize: 28 }}>🛵</Text>
+        </View>
+      </Animated.View>
+    </View>
+  );
+});
+
+/* ─── Delivered Celebration Animation ─── */
+const DeliveredAnimation = React.memo(() => {
+  const checkScale = useRef(new Animated.Value(0)).current;
+  const ring1 = useRef(new Animated.Value(0)).current;
+  const ring2 = useRef(new Animated.Value(0)).current;
+  const confettis = useRef(
+    Array.from({ length: 10 }, () => ({
+      x: new Animated.Value(0),
+      y: new Animated.Value(0),
+      opacity: new Animated.Value(0),
+      scale: new Animated.Value(0),
+    })),
+  ).current;
+
+  useEffect(() => {
+    Animated.spring(checkScale, { toValue: 1, friction: 4, tension: 60, useNativeDriver: true }).start();
+
+    const makeRing = (anim, delay) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.parallel([
+            Animated.timing(anim, { toValue: 1, duration: 1800, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          ]),
+          Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
+        ]),
+      );
+    makeRing(ring1, 0).start();
+    makeRing(ring2, 900).start();
+
+    const COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#3B82F6", "#EC4899", "#06C168", "#F97316", "#06B6D4", "#06C168", "#A855F7"];
+    confettis.forEach((c, i) => {
+      const angle = (i / 10) * Math.PI * 2;
+      const dist = 55 + Math.random() * 45;
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 80),
+          Animated.parallel([
+            Animated.timing(c.x, { toValue: Math.cos(angle) * dist, duration: 700, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+            Animated.timing(c.y, { toValue: Math.sin(angle) * dist, duration: 700, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+            Animated.timing(c.opacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+            Animated.timing(c.scale, { toValue: 1, duration: 350, useNativeDriver: true }),
+          ]),
+          Animated.timing(c.opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+          Animated.parallel([
+            Animated.timing(c.x, { toValue: 0, duration: 0, useNativeDriver: true }),
+            Animated.timing(c.y, { toValue: 0, duration: 0, useNativeDriver: true }),
+            Animated.timing(c.scale, { toValue: 0, duration: 0, useNativeDriver: true }),
+          ]),
+          Animated.delay(600),
+        ]),
+      ).start();
+    });
+  }, []);
+
+  const CONFETTI_COLORS = ["#F59E0B", "#EF4444", "#8B5CF6", "#3B82F6", "#EC4899", "#06C168", "#F97316", "#06B6D4", "#06C168", "#A855F7"];
+
+  const ringStyle = (anim) => ({
+    position: "absolute",
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.35)",
+    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 2.8] }) }],
+    opacity: anim.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0.6, 0.25, 0] }),
+  });
+
+  return (
+    <View style={st.deliveredScene}>
+      {/* Pulse rings */}
+      <Animated.View style={ringStyle(ring1)} />
+      <Animated.View style={ringStyle(ring2)} />
+
+      {/* Confetti */}
+      {confettis.map((c, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            st.confetti,
+            {
+              backgroundColor: CONFETTI_COLORS[i],
+              borderRadius: i % 2 === 0 ? 5 : 2,
+              width: i % 2 === 0 ? 10 : 8,
+              height: i % 2 === 0 ? 10 : 14,
+              transform: [{ translateX: c.x }, { translateY: c.y }, { scale: c.scale }, { rotate: `${i * 36}deg` }],
+              opacity: c.opacity,
+            },
+          ]}
+        />
+      ))}
+
+      {/* Checkmark */}
+      <Animated.View style={[st.deliveredCheck, { transform: [{ scale: checkScale }] }]}>
+        <Ionicons name="checkmark" size={52} color="#fff" />
+      </Animated.View>
+
+      <Text style={st.deliveredTxt}>Delivered!</Text>
+      <Text style={st.deliveredSub}>Enjoy your meal</Text>
+    </View>
+  );
+});
+
 /* ─── Driver Card ─── */
-const DriverCard = React.memo(({ driver, onCopyPhone }) => {
+const DriverCard = React.memo(({ driver }) => {
   if (!driver) return null;
   return (
     <View style={st.driverCard}>
@@ -428,7 +740,7 @@ const DriverCard = React.memo(({ driver, onCopyPhone }) => {
           <Image source={{ uri: driver.photo_url }} style={st.driverAvatar} />
         ) : (
           <View style={st.driverAvatarFallback}>
-            <Ionicons name="person" size={26} color="#10B981" />
+            <Ionicons name="person" size={20} color="#06C168" />
           </View>
         )}
       </View>
@@ -439,7 +751,7 @@ const DriverCard = React.memo(({ driver, onCopyPhone }) => {
         </Text>
         {(driver.vehicle_number || driver.license_plate) && (
           <View style={st.driverRow}>
-            <Ionicons name="car-sport" size={13} color="#6B7280" />
+            <Ionicons name="car-sport" size={11} color="#6B7280" />
             <Text style={st.driverRowText}>
               {driver.vehicle_number || driver.license_plate}
             </Text>
@@ -447,7 +759,7 @@ const DriverCard = React.memo(({ driver, onCopyPhone }) => {
         )}
         {driver.rating != null && (
           <View style={st.driverRow}>
-            <Ionicons name="star" size={12} color="#F59E0B" />
+            <Ionicons name="star" size={10} color="#F59E0B" />
             <Text style={st.driverRowText}>
               {parseFloat(driver.rating).toFixed(1)}
             </Text>
@@ -456,20 +768,12 @@ const DriverCard = React.memo(({ driver, onCopyPhone }) => {
       </View>
 
       {driver.phone && (
-        <View style={st.driverActions}>
-          <Pressable
-            style={st.callBtn}
-            onPress={() => Linking.openURL(`tel:${driver.phone}`)}
-          >
-            <Ionicons name="call" size={17} color="#fff" />
-          </Pressable>
-          <Pressable
-            style={st.copyBtn}
-            onPress={() => onCopyPhone(driver.phone)}
-          >
-            <Ionicons name="copy-outline" size={15} color="#10B981" />
-          </Pressable>
-        </View>
+        <Pressable
+          style={st.callBtn}
+          onPress={() => Linking.openURL(`tel:${driver.phone}`)}
+        >
+          <Ionicons name="call" size={16} color="#fff" />
+        </Pressable>
       )}
     </View>
   );
@@ -481,7 +785,7 @@ const VehicleCard = React.memo(({ driver }) => {
   return (
     <View style={st.vehicleCard}>
       <View style={st.vehicleIconWrap}>
-        <Ionicons name="bicycle" size={30} color="#10B981" />
+        <Ionicons name="bicycle" size={30} color="#06C168" />
       </View>
       <View style={st.vehicleInfo}>
         <VRow label="Vehicle" value={driver.vehicle_type || "Motorbike"} />
@@ -510,7 +814,7 @@ const RatingSection = React.memo(({ rating, onRate, onSubmit, submitted }) => {
   if (submitted) {
     return (
       <View style={st.ratingDone}>
-        <Ionicons name="checkmark-circle" size={22} color="#10B981" />
+        <Ionicons name="checkmark-circle" size={22} color="#06C168" />
         <Text style={st.ratingDoneText}>Thanks for your feedback!</Text>
       </View>
     );
@@ -546,18 +850,29 @@ export default function OrderTrackingScreen({ route, navigation }) {
   const params = route.params || {};
   const orderId = params.orderId;
 
+  // Guard: if no orderId, this screen was opened without valid data — go back
+  useEffect(() => {
+    if (!orderId) {
+      if (navigation.canGoBack()) navigation.goBack();
+      else navigation.reset({ index: 0, routes: [{ name: "MainTabs" }] });
+    }
+  }, [orderId, navigation]);
+
   /* ── order data (navigation or fetched) ── */
   const [orderData, setOrderData] = useState({
-    restaurantName: params.restaurantName || "",
-    orderNumber: params.orderNumber || "",
-    address: params.address || "",
-    items: params.items || [],
-    totalAmount: params.totalAmount || 0,
+    restaurantName: params.restaurantName || params.order?.restaurant_name || "",
+    orderNumber: params.orderNumber || params.order?.order_number || "",
+    address: params.address || params.order?.delivery_address || "",
+    items: params.items || params.order?.order_items || params.order?.items || [],
+    totalAmount: params.totalAmount ?? params.order?.total_amount ?? 0,
     order: params.order || null,
+    restaurantLogoUrl: params.restaurantLogoUrl || params.logoUrl || params.order?.restaurant_logo_url || "",
   });
 
   /* ── tracking state ── */
-  const [currentStatus, setCurrentStatus] = useState("placed");
+  const [currentStatus, setCurrentStatus] = useState(
+    (params.status || params.order?.status || params.order?.delivery_status || "placed").toLowerCase()
+  );
   const [driverInfo, setDriverInfo] = useState(null);
   const [estimatedTime, setEstimatedTime] = useState("Calculating...");
   const [driverLocation, setDriverLocation] = useState(null);
@@ -569,7 +884,6 @@ export default function OrderTrackingScreen({ route, navigation }) {
   const [rating, setRating] = useState(0);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [phoneCopied, setPhoneCopied] = useState(false);
-  const [mapReady, setMapReady] = useState(false);
 
   /* ── animations ── */
   const sheetAnim = useRef(new Animated.Value(0)).current;
@@ -577,9 +891,9 @@ export default function OrderTrackingScreen({ route, navigation }) {
   const statusFade = useRef(new Animated.Value(1)).current;
 
   /* ── refs ── */
-  const mapRef = useRef(null);
   const prevRouteKeyRef = useRef(null);
   const pollRef = useRef(null);
+  const mapRef = useRef(null);
 
   /* ── derived ── */
   const stepIndex = STEP_INDEX[currentStatus] ?? 0;
@@ -587,14 +901,37 @@ export default function OrderTrackingScreen({ route, navigation }) {
   const isCooking = COOKING_STATUSES.has(currentStatus);
   const isOTW = currentStatus === "on_the_way";
   const isDone = currentStatus === "delivered";
+  const isPreparingMapStage = PREPARING_MAP_STATUSES.has(currentStatus);
 
   // ===========================================================================
   // FETCH ORDER (if navigated from Orders list, not checkout)
   // ===========================================================================
+
+  // Fetch logo_url for a restaurant from the public API (same source as home page)
+  const fetchRestaurantLogo = React.useCallback(async (restaurantId) => {
+    if (!restaurantId) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/public/restaurants/${restaurantId}`);
+      if (res.ok) {
+        const json = await res.json();
+        const r = json.restaurant || json;
+        const logoUrl = r.logo_url || r.logo || r.restaurant_logo_url || r.restaurant_logo;
+        if (logoUrl) {
+          setOrderData((prev) => ({ ...prev, restaurantLogoUrl: logoUrl }));
+        }
+      }
+    } catch (e) {
+      console.log("Restaurant logo fetch error:", e);
+    }
+  }, []);
+
   useEffect(() => {
     const fetchOrder = async () => {
-      if (orderData.restaurantName && orderData.order) {
+      // Use params data for immediate display (optimistic UI)
+      if (orderData.order) {
         const o = orderData.order;
+        const resolvedStatus = (o.effective_status || o.status || "").toLowerCase();
+        if (resolvedStatus) setCurrentStatus(resolvedStatus);
         if (o.restaurant_latitude && o.restaurant_longitude) {
           setRestaurantLocation({
             lat: parseFloat(o.restaurant_latitude),
@@ -607,9 +944,9 @@ export default function OrderTrackingScreen({ route, navigation }) {
             lng: parseFloat(o.delivery_longitude),
           });
         }
-        setLoading(false);
-        return;
       }
+
+      // ALWAYS fetch full order from API to get order_items (single source of truth)
       try {
         const token = await AsyncStorage.getItem("token");
         const res = await fetch(`${API_BASE_URL}/orders/${orderId}`, {
@@ -619,14 +956,20 @@ export default function OrderTrackingScreen({ route, navigation }) {
           const data = await res.json();
           const o = data.order || data;
           setOrderData({
-            restaurantName: o.restaurant_name || "Restaurant",
-            orderNumber: o.order_number || "",
-            address: o.delivery_address || "",
-            items: o.items || [],
-            totalAmount: o.total_amount || 0,
+            restaurantName: o.restaurant_name || orderData.restaurantName || "Restaurant",
+            orderNumber: o.order_number || orderData.orderNumber || "",
+            address: o.delivery_address || orderData.address || "",
+            items: o.order_items || o.items || [],
+            totalAmount: params.totalAmount ?? o.total_amount ?? 0,
             order: o,
+            restaurantLogoUrl: orderData.restaurantLogoUrl || o.restaurant_logo_url || "",
           });
-          if (o.status) setCurrentStatus(o.status.toLowerCase());
+          // Fetch the restaurant logo from the public API if not present
+          if (!orderData.restaurantLogoUrl && !o.restaurant_logo_url) {
+            fetchRestaurantLogo(o.restaurant_id || o.restaurant?.id);
+          }
+          const resolvedFetchStatus = (o.effective_status || o.status || "").toLowerCase();
+          if (resolvedFetchStatus) setCurrentStatus(resolvedFetchStatus);
 
           if (o.restaurant_latitude && o.restaurant_longitude) {
             setRestaurantLocation({
@@ -693,7 +1036,7 @@ export default function OrderTrackingScreen({ route, navigation }) {
         );
         if (!res.ok) return;
         const data = await res.json();
-        const newStatus = (data.status || "").toLowerCase();
+        const newStatus = (data.effective_status || data.delivery_status || data.status || "").toLowerCase();
 
         if (data.driver) setDriverInfo(data.driver);
 
@@ -781,103 +1124,64 @@ export default function OrderTrackingScreen({ route, navigation }) {
   }, [orderId, loading, currentStatus]);
 
   // ===========================================================================
-  // OSRM ROUTE
+  // LINE ROUTE for map statuses (curved for preparing stage, straight otherwise)
   // ===========================================================================
   useEffect(() => {
-    let origin = null;
-    let destination = null;
-
-    if (isOTW || currentStatus === "picked_up") {
-      if (driverLocation && deliveryLocation) {
-        origin = driverLocation;
-        destination = deliveryLocation;
-      }
-    } else {
-      if (restaurantLocation && deliveryLocation) {
-        origin = restaurantLocation;
-        destination = deliveryLocation;
-      }
+    if (currentStatus === "on_the_way") {
+      // No route line when on the way — live driver tracking
+      setRouteCoords([]);
+      return;
     }
-
-    if (!origin || !destination) return;
-
-    const key = `${origin.lat.toFixed(4)},${origin.lng.toFixed(4)}-${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}`;
-    if (prevRouteKeyRef.current === key) return;
-    prevRouteKeyRef.current = key;
-
-    (async () => {
-      try {
-        const url = `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=polyline`;
-        const res = await fetch(url);
-        const data = await res.json();
-        if (data.code === "Ok" && data.routes?.[0]?.geometry) {
-          setRouteCoords(decodePolyline(data.routes[0].geometry));
-          if (data.routes[0].duration) {
-            const mins = Math.max(1, Math.ceil(data.routes[0].duration / 60));
-            setEstimatedTime(
-              isOTW
-                ? getFormattedETA(mins, mins)
-                : `${mins} min${mins !== 1 ? "s" : ""}`,
-            );
-          }
-        }
-      } catch {
-        setRouteCoords([
-          { latitude: origin.lat, longitude: origin.lng },
-          { latitude: destination.lat, longitude: destination.lng },
-        ]);
-      }
-    })();
+    if (restaurantLocation && deliveryLocation) {
+      const start = { latitude: restaurantLocation.lat, longitude: restaurantLocation.lng };
+      const end = { latitude: deliveryLocation.lat, longitude: deliveryLocation.lng };
+      setRouteCoords(
+        PREPARING_MAP_STATUSES.has(currentStatus)
+          ? createTopArcRoute(start, end)
+          : [start, end],
+      );
+    }
   }, [
-    currentStatus,
-    driverLocation,
-    deliveryLocation,
     restaurantLocation,
-    isOTW,
+    deliveryLocation,
+    currentStatus,
   ]);
 
   // ===========================================================================
-  // FIT MAP BOUNDS
+  // LIVE DRIVER TRACKING — now handled by LiveDriverMap component
   // ===========================================================================
+
+  // Fit map bounds after map loads for cooking statuses (not OTW)
+  // Bottom padding accounts for the bottom sheet covering ~55% of screen
   useEffect(() => {
-    if (!mapReady || !mapRef.current) return;
-
-    const coords = [];
-    if (restaurantLocation) {
-      coords.push({
-        latitude: restaurantLocation.lat,
-        longitude: restaurantLocation.lng,
-      });
+    if (
+      !isOTW &&
+      MAP_STATUSES.has(currentStatus) &&
+      restaurantLocation &&
+      deliveryLocation &&
+      mapRef.current
+    ) {
+      const timer = setTimeout(() => {
+        if (mapRef.current) {
+          mapRef.current.fitToCoordinates(
+            [
+              { latitude: restaurantLocation.lat, longitude: restaurantLocation.lng },
+              { latitude: deliveryLocation.lat, longitude: deliveryLocation.lng },
+            ],
+            {
+              edgePadding: {
+                top: 60,
+                right: 50,
+                bottom: Math.round(SH * 0.55),
+                left: 50,
+              },
+            },
+          );
+        }
+      }, 1200);
+      return () => clearTimeout(timer);
     }
-    if (deliveryLocation) {
-      coords.push({
-        latitude: deliveryLocation.lat,
-        longitude: deliveryLocation.lng,
-      });
-    }
-    if (driverLocation) {
-      coords.push({
-        latitude: driverLocation.lat,
-        longitude: driverLocation.lng,
-      });
-    }
-
-    if (coords.length >= 2) {
-      mapRef.current.fitToCoordinates(coords, {
-        edgePadding: { top: 60 },
-      });
-    } else if (coords.length === 1) {
-      mapRef.current.animateToRegion(
-        {
-          latitude: coords[0].latitude,
-          longitude: coords[0].longitude,
-          latitudeDelta: 0.015,
-          longitudeDelta: 0.015,
-        },
-        500,
-      );
-    }
-  }, [mapReady, restaurantLocation, deliveryLocation, driverLocation]);
+  }, [currentStatus, isOTW, restaurantLocation, deliveryLocation]);
 
   // ===========================================================================
   // HANDLERS
@@ -922,141 +1226,23 @@ export default function OrderTrackingScreen({ route, navigation }) {
   }, [navigation]);
 
   // ===========================================================================
-  // MAP PROPS (memoised)
-  // ===========================================================================
-
-  const mapInitialRegion = useMemo(() => {
-    const c = deliveryLocation || restaurantLocation || driverLocation;
-    if (!c)
-      return {
-        latitude: 7.8731,
-        longitude: 80.7718,
-        latitudeDelta: 0.05,
-        longitudeDelta: 0.05,
-      };
-    return {
-      latitude: c.lat,
-      longitude: c.lng,
-      latitudeDelta: 0.03,
-      longitudeDelta: 0.03,
-    };
-  }, [deliveryLocation, restaurantLocation, driverLocation]);
-
-  const mapMarkers = useMemo(() => {
-    const m = [];
-    if (restaurantLocation) {
-      m.push({
-        id: "restaurant",
-        coordinate: {
-          latitude: restaurantLocation.lat,
-          longitude: restaurantLocation.lng,
-        },
-        type: "restaurant",
-        emoji: "🏪",
-        title: orderData.restaurantName || "Restaurant",
-      });
-    }
-    if (deliveryLocation) {
-      m.push({
-        id: "customer",
-        coordinate: {
-          latitude: deliveryLocation.lat,
-          longitude: deliveryLocation.lng,
-        },
-        type: "customer",
-        emoji: "🏠",
-        title: "Your Location",
-      });
-    }
-    if (driverLocation) {
-      m.push({
-        id: "driver",
-        coordinate: {
-          latitude: driverLocation.lat,
-          longitude: driverLocation.lng,
-        },
-        type: "driver",
-        emoji: "🛵",
-        title: driverInfo?.full_name || "Driver",
-      });
-    }
-    return m;
-  }, [
-    restaurantLocation,
-    deliveryLocation,
-    driverLocation,
-    orderData.restaurantName,
-    driverInfo,
-  ]);
-
-  const mapPolylines = useMemo(() => {
-    if (routeCoords.length < 2) return [];
-    return [
-      {
-        id: "route",
-        coordinates: routeCoords,
-        strokeColor: isCooking ? "#6B7280" : "#10B981",
-        strokeWidth: isCooking ? 3 : 5,
-        dashArray: isCooking ? "10,8" : null,
-      },
-    ];
-  }, [routeCoords, isCooking]);
-
-  // ===========================================================================
   // LOADING SKELETON
   // ===========================================================================
 
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: "#F0FDF4" }}>
-        <SkeletonBlock width="100%" height={SH * 0.45} borderRadius={0} />
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "#fff",
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            marginTop: -20,
-            padding: 20,
-            gap: 16,
-          }}
-        >
-          <View
-            style={{
-              alignSelf: "center",
-              width: 40,
-              height: 5,
-              borderRadius: 3,
-              backgroundColor: "#E2E8F0",
-            }}
-          />
-          <SkeletonBlock width="55%" height={20} borderRadius={8} />
-          <SkeletonBlock width="80%" height={14} borderRadius={6} />
-          <View
-            style={{
-              backgroundColor: "#F0FDF4",
-              borderRadius: 16,
-              padding: 16,
-              flexDirection: "row",
-              gap: 12,
-              alignItems: "center",
-            }}
-          >
-            <SkeletonBlock width={44} height={44} borderRadius={22} />
-            <View style={{ flex: 1, gap: 6 }}>
-              <SkeletonBlock width="45%" height={12} borderRadius={6} />
-              <SkeletonBlock width="65%" height={18} borderRadius={6} />
-            </View>
-          </View>
+      <View style={{ flex: 1, backgroundColor: "#E6F9EE" }}>
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <ActivityIndicator size="large" color="#06C168" />
+          <Text style={{ color: "#06C168", marginTop: 10, fontSize: 14, fontWeight: "600" }}>Loading order...</Text>
+        </View>
+        <View style={{ flex: 1, backgroundColor: "#fff", borderTopLeftRadius: 28, borderTopRightRadius: 28, marginTop: -20, padding: 20, gap: 16 }}>
+          <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: "#D1D5DB" }} />
+          <SkeletonBlock width="55%" height={22} borderRadius={8} />
+          <SkeletonBlock width="45%" height={14} borderRadius={6} />
           <SkeletonBlock width="100%" height={8} borderRadius={4} />
-          <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
-            <SkeletonBlock width={48} height={48} borderRadius={24} />
-            <View style={{ flex: 1, gap: 6 }}>
-              <SkeletonBlock width="50%" height={14} borderRadius={6} />
-              <SkeletonBlock width="35%" height={12} borderRadius={6} />
-            </View>
-            <SkeletonBlock width={44} height={44} borderRadius={22} />
-          </View>
+          <SkeletonBlock width="100%" height={64} borderRadius={14} />
+          <SkeletonBlock width="100%" height={56} borderRadius={14} />
         </View>
       </View>
     );
@@ -1066,228 +1252,195 @@ export default function OrderTrackingScreen({ route, navigation }) {
   // RENDER
   // ===========================================================================
 
-  const sheetY = sheetAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [400, 0],
-  });
+  const sheetY = sheetAnim.interpolate({ inputRange: [0, 1], outputRange: [400, 0] });
 
   return (
     <View style={st.root}>
-      <StatusBar barStyle="light-content" backgroundColor="#064E3B" />
+      <StatusBar barStyle="dark-content" backgroundColor="#E6F9EE" />
 
-      {/* ══════════════ MAP BACKGROUND (always visible) ══════════════ */}
-      <View style={st.mapWrap}>
-        <FreeMapView
-          ref={mapRef}
-          style={StyleSheet.absoluteFill}
-          initialRegion={mapInitialRegion}
-          markers={mapMarkers}
-          polylines={mapPolylines}
-          onMapReady={() => setMapReady(true)}
-        />
-
-        {/* Map loading overlay */}
-        {!mapReady && (
-          <View style={st.mapLoading}>
-            <ActivityIndicator size="large" color="#10B981" />
-            <Text style={st.mapLoadingTxt}>Loading map…</Text>
-          </View>
-        )}
-
-        {/* Cooking animation overlay (placed / pending / received) */}
-        {isCooking && <CookingAnimation />}
-
-        {/* Live badge (on_the_way) */}
-        {isOTW && (
-          <View style={st.mapLiveBadge}>
-            <View style={st.liveDot} />
-            <Text style={st.mapLiveTxt}>LIVE</Text>
-          </View>
-        )}
-      </View>
+      {/* ══════ HERO: MAP or GREEN BACKGROUND ══════ */}
+      {isOTW ? (
+        /* ── On-the-way: dedicated tight-zoom driver-only map ── */
+        <View style={st.mapWrap}>
+          <LiveDriverMap
+            orderId={orderId}
+            driverLocation={driverLocation}
+            deliveryLocation={deliveryLocation}
+            style={StyleSheet.absoluteFillObject}
+          />
+        </View>
+      ) : MAP_STATUSES.has(currentStatus) && restaurantLocation && deliveryLocation ? (
+        <View style={st.mapWrap}>
+          <OSMMapView
+            ref={mapRef}
+            style={StyleSheet.absoluteFillObject}
+            initialRegion={(() => {
+              const latD = Math.abs(restaurantLocation.lat - deliveryLocation.lat) * 2.2 + 0.012;
+              const lngD = Math.abs(restaurantLocation.lng - deliveryLocation.lng) * 2.2 + 0.012;
+              // Shift center south so markers appear above the bottom sheet
+              return {
+                latitude: (restaurantLocation.lat + deliveryLocation.lat) / 2 - latD * 0.28,
+                longitude: (restaurantLocation.lng + deliveryLocation.lng) / 2,
+                latitudeDelta: latD,
+                longitudeDelta: lngD,
+              };
+            })()}
+            scrollEnabled={true}
+            zoomEnabled={true}
+            markers={[
+              {
+                id: "restaurant",
+                coordinate: { latitude: restaurantLocation.lat, longitude: restaurantLocation.lng },
+                type: "restaurant",
+                title: orderData.restaurantName || "Restaurant",
+                emoji: isPreparingMapStage ? "🍴" : "🍽️",
+              },
+              {
+                id: "customer",
+                coordinate: { latitude: deliveryLocation.lat, longitude: deliveryLocation.lng },
+                type: isPreparingMapStage ? "restaurant" : "customer",
+                title: "Delivery",
+                emoji: isPreparingMapStage ? "🏡" : "🏠",
+              },
+            ]}
+            polylines={
+              routeCoords.length > 1
+                ? isPreparingMapStage
+                  ? [
+                      {
+                        id: "route-glow",
+                        coordinates: routeCoords,
+                        strokeColor: "#4B5563",
+                        strokeWidth: 4,
+                        dashArray: "10, 12",
+                      },
+                      {
+                        id: "route",
+                        coordinates: routeCoords,
+                        strokeColor: "#111827",
+                        strokeWidth: 2,
+                        dashArray: "10, 12",
+                      },
+                    ]
+                  : [
+                      {
+                        id: "route",
+                        coordinates: routeCoords,
+                        strokeColor: "#111827",
+                        strokeWidth: 3,
+                        dashArray: "10, 10",
+                      },
+                    ]
+                : []
+            }
+          />
+        </View>
+      ) : currentStatus === "placed" || isDone ? (
+        <View style={st.heroWrap}>
+          <OrderPlacedBackground />
+        </View>
+      ) : (
+        <View style={st.heroWrap}>
+          {/* bg gradient layers */}
+          <View style={st.heroBgLayer1} />
+          <View style={st.heroBgLayer2} />
+          {/* Floating food icons */}
+          <FloatingFoodIcons />
+          {/* Status icon with pulse rings */}
+          <StatusIconBubble status={currentStatus} />
+        </View>
+      )}
 
       {/* Back Button */}
       {!isDone && (
         <Pressable style={st.backBtn} onPress={goBack}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Ionicons name="arrow-back" size={22} color="#374151" />
         </Pressable>
       )}
 
       {/* Copied toast */}
       {phoneCopied && (
         <View style={st.toast}>
-          <Ionicons name="checkmark-circle" size={15} color="#10B981" />
+          <Ionicons name="checkmark-circle" size={15} color="#06C168" />
           <Text style={st.toastTxt}>Phone number copied!</Text>
         </View>
       )}
 
-      {/* ══════════════ BOTTOM SHEET CARD ══════════════ */}
-      <Animated.View
-        style={[
-          st.sheet,
-          { transform: [{ translateY: sheetY }], opacity: contentFade },
-        ]}
-      >
-        {/* Handle */}
+      {/* ══════ BOTTOM SHEET (web-matching structure) ══════ */}
+      <Animated.View style={[st.sheet, { transform: [{ translateY: sheetY }], opacity: contentFade }]}>
+        {/* Drag handle */}
         <View style={st.handle} />
 
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={st.sheetInner}
-          bounces={false}
-        >
-          {/* Live badge inside sheet (on_the_way) */}
-          {isOTW && (
-            <View style={st.liveBadge}>
-              <View style={st.liveDot} />
-              <Text style={st.liveTxt}>Live Tracking</Text>
-            </View>
-          )}
-
-          {/* Title / subtitle */}
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.sheetInner} bounces={false}>
+          {/* 1) Status title + ETA */}
           <Animated.View style={{ opacity: statusFade }}>
-            <Text style={[st.title, isDone && st.titleSuccess]}>
-              {info.title}
+            <Text style={[st.title, isDone && st.titleSuccess]}>{info.title}</Text>
+            <Text style={st.statusEtaTxt}>
+              {isDone
+                ? "Delivered"
+                : estimatedTime === "Calculating..."
+                ? (info.eta || estimatedTime)
+                : estimatedTime}
             </Text>
-            <Text style={st.subtitle}>{info.subtitle}</Text>
           </Animated.View>
 
-          {/* ETA card */}
-          {!isDone && currentStatus !== "placed" && (
-            <View style={st.etaCard}>
-              <View style={st.etaIconBox}>
-                <Ionicons name="time-outline" size={22} color="#10B981" />
-              </View>
-              <View style={st.etaBody}>
-                <Text style={st.etaLabel}>Estimated arrival</Text>
-                <Text style={st.etaVal}>{estimatedTime}</Text>
-              </View>
-            </View>
+          {/* 2) Segmented progress bar */}
+          <ProgressBar stepIndex={stepIndex} />
+
+          {/* 3) Driver card (accepted / picked_up / on_the_way) */}
+          {(currentStatus === "accepted" || currentStatus === "picked_up" || isOTW) && driverInfo && (
+            <DriverCard driver={driverInfo} />
           )}
 
-          {/* Progress bar */}
-          {currentStatus === "placed" ? (
-            <PlacedProgressBar />
-          ) : (
-            <ProgressBar stepIndex={stepIndex} />
-          )}
-
-          {/* ── Status-specific sections ── */}
-          <Animated.View style={{ opacity: statusFade }}>
-            {/* Driver + Vehicle (accepted / picked_up / on_the_way) */}
-            {(currentStatus === "accepted" ||
-              currentStatus === "picked_up" ||
-              isOTW) &&
-              driverInfo && (
-                <>
-                  <DriverCard
-                    driver={driverInfo}
-                    onCopyPhone={handleCopyPhone}
-                  />
-                  {!isOTW && <VehicleCard driver={driverInfo} />}
-                </>
-              )}
-
-            {/* Delivery address (on_the_way) */}
-            {isOTW && (
-              <View style={st.addrCard}>
-                <View style={st.addrIconBox}>
-                  <Ionicons name="location" size={20} color="#10B981" />
+          {/* ── Delivered: premium thank-you screen ── */}
+          {isDone ? (
+            <>
+              <View style={st.thankYouWrap}>
+                <View style={st.thankYouIconCircle}>
+                  <Ionicons name="checkmark-circle" size={52} color="#06C168" />
                 </View>
-                <View style={st.addrBody}>
-                  <Text style={st.addrLabel}>Delivering to</Text>
-                  <Text style={st.addrVal} numberOfLines={2}>
-                    {orderData.address || "Your address"}
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* Delivery details (placed / pending / received) */}
-            {(currentStatus === "placed" ||
-              currentStatus === "pending" ||
-              currentStatus === "received") && (
-              <View style={st.deliverySection}>
-                <Text style={st.sectionLabel}>Delivery details</Text>
-                <Text style={st.deliveryAddr}>
-                  {orderData.address || "Your address"}
+                <Text style={st.thankYouTitle}>Thank you for your order!</Text>
+                <Text style={st.thankYouBody}>
+                  Your food has been successfully delivered.{"\n"}
+                  We hope you enjoyed your meal and look forward to serving you again.
                 </Text>
               </View>
-            )}
-
-            {/* View Order toggle */}
-            {!isDone && (
-              <>
-                <Pressable
-                  style={st.viewOrderBtn}
-                  onPress={() => setViewOrderExpanded(!viewOrderExpanded)}
-                >
-                  <View style={st.viewOrderLeft}>
-                    <Ionicons
-                      name="receipt-outline"
-                      size={18}
-                      color="#374151"
-                    />
-                    <Text style={st.viewOrderTxt}>View Order</Text>
+            </>
+          ) : (
+            <>
+              {/* 4) Delivery Address Card */}
+              <View style={st.deliveryAddressCard}>
+                <View style={st.deliveryAddressRow}>
+                  <Ionicons name="location" size={18} color="#06C168" />
+                  <View style={st.deliveryAddressContent}>
+                    <Text style={st.deliveryAddressLabel}>DELIVERY ADDRESS</Text>
+                    <Text style={st.deliveryAddressText} numberOfLines={2}>{orderData.address || "Your delivery address"}</Text>
                   </View>
-                  <Ionicons
-                    name={viewOrderExpanded ? "chevron-up" : "chevron-down"}
-                    size={20}
-                    color="#9CA3AF"
-                  />
-                </Pressable>
-
-                {viewOrderExpanded && <OrderDetailsBlock data={orderData} />}
-              </>
-            )}
-
-            {/* ── Delivered section ── */}
-            {isDone && (
-              <>
-                <RatingSection
-                  rating={rating}
-                  onRate={setRating}
-                  onSubmit={handleSubmitRating}
-                  submitted={ratingSubmitted}
-                />
-
-                <Pressable
-                  style={st.viewOrderBtn}
-                  onPress={() => setViewOrderExpanded(!viewOrderExpanded)}
-                >
-                  <View style={st.viewOrderLeft}>
-                    <Ionicons
-                      name="receipt-outline"
-                      size={18}
-                      color="#374151"
-                    />
-                    <Text style={st.viewOrderTxt}>Order details</Text>
-                  </View>
-                  <Ionicons
-                    name={viewOrderExpanded ? "chevron-up" : "chevron-down"}
-                    size={20}
-                    color="#9CA3AF"
-                  />
-                </Pressable>
-
-                {viewOrderExpanded && (
-                  <OrderDetailsBlock data={orderData} showDeliveredTo />
-                )}
-
-                {/* Action buttons */}
-                <View style={st.actionRow}>
-                  <Pressable style={st.orderAgainBtn} onPress={goHome}>
-                    <Ionicons name="refresh" size={20} color="#fff" />
-                    <Text style={st.orderAgainTxt}>Order Again</Text>
-                  </Pressable>
-                  <Pressable style={st.goHomeBtn} onPress={goHome}>
-                    <Ionicons name="home-outline" size={20} color="#10B981" />
-                    <Text style={st.goHomeTxt}>Back to Home</Text>
-                  </Pressable>
                 </View>
-              </>
-            )}
-          </Animated.View>
+              </View>
+
+              {/* 5) Order Summary Card */}
+              <OrderSummaryCard
+                data={orderData}
+                expanded={viewOrderExpanded}
+                onToggle={() => setViewOrderExpanded(!viewOrderExpanded)}
+              />
+            </>
+          )}
+
+          {/* 8) Delivered action buttons */}
+          {isDone && (
+            <View style={st.actionRow}>
+              <Pressable style={st.orderAgainBtn} onPress={goHome}>
+                <Ionicons name="refresh" size={20} color="#fff" />
+                <Text style={st.orderAgainTxt}>Order Again</Text>
+              </Pressable>
+              <Pressable style={st.goHomeBtn} onPress={goHome}>
+                <Ionicons name="home-outline" size={20} color="#06C168" />
+                <Text style={st.goHomeTxt}>Back to Home</Text>
+              </Pressable>
+            </View>
+          )}
         </ScrollView>
       </Animated.View>
     </View>
@@ -1295,123 +1448,83 @@ export default function OrderTrackingScreen({ route, navigation }) {
 }
 
 // =============================================================================
-// ORDER DETAILS BLOCK
-// =============================================================================
-
-const OrderDetailsBlock = React.memo(({ data, showDeliveredTo }) => (
-  <View style={st.orderDetails}>
-    <DetailRow label="Restaurant" value={data.restaurantName} />
-    {data.orderNumber ? (
-      <DetailRow label="Order #" value={`#${data.orderNumber}`} />
-    ) : null}
-    {showDeliveredTo && <DetailRow label="Delivered to" value={data.address} />}
-    {data.items?.length > 0 && (
-      <View style={st.itemsSection}>
-        <Text style={st.detailLabelTxt}>Items</Text>
-        {data.items.map((item, idx) => (
-          <View key={idx} style={st.itemRow}>
-            <Text style={st.itemName} numberOfLines={1}>
-              {item.quantity}× {item.name || item.food_name}
-            </Text>
-            <Text style={st.itemPrice}>
-              Rs.{" "}
-              {((item.price || item.unit_price || 0) * item.quantity).toFixed(
-                2,
-              )}
-            </Text>
-          </View>
-        ))}
-      </View>
-    )}
-    {data.totalAmount > 0 && (
-      <View style={st.totalRow}>
-        <Text style={st.totalLabel}>
-          {showDeliveredTo ? "Total Paid" : "Total"}
-        </Text>
-        <Text style={st.totalVal}>
-          Rs. {parseFloat(data.totalAmount).toFixed(2)}
-        </Text>
-      </View>
-    )}
-  </View>
-));
-
-const DetailRow = ({ label, value }) => (
-  <View style={st.detailRow}>
-    <Text style={st.detailLabelTxt}>{label}</Text>
-    <Text style={st.detailValTxt} numberOfLines={2}>
-      {value}
-    </Text>
-  </View>
-);
-
-// =============================================================================
-// STYLES
+// STYLES  (web-matching design)
 // =============================================================================
 
 const st = StyleSheet.create({
-  /* layout */
-  root: { flex: 1, backgroundColor: "#064E3B" },
+  /* ── layout ── */
+  root: { flex: 1, backgroundColor: "#E6F9EE" },
 
-  /* ─ map area (always visible) ─ */
+  /* ── map container ── */
   mapWrap: {
-    height: SH * 0.5,
+    flex: 1,
     width: "100%",
-    backgroundColor: "#E5E7EB",
+    overflow: "hidden",
   },
-  mapLoading: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.35)",
+
+  /* ── hero background (light green gradient, web-matching) ── */
+  heroWrap: {
+    flex: 1,
+    width: "100%",
+    overflow: "hidden",
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "#E6F9EE",
   },
-  mapLoadingTxt: { color: "#fff", marginTop: 8, fontSize: 14 },
-
-  /* cooking animation overlay */
-  cookingOverlay: {
+  heroBgLayer1: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#E6F9EE",
+  },
+  heroBgLayer2: {
+    position: "absolute",
+    top: 0, left: 0, right: 0,
+    height: "60%",
+    backgroundColor: "#86E5AF",
+    opacity: 0.35,
+  },
+
+  /* ── floating food icons ── */
+  floatingIcon: {
+    position: "absolute",
+    fontSize: 32,
+  },
+
+  /* ── status icon bubble (white circle + SVG + pulse rings) ── */
+  statusBubbleWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 140,
+    height: 140,
+  },
+  statusIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#fff",
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 5,
+    elevation: 8,
+    shadowColor: "rgba(34,197,94,0.4)",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 1,
+    shadowRadius: 20,
+    zIndex: 1,
   },
-  cookingBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.35)",
+  statusIconCircleSuccess: {
+    backgroundColor: "#06C168",
+    borderWidth: 0,
   },
-  cookingScene: {
-    alignItems: "center",
-    justifyContent: "flex-end",
-    width: 160,
-    height: 160,
-  },
-  pepperShaker: {
+  successRing: {
     position: "absolute",
-    right: -10,
-    bottom: 30,
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 3,
+    borderColor: "#06C168",
+    opacity: 0.5,
   },
 
-  /* map live badge */
-  mapLiveBadge: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 56 : 46,
-    right: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.6)",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
-    gap: 6,
-    zIndex: 10,
-  },
-  mapLiveTxt: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#fff",
-    letterSpacing: 1,
-  },
-
-  /* back button */
+  /* ── back button (light bg for light hero) ── */
   backBtn: {
     position: "absolute",
     top: Platform.OS === "ios" ? 54 : 44,
@@ -1419,13 +1532,18 @@ const st = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.3)",
+    backgroundColor: "rgba(255,255,255,0.85)",
     justifyContent: "center",
     alignItems: "center",
     zIndex: 10,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
 
-  /* toast */
+  /* ── toast ── */
   toast: {
     position: "absolute",
     top: Platform.OS === "ios" ? 100 : 90,
@@ -1446,21 +1564,21 @@ const st = StyleSheet.create({
   },
   toastTxt: { fontSize: 13, color: "#374151", fontWeight: "500" },
 
-  /* ─ bottom sheet ─ */
+  /* ── bottom sheet ── */
   sheet: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    maxHeight: SH * 0.58,
+    maxHeight: SH * 0.78,
     backgroundColor: "#fff",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     elevation: 20,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
   },
   handle: {
     width: 40,
@@ -1468,67 +1586,30 @@ const st = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#D1D5DB",
     alignSelf: "center",
-    marginTop: 10,
+    marginTop: 12,
     marginBottom: 4,
   },
-  sheetInner: { paddingHorizontal: 20, paddingBottom: 34 },
+  sheetInner: { paddingHorizontal: 20, paddingBottom: 34, paddingTop: 4 },
 
-  /* live badge */
-  liveBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    backgroundColor: "#ECFDF5",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginBottom: 6,
-    gap: 6,
+  /* ── 1) title + ETA ── */
+  title: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#111827",
+    marginTop: 8,
+    marginBottom: 2,
   },
-  liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#10B981",
-  },
-  liveTxt: { fontSize: 12, fontWeight: "600", color: "#059669" },
-
-  /* title */
-  title: { fontSize: 24, fontWeight: "800", color: "#111827", marginTop: 8 },
-  titleSuccess: { color: "#059669" },
-  subtitle: {
-    fontSize: 14,
+  titleSuccess: { color: "#06C168" },
+  statusEtaTxt: {
+    fontSize: 13,
     color: "#6B7280",
-    marginTop: 2,
-    marginBottom: 14,
-    lineHeight: 20,
+    marginBottom: 16,
+    fontWeight: "400",
   },
 
-  /* ETA card */
-  etaCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#ECFDF5",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 14,
-    gap: 12,
-  },
-  etaIconBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "#D1FAE5",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  etaBody: { flex: 1 },
-  etaLabel: { fontSize: 12, color: "#6B7280", fontWeight: "500" },
-  etaVal: { fontSize: 16, fontWeight: "700", color: "#065F46", marginTop: 1 },
-
-  /* progress bar */
-  progressContainer: { marginBottom: 16 },
-  progressTrack: { flexDirection: "row", gap: 4 },
+  /* ── 2) progress bar (6 segments + labels) ── */
+  progressContainer: { marginBottom: 20 },
+  progressTrack: { flexDirection: "row", gap: 4, height: 6 },
   progressSeg: {
     flex: 1,
     height: 6,
@@ -1536,221 +1617,374 @@ const st = StyleSheet.create({
     backgroundColor: "#E5E7EB",
     overflow: "hidden",
   },
-  progressDone: { backgroundColor: "#10B981" },
+  progressDone: { backgroundColor: "#06C168" },
   progressFill: {
     position: "absolute",
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     borderRadius: 3,
   },
-
-  /* driver card */
-  driverCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F9FAFB",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  driverAvatarWrap: { marginRight: 12 },
-  driverAvatar: { width: 50, height: 50, borderRadius: 25 },
-  driverAvatarFallback: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: "#D1FAE5",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  driverMeta: { flex: 1 },
-  driverName: { fontSize: 16, fontWeight: "700", color: "#111827" },
-  driverRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 3,
-  },
-  driverRowText: { fontSize: 12, color: "#6B7280" },
-  driverActions: { flexDirection: "column", gap: 6, marginLeft: 8 },
-  callBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#10B981",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  copyBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#D1FAE5",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  /* vehicle card */
-  vehicleCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F9FAFB",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  vehicleIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "#D1FAE5",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  vehicleInfo: { flex: 1 },
-  vehicleRow: {
+  progressLabelRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 3,
+    marginTop: 8,
   },
-  vehicleLabel: { fontSize: 12, color: "#9CA3AF", fontWeight: "500" },
-  vehicleValue: { fontSize: 13, color: "#374151", fontWeight: "600" },
-  vehicleValueBold: {
-    backgroundColor: "#ECFDF5",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    color: "#065F46",
-    fontWeight: "700",
-    overflow: "hidden",
+  progressLabel: {
+    flex: 1,
+    fontSize: 9,
+    color: "#9CA3AF",
+    textAlign: "center",
+    fontWeight: "500",
   },
+  progressLabelActive: { color: "#06C168", fontWeight: "700" },
 
-  /* address card */
-  addrCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F9FAFB",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    gap: 12,
-  },
-  addrIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#D1FAE5",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  addrBody: { flex: 1 },
-  addrLabel: { fontSize: 12, color: "#9CA3AF", fontWeight: "500" },
-  addrVal: {
-    fontSize: 14,
-    color: "#374151",
-    fontWeight: "600",
-    marginTop: 1,
-  },
-
-  /* delivery section */
-  deliverySection: {
-    backgroundColor: "#F9FAFB",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  sectionLabel: { fontSize: 12, color: "#9CA3AF", fontWeight: "600" },
-  deliveryAddr: {
-    fontSize: 14,
-    color: "#374151",
-    fontWeight: "600",
-    marginTop: 4,
-  },
-
-  /* view order button */
-  viewOrderBtn: {
+  /* ── 3) View Order collapsible ── */
+  viewOrderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: 14,
     borderTopWidth: 1,
     borderTopColor: "#F3F4F6",
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+    marginBottom: 16,
   },
-  viewOrderLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
-  viewOrderTxt: { fontSize: 15, fontWeight: "600", color: "#374151" },
+  viewOrderText: { fontSize: 15, fontWeight: "500", color: "#1F2937" },
 
-  /* order details */
-  orderDetails: {
+  /* expanded order details */
+  orderDetailsExpanded: {
     backgroundColor: "#F9FAFB",
     borderRadius: 14,
     padding: 14,
-    marginBottom: 10,
+    marginBottom: 16,
+    gap: 2,
   },
   detailRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    paddingVertical: 6,
+    paddingVertical: 5,
   },
-  detailLabelTxt: { fontSize: 13, color: "#9CA3AF", fontWeight: "500" },
-  detailValTxt: {
-    fontSize: 13,
-    color: "#374151",
-    fontWeight: "600",
-    maxWidth: "60%",
-    textAlign: "right",
-  },
-  itemsSection: {
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
-    marginTop: 6,
-    paddingTop: 8,
-  },
-  itemRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 4,
-  },
-  itemName: { fontSize: 13, color: "#4B5563", flex: 1, marginRight: 8 },
-  itemPrice: { fontSize: 13, color: "#374151", fontWeight: "600" },
+  detailLabel: { fontSize: 13, color: "#9CA3AF", fontWeight: "500" },
+  detailValue: { fontSize: 13, color: "#374151", fontWeight: "600", maxWidth: "58%", textAlign: "right" },
+  itemsSection: { borderTopWidth: 1, borderTopColor: "#E5E7EB", marginTop: 4, paddingTop: 8, gap: 4 },
+  itemRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 2 },
+  itemRowLeft: { fontSize: 13, color: "#4B5563", flex: 1, marginRight: 8 },
+  itemRowRight: { fontSize: 13, color: "#374151", fontWeight: "600" },
   totalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     borderTopWidth: 1,
-    borderTopColor: "#10B981",
-    marginTop: 6,
-    paddingTop: 8,
+    borderTopColor: "#06C168",
+    marginTop: 8,
+    paddingTop: 10,
   },
   totalLabel: { fontSize: 14, color: "#374151", fontWeight: "700" },
-  totalVal: { fontSize: 16, color: "#059669", fontWeight: "800" },
+  totalAmount: { fontSize: 16, color: "#06C168", fontWeight: "800" },
 
-  /* rating */
-  ratingWrap: { alignItems: "center", paddingVertical: 16 },
-  ratingTitle: {
+  /* ── delivery address card ── */
+  deliveryAddressCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  deliveryAddressRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  deliveryAddressContent: {
+    flex: 1,
+  },
+  deliveryAddressLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#9CA3AF",
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  deliveryAddressText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#374151",
+    lineHeight: 20,
+  },
+
+  /* ── 3) summary card ── */
+  summaryCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 16,
+    overflow: "hidden",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+  },
+  /* restaurant section (always visible) */
+  summaryRestaurantSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  summaryRestaurantLogoWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#EDFBF2",
+  },
+  summaryRestaurantLogo: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+  },
+  summaryRestaurantLogoFallback: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: "#B8F0D0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  summaryRestaurantLogoInitial: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#06C168",
+  },
+  summaryRestaurantName: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#374151",
-    marginBottom: 12,
+    color: "#1F2937",
   },
+  summaryOrderNum: {
+    fontSize: 12,
+    color: "#9CA3AF",
+    fontWeight: "500",
+    marginTop: 2,
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: "#F3F4F6",
+  },
+  /* total section (always visible) */
+  summaryTotalSection: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  summaryTotalLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#374151",
+    letterSpacing: 0.5,
+  },
+  summaryTotalVal: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#06C168",
+  },
+  /* view details toggle */
+  viewDetailsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    backgroundColor: "#F9FAFB",
+  },
+  viewDetailsText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#4B5563",
+  },
+  /* expanded details area */
+  detailsExpanded: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#F3F4F6",
+  },
+  detailBlock: { gap: 6 },
+  detailBlockLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#9CA3AF",
+    letterSpacing: 0.8,
+  },
+  detailAddrRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  detailAddrText: {
+    flex: 1,
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: "500",
+    lineHeight: 19,
+  },
+  detailItemsBox: {
+    backgroundColor: "#F9FAFB",
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  detailItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  detailItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+  },
+  detailQtyBadge: {
+    minWidth: 28,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: "#DCFCE7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  detailQtyTxt: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#06C168",
+  },
+  detailItemName: {
+    flex: 1,
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: "500",
+  },
+  detailItemPrice: {
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: "600",
+  },
+  /* ordered items in View Details */
+  orderedItemRow: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  orderedItemName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  orderedItemSize: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 2,
+  },
+
+  /* ── 4) restaurant card (kept for reference, now replaced by summaryCard) ── */
+  restaurantCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#F3F4F6",
+    borderRadius: 14,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+  },
+  restaurantLogoWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#DCFCE7",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  restaurantLogoImg: { width: 44, height: 44, borderRadius: 22 },
+  restaurantInfo: { flex: 1 },
+  restaurantNameTxt: { fontSize: 15, fontWeight: "600", color: "#1F2937" },
+  restaurantSubtitleTxt: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+
+  /* ── 5) driver card (compact) ── */
+  driverCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#F3F4F6",
+  },
+  driverAvatarWrap: { marginRight: 10 },
+  driverAvatar: { width: 40, height: 40, borderRadius: 20 },
+  driverAvatarFallback: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#E6F9EE",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  driverMeta: { flex: 1 },
+  driverName: { fontSize: 14, fontWeight: "600", color: "#111827" },
+  driverRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
+  driverRowText: { fontSize: 11, color: "#6B7280" },
+  callBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#06C168",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  /* ── 7) info message (italic 3D animated text, web-matching) ── */
+  infoMsgContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 18,
+  },
+  infoMsgText: {
+    fontSize: 18,
+    fontWeight: "700",
+    fontStyle: "italic",
+    color: "#06C168",
+    textAlign: "center",
+    lineHeight: 26,
+  },
+
+  /* ── rating ── */
+  ratingWrap: { alignItems: "center", paddingVertical: 16 },
+  ratingTitle: { fontSize: 16, fontWeight: "700", color: "#374151", marginBottom: 12 },
   stars: { flexDirection: "row", gap: 8 },
   starBtn: { padding: 2 },
   submitRating: {
     marginTop: 14,
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     paddingHorizontal: 28,
     paddingVertical: 12,
     borderRadius: 12,
@@ -1763,9 +1997,9 @@ const st = StyleSheet.create({
     paddingVertical: 14,
     justifyContent: "center",
   },
-  ratingDoneText: { fontSize: 14, fontWeight: "600", color: "#059669" },
+  ratingDoneText: { fontSize: 14, fontWeight: "600", color: "#06C168" },
 
-  /* action buttons (delivered) */
+  /* ── action buttons (delivered) ── */
   actionRow: { flexDirection: "row", gap: 12, marginTop: 16 },
   orderAgainBtn: {
     flex: 1,
@@ -1773,7 +2007,7 @@ const st = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     paddingVertical: 14,
     borderRadius: 14,
   },
@@ -1784,11 +2018,57 @@ const st = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#F0FDF4",
+    backgroundColor: "#EDFBF2",
     paddingVertical: 14,
     borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: "#10B981",
+    borderColor: "#06C168",
   },
-  goHomeTxt: { color: "#10B981", fontSize: 15, fontWeight: "700" },
+  goHomeTxt: { color: "#06C168", fontSize: 15, fontWeight: "700" },
+
+  /* ── delivered thank-you section ── */
+  thankYouWrap: {
+    alignItems: "center",
+    paddingVertical: 28,
+    paddingHorizontal: 8,
+  },
+  thankYouIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#E6F9EE",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 18,
+  },
+  thankYouTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#111827",
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  thankYouBody: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#6B7280",
+    textAlign: "center",
+    lineHeight: 22,
+    paddingHorizontal: 4,
+  },
+  quoteDivider: {
+    width: 40,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#B8F0D0",
+    marginVertical: 20,
+  },
+  quoteText: {
+    fontSize: 13,
+    fontWeight: "600",
+    fontStyle: "italic",
+    color: "#06C168",
+    textAlign: "center",
+    lineHeight: 20,
+  },
 });

@@ -420,8 +420,8 @@ export default function Orders() {
       case "accepted":
         return {
           label: "Accepted",
-          bg: "#d1fae5",
-          text: "#059669",
+          bg: "#B8F0D0",
+          text: "#06C168",
           icon: "✓",
         };
       case "picked_up":
@@ -449,7 +449,7 @@ export default function Orders() {
         return {
           label: "Delivered",
           bg: "#dcfce7",
-          text: "#16a34a",
+          text: "#06C168",
           icon: "✅",
         };
       case "cancelled":
@@ -716,7 +716,7 @@ export default function Orders() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={["#22c55e"]}
+              colors={["#06C168"]}
             />
           }
         >
@@ -1236,7 +1236,7 @@ const styles = StyleSheet.create({
 
   // Stats Header
   statsHeader: {
-    backgroundColor: "#16a34a",
+    backgroundColor: "#06C168",
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 80,
@@ -1304,7 +1304,7 @@ const styles = StyleSheet.create({
   notificationBanner: {
     backgroundColor: "#dcfce7",
     borderWidth: 1,
-    borderColor: "#bbf7d0",
+    borderColor: "#9EEBBE",
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -1327,11 +1327,11 @@ const styles = StyleSheet.create({
   },
   notificationTime: {
     fontSize: 12,
-    color: "#16a34a",
+    color: "#06C168",
   },
   notificationClose: {
     fontSize: 18,
-    color: "#16a34a",
+    color: "#06C168",
     padding: 4,
   },
 
@@ -1349,8 +1349,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   filterTabActive: {
-    backgroundColor: "#065f46",
-    borderColor: "#065f46",
+    backgroundColor: "#04553C",
+    borderColor: "#04553C",
   },
   filterTabText: {
     fontSize: 14,
@@ -1447,7 +1447,7 @@ const styles = StyleSheet.create({
   orderAmount: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#22c55e",
+    color: "#06C168",
   },
 
   // Customer Row
@@ -1584,14 +1584,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#bbf7d0",
+    borderColor: "#9EEBBE",
     gap: 6,
   },
   driverInitials: {
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1607,7 +1607,7 @@ const styles = StyleSheet.create({
   },
   driverCallIcon: {
     fontSize: 18,
-    color: "#22c55e",
+    color: "#06C168",
   },
 
   // Action Buttons
@@ -1617,7 +1617,7 @@ const styles = StyleSheet.create({
   },
   acceptButton: {
     flex: 1,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: "center",
@@ -1661,11 +1661,11 @@ const styles = StyleSheet.create({
   viewDetailsText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#16a34a",
+    color: "#06C168",
   },
   viewDetailsArrow: {
     fontSize: 18,
-    color: "#16a34a",
+    color: "#06C168",
   },
 
   // End of List
@@ -1858,7 +1858,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1886,7 +1886,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#bbf7d0",
+    borderColor: "#9EEBBE",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1900,7 +1900,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1984,7 +1984,7 @@ const styles = StyleSheet.create({
   summaryAmount: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#16a34a",
+    color: "#06C168",
   },
 
   // Close Button

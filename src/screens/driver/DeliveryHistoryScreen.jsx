@@ -104,7 +104,7 @@ export default function DeliveryHistoryScreen({ navigation }) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#10b981" />
+          <ActivityIndicator size="large" color="#06C168" />
           <Text style={styles.loadingText}>Loading history...</Text>
         </View>
       </SafeAreaView>
@@ -126,7 +126,7 @@ export default function DeliveryHistoryScreen({ navigation }) {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#10b981"]} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#06C168"]} />
         }
         showsVerticalScrollIndicator={false}
       >
@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#DBEAFE",
   },
   earningsCard: {
-    backgroundColor: "#D1FAE5",
+    backgroundColor: "#B8F0D0",
   },
   ratingCard: {
     backgroundColor: "#FEF3C7",
@@ -356,7 +356,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   filterBtnActive: {
-    backgroundColor: "#10b981",
+    backgroundColor: "#06C168",
   },
   filterBtnText: {
     fontSize: 14,
@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   deliveredBadge: {
-    backgroundColor: "#D1FAE5",
+    backgroundColor: "#B8F0D0",
   },
   cancelledBadge: {
     backgroundColor: "#FEE2E2",
@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
     color: "#6B7280",
   },
   deliveredBadgeText: {
-    color: "#059669",
+    color: "#06C168",
   },
   cancelledBadgeText: {
     color: "#DC2626",
@@ -481,6 +481,6 @@ const styles = StyleSheet.create({
   earningsValue: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#059669",
+    color: "#06C168",
   },
 });

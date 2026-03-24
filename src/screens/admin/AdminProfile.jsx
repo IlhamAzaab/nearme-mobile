@@ -366,7 +366,7 @@ export default function AdminProfile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#16a34a",
+    backgroundColor: "#06C168",
   },
   backgroundContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -426,11 +426,11 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
-    shadowColor: "#22c55e",
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: "#22c55e",
+    borderColor: "#06C168",
   },
   input: {
     backgroundColor: "#fff",
@@ -500,13 +500,13 @@ const styles = StyleSheet.create({
     margin: 2,
   },
   submitButton: {
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 8,
-    shadowColor: "#22c55e",
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,

@@ -56,7 +56,7 @@ const DEFAULT_DRIVER_LOCATION = {
 
 // Marker colors
 const MARKER_COLORS = {
-  driver: "#10B981",
+  driver: "#06C168",
   restaurant: "#EF4444",
   customer: "#3B82F6",
   route: "#8B5CF6",
@@ -960,7 +960,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
               <Text style={styles.headerTitle}>Active Deliveries</Text>
               {isRefreshing && (
                 <View style={styles.headerSpinner}>
-                  <ActivityIndicator size="small" color="#10B981" />
+                  <ActivityIndicator size="small" color="#06C168" />
                 </View>
               )}
             </View>
@@ -1039,8 +1039,8 @@ export default function ActiveDeliveriesScreen({ navigation }) {
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={onRefresh}
-              tintColor="#10B981"
-              colors={["#10B981"]}
+              tintColor="#06C168"
+              colors={["#06C168"]}
             />
           }
           showsVerticalScrollIndicator={false}
@@ -1831,7 +1831,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   toastSuccess: {
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
   },
   toastError: {
     backgroundColor: "#EF4444",
@@ -1928,7 +1928,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   findDeliveriesBtn: {
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     paddingVertical: 14,
     paddingHorizontal: 28,
     borderRadius: 14,
@@ -2003,7 +2003,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     paddingVertical: 16,
     borderRadius: 14,
     gap: 10,
@@ -2032,7 +2032,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     overflow: "hidden",
     borderWidth: 2,
-    borderColor: "#10B981",
+    borderColor: "#06C168",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -2040,7 +2040,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   fullRouteHeader: {
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
@@ -2056,10 +2056,10 @@ const styles = StyleSheet.create({
   },
   fullRouteStats: {
     flexDirection: "row",
-    backgroundColor: "#ECFDF5",
+    backgroundColor: "#E6F9EE",
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#D1FAE5",
+    borderBottomColor: "#B8F0D0",
   },
   fullRouteStat: {
     flex: 1,
@@ -2068,11 +2068,11 @@ const styles = StyleSheet.create({
   fullRouteStatValue: {
     fontSize: 26,
     fontWeight: "800",
-    color: "#059669",
+    color: "#06C168",
   },
   fullRouteStatLabel: {
     fontSize: 12,
-    color: "#047857",
+    color: "#046B4D",
     fontWeight: "600",
     marginTop: 2,
   },
@@ -2105,9 +2105,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   stopItemDriver: {
-    backgroundColor: "#ECFDF5",
+    backgroundColor: "#E6F9EE",
     borderWidth: 1,
-    borderColor: "#A7F3D0",
+    borderColor: "#86E5AF",
   },
   stopItemRestaurant: {
     backgroundColor: "#FEF2F2",
@@ -2312,7 +2312,7 @@ const styles = StyleSheet.create({
   },
   skeletonButton: {
     height: 52,
-    backgroundColor: "#A7F3D0",
+    backgroundColor: "#86E5AF",
     borderRadius: 14,
   },
 
@@ -2350,7 +2350,7 @@ const styles = StyleSheet.create({
     color: "#111827",
   },
   nextBadge: {
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
@@ -2395,7 +2395,7 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
   },
   startButton: {
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: "center",

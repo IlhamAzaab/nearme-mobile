@@ -98,7 +98,7 @@ export default function VerifyEmailScreen({ navigation }) {
         {status === "success" && (
           <>
             <View style={[styles.iconCircle, { backgroundColor: "#DCFCE7" }]}>
-              <Text style={[styles.icon, { color: "#22C55E" }]}>✓</Text>
+              <Text style={[styles.icon, { color: "#06C168" }]}>✓</Text>
             </View>
             <Text style={styles.title}>Email Verified!</Text>
             <Text style={styles.text}>{message}</Text>

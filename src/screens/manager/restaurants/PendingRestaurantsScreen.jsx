@@ -367,7 +367,7 @@ const PendingRestaurantsScreen = () => {
         {/* Actions */}
         <View style={styles.actionRow}>
           <TouchableOpacity
-            style={[styles.actionBtn, { backgroundColor: "#059669" }]}
+            style={[styles.actionBtn, { backgroundColor: "#06C168" }]}
             onPress={handleApprove}
             disabled={approving}
           >

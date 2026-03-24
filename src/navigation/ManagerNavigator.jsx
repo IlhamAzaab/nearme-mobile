@@ -210,7 +210,7 @@ export default function ManagerNavigator() {
             paddingBottom: insets.bottom + 4,
           },
         ],
-        tabBarActiveTintColor: "#059669",
+        tabBarActiveTintColor: "#06C168",
         tabBarInactiveTintColor: "#9CA3AF",
         tabBarLabelStyle: styles.tabLabel,
         tabBarIcon: ({ focused, color }) => {

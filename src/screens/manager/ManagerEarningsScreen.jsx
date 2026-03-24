@@ -124,7 +124,7 @@ export default function ManagerEarningsScreen() {
           <RefreshControl
             refreshing={false}
             onRefresh={fetchEarnings}
-            colors={["#059669"]}
+            colors={["#06C168"]}
           />
         }
       >
@@ -154,7 +154,7 @@ export default function ManagerEarningsScreen() {
 
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#059669" />
+            <ActivityIndicator size="large" color="#06C168" />
           </View>
         ) : (
           <>
@@ -170,13 +170,13 @@ export default function ManagerEarningsScreen() {
                 <View
                   style={[
                     styles.heroStat,
-                    { backgroundColor: "#ECFDF5", borderColor: "#D1FAE5" },
+                    { backgroundColor: "#E6F9EE", borderColor: "#B8F0D0" },
                   ]}
                 >
-                  <Text style={[styles.heroStatLabel, { color: "#059669" }]}>
+                  <Text style={[styles.heroStatLabel, { color: "#06C168" }]}>
                     TOTAL DELIVERIES
                   </Text>
-                  <Text style={[styles.heroStatValue, { color: "#047857" }]}>
+                  <Text style={[styles.heroStatValue, { color: "#046B4D" }]}>
                     {summary?.total_orders || 0}
                   </Text>
                 </View>
@@ -224,8 +224,8 @@ export default function ManagerEarningsScreen() {
                   label: "COMMISSION",
                   value: summary?.food_commission,
                   icon: "cash-outline",
-                  bg: "#ECFDF5",
-                  color: "#059669",
+                  bg: "#E6F9EE",
+                  color: "#06C168",
                 },
               ].map((item, i) => (
                 <View key={i} style={styles.breakdownCard}>
@@ -337,7 +337,7 @@ export default function ManagerEarningsScreen() {
                             styles.orderIcon,
                             {
                               backgroundColor: isPositive
-                                ? "#ECFDF5"
+                                ? "#E6F9EE"
                                 : "#FEF2F2",
                             },
                           ]}
@@ -345,7 +345,7 @@ export default function ManagerEarningsScreen() {
                           <Ionicons
                             name={isPositive ? "trending-up" : "trending-down"}
                             size={20}
-                            color={isPositive ? "#059669" : "#DC2626"}
+                            color={isPositive ? "#06C168" : "#DC2626"}
                           />
                         </View>
                         <View style={{ flex: 1 }}>
@@ -404,7 +404,7 @@ export default function ManagerEarningsScreen() {
                           <Text
                             style={[
                               styles.orderEarning,
-                              { color: isPositive ? "#059669" : "#DC2626" },
+                              { color: isPositive ? "#06C168" : "#DC2626" },
                             ]}
                           >
                             Rs.{managerEarning.toFixed(0)}
@@ -512,14 +512,14 @@ export default function ManagerEarningsScreen() {
                           <View style={styles.finDivider} />
                           <View style={styles.finRow}>
                             <Text
-                              style={[styles.finKeyBold, { color: "#047857" }]}
+                              style={[styles.finKeyBold, { color: "#046B4D" }]}
                             >
                               Your Earning
                             </Text>
                             <Text
                               style={[
                                 styles.finValBold,
-                                { color: "#047857", fontSize: 15 },
+                                { color: "#046B4D", fontSize: 15 },
                               ]}
                             >
                               Rs.{(order.manager_earning || 0).toFixed(0)}
@@ -601,7 +601,7 @@ const styles = StyleSheet.create({
   heroAmount: {
     fontSize: 34,
     fontWeight: "800",
-    color: "#065F46",
+    color: "#04553C",
     textAlign: "center",
     marginBottom: 16,
   },
@@ -775,17 +775,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "#ECFDF5",
+    backgroundColor: "#E6F9EE",
     padding: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#D1FAE5",
+    borderColor: "#B8F0D0",
   },
   driverAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#059669",
+    backgroundColor: "#06C168",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -796,7 +796,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#059669",
+    backgroundColor: "#06C168",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -823,7 +823,7 @@ const styles = StyleSheet.create({
   totalAmount: {
     fontSize: 36,
     fontWeight: "800",
-    color: "#059669",
+    color: "#06C168",
     marginTop: 4,
   },
   statsGrid: { gap: 10, marginBottom: 20 },

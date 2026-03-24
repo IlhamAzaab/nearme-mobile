@@ -104,7 +104,7 @@ export default function UrgentNotificationModal({
 
   const icon = isNewOrder ? "🔔" : isNewDelivery ? "🚗" : "📢";
   const accentColor = isNewOrder
-    ? "#22c55e"
+    ? "#06C168"
     : isNewDelivery
       ? "#3b82f6"
       : "#f59e0b";
@@ -494,7 +494,7 @@ const styles = StyleSheet.create({
     color: "#ef4444",
   },
   acceptButton: {
-    shadowColor: "#22c55e",
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,

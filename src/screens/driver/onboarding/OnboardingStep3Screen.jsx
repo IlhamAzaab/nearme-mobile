@@ -1,4 +1,4 @@
-﻿import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
 import {
@@ -92,7 +92,7 @@ export default function OnboardingStep3Screen({ navigation }) {
                     {isLoading ? "Uploading..." : isUploaded ? " Uploaded" : "Tap to upload"}
                   </Text>
                 </View>
-                {isLoading && <ActivityIndicator size="small" color="#1db95b" />}
+                {isLoading && <ActivityIndicator size="small" color="#06C168" />}
               </TouchableOpacity>
             );
           })}
@@ -113,21 +113,21 @@ export default function OnboardingStep3Screen({ navigation }) {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#1db95b" },
+  container: { flex: 1, backgroundColor: "#06C168" },
   scroll: { flexGrow: 1, padding: 20 },
   title: { fontSize: 26, fontWeight: "800", color: "#fff", textAlign: "center", marginBottom: 4 },
   subtitle: { fontSize: 14, color: "rgba(255,255,255,0.8)", textAlign: "center", marginBottom: 24 },
   card: { backgroundColor: "#fff", borderRadius: 20, padding: 20, elevation: 8 },
   docBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "#f9fafb", borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1.5, borderColor: "#e5e7eb", gap: 12 },
-  docBtnDone: { backgroundColor: "#f0fdf4", borderColor: "#86efac" },
+  docBtnDone: { backgroundColor: "#EDFBF2", borderColor: "#6EDE9A" },
   docIcon: { fontSize: 28 },
   docInfo: { flex: 1 },
   docLabel: { fontSize: 14, fontWeight: "600", color: "#374151" },
-  docLabelDone: { color: "#16a34a" },
+  docLabelDone: { color: "#06C168" },
   docStatus: { fontSize: 12, color: "#6b7280", marginTop: 2 },
   progressBar: { height: 6, backgroundColor: "#f3f4f6", borderRadius: 3, overflow: "hidden", marginBottom: 16 },
-  progressFill: { height: 6, backgroundColor: "#1db95b", borderRadius: 3 },
-  nextBtn: { backgroundColor: "#1db95b", borderRadius: 12, paddingVertical: 15, alignItems: "center", marginTop: 8 },
+  progressFill: { height: 6, backgroundColor: "#06C168", borderRadius: 3 },
+  nextBtn: { backgroundColor: "#06C168", borderRadius: 12, paddingVertical: 15, alignItems: "center", marginTop: 8 },
   btnDisabled: { opacity: 0.5 },
   nextBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
   backBtn: { marginTop: 10, alignItems: "center", paddingVertical: 10 },

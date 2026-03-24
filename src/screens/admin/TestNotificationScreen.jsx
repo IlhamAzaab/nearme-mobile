@@ -265,7 +265,7 @@ export default function TestNotificationScreen({ navigation }) {
   };
 
   const StatusDot = ({ status }) => (
-    <View style={[styles.dot, { backgroundColor: status ? '#22c55e' : '#ef4444' }]} />
+    <View style={[styles.dot, { backgroundColor: status ? '#06C168' : '#ef4444' }]} />
   );
 
   return (
@@ -452,7 +452,7 @@ This proves notifications work even from outside your app.`}
               <View key={i} style={styles.logRow}>
                 <Text style={styles.logTime}>{log.time}</Text>
                 <View style={[styles.logDot, {
-                  backgroundColor: log.type === 'success' ? '#22c55e'
+                  backgroundColor: log.type === 'success' ? '#06C168'
                     : log.type === 'error' ? '#ef4444'
                     : log.type === 'warning' ? '#f59e0b'
                     : '#6b7280'
@@ -476,7 +476,7 @@ This proves notifications work even from outside your app.`}
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
   },
   content: {
     padding: 16,
@@ -533,12 +533,12 @@ const styles = StyleSheet.create({
 
   // Setup button
   setupButton: {
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     paddingVertical: 18,
     borderRadius: 14,
     alignItems: 'center',
     marginBottom: 14,
-    shadowColor: '#16a34a',
+    shadowColor: '#06C168',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -561,7 +561,7 @@ const styles = StyleSheet.create({
   testButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
     borderRadius: 12,
     padding: 14,
     marginBottom: 10,

@@ -16,6 +16,7 @@ import { API_URL } from "../../config/env";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
 const FILTER_TABS = ["all"];
+const DRIVER_READ_IDS_KEY = "@driver_read_notification_ids";
 
 function getNotifIcon(type) {
   switch (type) {
@@ -44,6 +45,48 @@ export default function DriverNotificationsScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState("all");
   const [driverId, setDriverId] = useState(null);
+  const [readIds, setReadIds] = useState(new Set());
+
+  // Load persisted read IDs from AsyncStorage
+  useEffect(() => {
+    const loadReadIds = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(DRIVER_READ_IDS_KEY);
+        if (stored) {
+          setReadIds(new Set(JSON.parse(stored)));
+        }
+      } catch (e) {
+        console.log("[DriverNotifications] loadReadIds error:", e);
+      }
+    };
+    loadReadIds();
+  }, []);
+
+  const persistReadIds = useCallback(async (ids) => {
+    try {
+      await AsyncStorage.setItem(DRIVER_READ_IDS_KEY, JSON.stringify([...ids]));
+    } catch (e) {
+      console.log("[DriverNotifications] persistReadIds error:", e);
+    }
+  }, []);
+
+  // Mark all current notifications as read on screen open
+  useEffect(() => {
+    if (notifications.length > 0) {
+      const allIds = new Set(readIds);
+      let changed = false;
+      for (const n of notifications) {
+        if (!allIds.has(String(n.id))) {
+          allIds.add(String(n.id));
+          changed = true;
+        }
+      }
+      if (changed) {
+        setReadIds(allIds);
+        persistReadIds(allIds);
+      }
+    }
+  }, [notifications, persistReadIds]);
 
   useEffect(() => {
     const getDriver = async () => {
@@ -88,7 +131,12 @@ export default function DriverNotificationsScreen({ navigation }) {
   }, [fetchNotifications]);
 
   const handleNotificationPress = (notification) => {
-    // notification_log is read-only, no mark-as-read
+    // Mark this notification as read locally
+    const newReadIds = new Set(readIds);
+    newReadIds.add(String(notification.id));
+    setReadIds(newReadIds);
+    persistReadIds(newReadIds);
+
     try {
       // notification_log uses 'data' instead of 'metadata'
       const metadata = notification.data
@@ -106,37 +154,49 @@ export default function DriverNotificationsScreen({ navigation }) {
     } catch {}
   };
 
-  // notification_log has no is_read field - show all
+  // notification_log has no is_read field - track locally via AsyncStorage
   const filtered = notifications;
 
-  const unreadCount = 0;
+  const unreadCount = notifications.filter(
+    (n) => !readIds.has(String(n.id))
+  ).length;
 
-  const renderItem = ({ item }) => (
-    <TouchableOpacity
-      style={[styles.notifCard]}
-      onPress={() => handleNotificationPress(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.notifRow}>
-        <View style={styles.notifIconWrap}>
-          <Text style={styles.notifIconText}>{getNotifIcon(item.type)}</Text>
-        </View>
-        <View style={styles.notifContent}>
-          <View style={styles.notifTitleRow}>
-            <Text style={[styles.notifTitle]} numberOfLines={2}>
-              {item.title}
+  const renderItem = ({ item }) => {
+    const isUnread = !readIds.has(String(item.id));
+    return (
+      <TouchableOpacity
+        style={[styles.notifCard, isUnread && styles.notifUnread]}
+        onPress={() => handleNotificationPress(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.notifRow}>
+          <View style={styles.notifIconWrap}>
+            <Text style={styles.notifIconText}>{getNotifIcon(item.type)}</Text>
+          </View>
+          <View style={styles.notifContent}>
+            <View style={styles.notifTitleRow}>
+              <Text
+                style={[styles.notifTitle, isUnread && styles.notifTitleUnread]}
+                numberOfLines={2}
+              >
+                {item.title}
+              </Text>
+              {isUnread && <View style={styles.unreadDot} />}
+            </View>
+            <Text
+              style={[styles.notifMessage, isUnread && styles.notifMessageUnread]}
+              numberOfLines={2}
+            >
+              {item.body || item.message}
+            </Text>
+            <Text style={styles.notifTime}>
+              {new Date(item.created_at).toLocaleString()}
             </Text>
           </View>
-          <Text style={[styles.notifMessage]} numberOfLines={2}>
-            {item.body || item.message}
-          </Text>
-          <Text style={styles.notifTime}>
-            {new Date(item.created_at).toLocaleString()}
-          </Text>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -204,7 +264,7 @@ export default function DriverNotificationsScreen({ navigation }) {
             </View>
           }
           ListFooterComponent={
-            <Text style={styles.footer}>Auto-refreshing every 15 seconds</Text>
+            <Text style={styles.footer}>Auto-refreshing every 60 seconds</Text>
           }
         />
       )}

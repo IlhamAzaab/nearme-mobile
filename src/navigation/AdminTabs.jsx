@@ -100,5 +100,5 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
     fontWeight: "800",
   },
-  iconLabelActive: { color: "#22c55e" },
+  iconLabelActive: { color: "#06C168" },
 });

@@ -1,530 +1,22 @@
-import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Location from "expo-location";
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
   ActivityIndicator,
   Alert,
-  Dimensions,
-  Image,
-  Modal,
-  Pressable,
   ScrollView,
-  StyleSheet,
-  Text,
   TextInput,
-  View,
+  Modal,
+  Dimensions,
 } from "react-native";
-import SkeletonBlock from "../../components/common/SkeletonBlock";
-import FreeMapView from "../../components/maps/FreeMapView";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import OSMMapView from "../../components/maps/OSMMapView";
+import * as Location from "expo-location";
 import { API_BASE_URL } from "../../constants/api";
-import { useOrders } from "../../context/OrderContext";
-import pushNotificationService from "../../services/pushNotificationService";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
-
-// ============================================================================
-// ORDER SUCCESS SCREEN COMPONENT (Image-like UI)
-// ============================================================================
-function OrderSuccessScreen({
-  order,
-  cart,
-  position,
-  address,
-  navigation,
-  formatPrice,
-}) {
-  const [viewOrderExpanded, setViewOrderExpanded] = useState(false);
-
-  const restaurant = cart?.restaurant || {};
-  const items = cart?.items || [];
-
-  return (
-    <View style={successStyles.container}>
-      {/* Map Background */}
-      <View style={successStyles.mapContainer}>
-        <FreeMapView
-          style={successStyles.map}
-          region={{
-            latitude: parseFloat(position?.latitude) || 7.8731,
-            longitude: parseFloat(position?.longitude) || 80.7718,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          }}
-          scrollEnabled={false}
-          zoomEnabled={false}
-          markers={[
-            {
-              id: "delivery",
-              coordinate: {
-                latitude: parseFloat(position?.latitude) || 7.8731,
-                longitude: parseFloat(position?.longitude) || 80.7718,
-              },
-              type: "location-pin",
-            },
-          ]}
-        />
-
-        {/* Back Button */}
-        <Pressable
-          style={successStyles.backButton}
-          onPress={() =>
-            navigation.navigate("MainTabs", {
-              screen: "Home",
-              params: { screen: "HomeMain" },
-            })
-          }
-        >
-          <Text style={successStyles.backButtonText}>←</Text>
-        </Pressable>
-      </View>
-
-      {/* Bottom Sheet */}
-      <View style={successStyles.bottomSheet}>
-        {/* Drag Handle */}
-        <View style={successStyles.dragHandle} />
-
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {/* Order Placed Title with Progress */}
-          <View style={successStyles.headerSection}>
-            <View style={successStyles.progressBar}>
-              <View style={successStyles.progressFill} />
-            </View>
-            <Text style={successStyles.title}>Order Placed!</Text>
-          </View>
-
-          {/* Delivery Details */}
-          <View style={successStyles.section}>
-            <Text style={successStyles.sectionLabel}>DELIVERY DETAILS</Text>
-            <View style={successStyles.deliveryCard}>
-              <Text style={successStyles.deliveryIcon}>📍</Text>
-              <View style={successStyles.deliveryTextWrap}>
-                <Text style={successStyles.deliveryLabel}>Delivering to</Text>
-                <Text style={successStyles.deliveryAddress} numberOfLines={2}>
-                  {address || "Your location"}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* View Order Expandable */}
-          <Pressable
-            style={successStyles.expandableCard}
-            onPress={() => setViewOrderExpanded(!viewOrderExpanded)}
-          >
-            <View style={successStyles.expandableRow}>
-              <Text style={successStyles.expandableIcon}>📋</Text>
-              <Text style={successStyles.expandableText}>View Order</Text>
-              <Text style={successStyles.expandableArrow}>
-                {viewOrderExpanded ? "∧" : "∨"}
-              </Text>
-            </View>
-
-            {viewOrderExpanded && (
-              <View style={successStyles.orderDetails}>
-                <View style={successStyles.orderRow}>
-                  <Text style={successStyles.orderLabel}>Order No</Text>
-                  <Text style={successStyles.orderValue}>
-                    {order.order_number || order.id}
-                  </Text>
-                </View>
-                <View style={successStyles.orderRow}>
-                  <Text style={successStyles.orderLabel}>Items</Text>
-                  <Text style={successStyles.orderValue}>
-                    {order.items_count || items.length}
-                  </Text>
-                </View>
-                <View style={successStyles.orderRow}>
-                  <Text style={successStyles.orderLabel}>Est. Delivery</Text>
-                  <Text style={successStyles.orderValue}>
-                    ~{Math.round(order.estimated_duration_min || 30)} mins
-                  </Text>
-                </View>
-                <View style={successStyles.divider} />
-                <View style={successStyles.orderRow}>
-                  <Text
-                    style={[successStyles.orderLabel, { fontWeight: "700" }]}
-                  >
-                    Total
-                  </Text>
-                  <Text
-                    style={[
-                      successStyles.orderValue,
-                      { fontWeight: "900", color: "#10B981" },
-                    ]}
-                  >
-                    {formatPrice(order.total_amount)}
-                  </Text>
-                </View>
-
-                {/* Items List */}
-                {items.length > 0 && (
-                  <View style={successStyles.itemsList}>
-                    {items.map((item, index) => (
-                      <View
-                        key={item.id || index}
-                        style={successStyles.itemRow}
-                      >
-                        <Text style={successStyles.itemQty}>
-                          {item.quantity}x
-                        </Text>
-                        <Text style={successStyles.itemName} numberOfLines={1}>
-                          {item.food_name}
-                        </Text>
-                        <Text style={successStyles.itemPrice}>
-                          {formatPrice(item.unit_price * item.quantity)}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </View>
-            )}
-          </Pressable>
-
-          {/* Restaurant Section */}
-          <View style={successStyles.section}>
-            <Text style={successStyles.sectionLabel}>RESTAURANT</Text>
-            <View style={successStyles.restaurantCard}>
-              {restaurant.logo_url ? (
-                <Image
-                  source={{ uri: restaurant.logo_url }}
-                  style={successStyles.restaurantLogo}
-                />
-              ) : (
-                <View style={successStyles.restaurantLogoFallback}>
-                  <Text style={successStyles.restaurantLogoText}>
-                    {(restaurant.restaurant_name || "R").charAt(0)}
-                  </Text>
-                </View>
-              )}
-              <Text style={successStyles.restaurantName} numberOfLines={1}>
-                {restaurant.restaurant_name ||
-                  order.restaurant_name ||
-                  "Restaurant"}
-              </Text>
-            </View>
-          </View>
-
-          {/* Action Buttons */}
-          <View style={successStyles.buttonsContainer}>
-            <Pressable
-              style={successStyles.trackButton}
-              onPress={() =>
-                navigation.navigate("MainTabs", {
-                  screen: "Orders",
-                  params: {
-                    screen: "OrderTracking",
-                    params: { orderId: order.id },
-                  },
-                })
-              }
-            >
-              <Text style={successStyles.trackButtonText}>Track Order</Text>
-            </Pressable>
-
-            <Pressable
-              style={successStyles.homeButton}
-              onPress={() =>
-                navigation.navigate("MainTabs", {
-                  screen: "Home",
-                  params: { screen: "HomeMain" },
-                })
-              }
-            >
-              <Text style={successStyles.homeButtonText}>Back to Home</Text>
-            </Pressable>
-          </View>
-        </ScrollView>
-      </View>
-    </View>
-  );
-}
-
-const successStyles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-  mapContainer: {
-    height: SCREEN_HEIGHT * 0.35,
-  },
-  map: {
-    flex: 1,
-  },
-  markerContainer: {
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-  markerPin: {
-    width: 30,
-    height: 40,
-    backgroundColor: "#10B981",
-    borderTopLeftRadius: 15,
-    borderTopRightRadius: 15,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 15,
-    transform: [{ rotate: "45deg" }],
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 6,
-  },
-  markerPinInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#fff",
-    transform: [{ rotate: "-45deg" }],
-  },
-  markerShadow: {
-    width: 14,
-    height: 6,
-    backgroundColor: "rgba(0,0,0,0.2)",
-    borderRadius: 7,
-    marginTop: -3,
-  },
-  backButton: {
-    position: "absolute",
-    top: 50,
-    left: 16,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  backButtonText: {
-    fontSize: 20,
-    fontWeight: "600",
-    color: "#111",
-  },
-  bottomSheet: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    marginTop: -20,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-  },
-  dragHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: "#E5E7EB",
-    borderRadius: 2,
-    alignSelf: "center",
-    marginBottom: 16,
-  },
-  headerSection: {
-    alignItems: "center",
-    marginBottom: 24,
-  },
-  progressBar: {
-    width: 60,
-    height: 4,
-    backgroundColor: "#E5E7EB",
-    borderRadius: 2,
-    marginBottom: 12,
-  },
-  progressFill: {
-    width: "40%",
-    height: "100%",
-    backgroundColor: "#10B981",
-    borderRadius: 2,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "900",
-    color: "#111827",
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6B7280",
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  deliveryCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F0FDF4",
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#BBF7D0",
-  },
-  deliveryIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  deliveryTextWrap: {
-    flex: 1,
-  },
-  deliveryLabel: {
-    fontSize: 12,
-    color: "#6B7280",
-    marginBottom: 2,
-  },
-  deliveryAddress: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  expandableCard: {
-    backgroundColor: "#F9FAFB",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  expandableRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  expandableIcon: {
-    fontSize: 18,
-    marginRight: 12,
-  },
-  expandableText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  expandableArrow: {
-    fontSize: 16,
-    color: "#6B7280",
-  },
-  orderDetails: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
-  },
-  orderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  orderLabel: {
-    fontSize: 14,
-    color: "#6B7280",
-  },
-  orderValue: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#E5E7EB",
-    marginVertical: 10,
-  },
-  itemsList: {
-    marginTop: 12,
-  },
-  itemRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-  itemQty: {
-    width: 30,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#10B981",
-  },
-  itemName: {
-    flex: 1,
-    fontSize: 14,
-    color: "#374151",
-  },
-  itemPrice: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  restaurantCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F9FAFB",
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  restaurantLogo: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    marginRight: 12,
-  },
-  restaurantLogoFallback: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#10B981",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  restaurantLogoText: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  restaurantName: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  buttonsContainer: {
-    marginTop: 10,
-    marginBottom: 30,
-  },
-  trackButton: {
-    height: 54,
-    backgroundColor: "#10B981",
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 12,
-  },
-  trackButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  homeButton: {
-    height: 54,
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#10B981",
-  },
-  homeButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#10B981",
-  },
-});
 
 // ============================================================================
 // OSRM route distance
@@ -537,11 +29,7 @@ async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
 
     if (data.code === "Ok" && data.routes?.length) {
       const r = data.routes[0];
-      return {
-        success: true,
-        distance: r.distance / 1000,
-        duration: r.duration / 60,
-      };
+      return { success: true, distance: r.distance / 1000, duration: r.duration / 60 };
     }
     return { success: false, error: "No route found" };
   } catch (e) {
@@ -552,7 +40,6 @@ async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
 export default function CheckoutScreen({ route, navigation }) {
   const { cartId } = route.params || {};
   const mapRef = useRef(null);
-  const { addNewOrder } = useOrders();
 
   // Cart + profile
   const [cart, setCart] = useState(null);
@@ -587,7 +74,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
   // Order
   const [placing, setPlacing] = useState(false);
-  const [orderSuccess, setOrderSuccess] = useState(null);
+
 
   const MINIMUM_SUBTOTAL = 300;
   const PRIORITY_FEE = 49;
@@ -618,10 +105,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
   useEffect(() => {
     if (!cartId) {
-      navigation.navigate("MainTabs", {
-        screen: "Cart",
-        params: { screen: "CartMain" },
-      });
+      navigation.navigate("MainTabs", { screen: "Cart" });
       return;
     }
     fetchCheckoutData();
@@ -641,7 +125,7 @@ export default function CheckoutScreen({ route, navigation }) {
         Alert.alert(
           "Permission Denied",
           "Please enable location permission to use this feature",
-          [{ text: "OK" }],
+          [{ text: "OK" }]
         );
         setFetchingLocation(false);
         return;
@@ -661,14 +145,11 @@ export default function CheckoutScreen({ route, navigation }) {
 
       // Animate map to new location
       if (mapRef.current) {
-        mapRef.current.animateToRegion(
-          {
-            ...newPosition,
-            latitudeDelta: 0.005,
-            longitudeDelta: 0.005,
-          },
-          1000,
-        );
+        mapRef.current.animateToRegion({
+          ...newPosition,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
+        }, 1000);
       }
 
       // Try to get address from coordinates (reverse geocoding)
@@ -684,7 +165,7 @@ export default function CheckoutScreen({ route, navigation }) {
           if (geocode.street) addressParts.push(geocode.street);
           if (geocode.district) addressParts.push(geocode.district);
           if (geocode.subregion) addressParts.push(geocode.subregion);
-
+          
           const newAddress = addressParts.join(", ") || geocode.name || "";
           const newCity = geocode.city || geocode.region || "";
 
@@ -706,11 +187,7 @@ export default function CheckoutScreen({ route, navigation }) {
   // ✅ route calc when customer position / restaurant changes
   useEffect(() => {
     const run = async () => {
-      if (
-        !position ||
-        !cart?.restaurant?.latitude ||
-        !cart?.restaurant?.longitude
-      ) {
+      if (!position || !cart?.restaurant?.latitude || !cart?.restaurant?.longitude) {
         setRouteInfo(null);
         return;
       }
@@ -720,11 +197,10 @@ export default function CheckoutScreen({ route, navigation }) {
         position.latitude,
         position.longitude,
         parseFloat(cart.restaurant.latitude),
-        parseFloat(cart.restaurant.longitude),
+        parseFloat(cart.restaurant.longitude)
       );
 
-      if (result.success)
-        setRouteInfo({ distance: result.distance, duration: result.duration });
+      if (result.success) setRouteInfo({ distance: result.distance, duration: result.duration });
       else setRouteInfo(null);
 
       setRouteLoading(false);
@@ -756,26 +232,18 @@ export default function CheckoutScreen({ route, navigation }) {
 
       // web போல parallel calls
       const [cartRes, profileRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/cart`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API_BASE_URL}/cart/customer-profile`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
+        fetch(`${API_BASE_URL}/cart`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE_URL}/cart/customer-profile`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
 
       const cartData = await cartRes.json().catch(() => ({}));
       const profileData = await profileRes.json().catch(() => ({}));
 
-      if (!cartRes.ok)
-        throw new Error(cartData.message || "Failed to fetch cart");
-      if (!profileRes.ok)
-        throw new Error(profileData.message || "Failed to fetch profile");
+      if (!cartRes.ok) throw new Error(cartData.message || "Failed to fetch cart");
+      if (!profileRes.ok) throw new Error(profileData.message || "Failed to fetch profile");
 
       // cartId match (string vs number fix)
-      const selected = (cartData.carts || []).find(
-        (c) => String(c.id) === String(cartId),
-      );
+      const selected = (cartData.carts || []).find((c) => String(c.id) === String(cartId));
       if (!selected) throw new Error("Cart not found");
 
       setCart(selected);
@@ -799,11 +267,7 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
-  const saveAddressAndLocation = async ({
-    newAddress,
-    newCity,
-    newPosition,
-  }) => {
+  const saveAddressAndLocation = async ({ newAddress, newCity, newPosition }) => {
     try {
       setSavingAddress(true);
       const token = await AsyncStorage.getItem("token");
@@ -838,15 +302,12 @@ export default function CheckoutScreen({ route, navigation }) {
 
   const handlePlaceOrder = async () => {
     try {
-      if (!phone || !address || !position)
-        throw new Error("Please fill address & location");
+      if (!phone || !address || !position) throw new Error("Please fill address & location");
       if (!cart) throw new Error("Cart missing");
 
       const subtotal = Number(cart.cart_total) || 0;
-      if (subtotal < MINIMUM_SUBTOTAL)
-        throw new Error(`Minimum order amount is Rs. ${MINIMUM_SUBTOTAL}`);
-      if (!routeInfo)
-        throw new Error("Please wait for delivery fee calculation");
+      if (subtotal < MINIMUM_SUBTOTAL) throw new Error(`Minimum order amount is Rs. ${MINIMUM_SUBTOTAL}`);
+      if (!routeInfo) throw new Error("Please wait for delivery fee calculation");
 
       setPlacing(true);
       setError("");
@@ -874,48 +335,38 @@ export default function CheckoutScreen({ route, navigation }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to place order");
 
-      const placedOrder = data.order;
+      // Navigate to Order Tracking — reset stack so user can't go back to checkout
+      const order = data.order;
+      if (order?.id) {
+        // Get restaurant logo from cart data to pass to tracking screen
+        const restaurantLogoUrl =
+          cart?.restaurant?.logo_url ||
+          cart?.restaurant?.restaurant_logo_url ||
+          cart?.restaurant?.restaurant_logo ||
+          cart?.restaurant?.image_url ||
+          order.restaurant_logo_url ||
+          order.restaurant_logo ||
+          "";
 
-      // Add to centralized order state for real-time sync
-      if (placedOrder) {
-        addNewOrder(placedOrder);
+        navigation.reset({
+          index: 1,
+          routes: [
+            { name: "MainTabs" },
+            {
+              name: "OrderTracking",
+              params: {
+                orderId: order.id,
+                status: "placed",
+                order: order,
+                totalAmount: finalTotal,
+                restaurantName:
+                  cart?.restaurant?.restaurant_name || order.restaurant_name,
+                restaurantLogoUrl,
+              },
+            },
+          ],
+        });
       }
-
-      // Send local push notification
-      try {
-        await pushNotificationService.scheduleLocalNotification(
-          "Order Placed Successfully 🎉",
-          `Your order from ${placedOrder?.restaurant_name || "the restaurant"} has been placed! Track it in Active Orders.`,
-          { type: "order_placed", orderId: placedOrder?.id, screen: "Orders" },
-        );
-      } catch (notifErr) {
-        console.log("Notification send error:", notifErr);
-      }
-
-      // Navigate instantly to Order Tracking (no overlay, no delay)
-      navigation.navigate("MainTabs", {
-        screen: "Orders",
-        params: {
-          screen: "OrderTracking",
-          params: {
-            orderId: placedOrder.id,
-            orderNumber: placedOrder.order_number || "",
-            order: placedOrder,
-            address: address,
-            restaurantName:
-              placedOrder.restaurant_name ||
-              cart?.restaurant_name ||
-              "Restaurant",
-            totalAmount: placedOrder.total_amount || 0,
-            items: (cart?.items || []).map((item) => ({
-              name: item.name || item.food_name,
-              quantity: item.quantity,
-              price: item.unit_price || item.price,
-              image: item.image_url,
-            })),
-          },
-        },
-      });
     } catch (e) {
       setError(e.message || "Place order failed");
     } finally {
@@ -923,14 +374,11 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
-  const subtotal = useMemo(
-    () => (cart ? Number(cart.cart_total) || 0 : 0),
-    [cart],
-  );
+  const subtotal = useMemo(() => (cart ? Number(cart.cart_total) || 0 : 0), [cart]);
   const serviceFee = useMemo(() => calculateServiceFee(subtotal), [subtotal]);
   const deliveryFee = useMemo(
     () => (routeInfo ? calculateDeliveryFee(routeInfo.distance) : null),
-    [routeInfo],
+    [routeInfo]
   );
 
   const isSubtotalValid = subtotal >= MINIMUM_SUBTOTAL;
@@ -949,110 +397,10 @@ export default function CheckoutScreen({ route, navigation }) {
   // ✅ Loading / Error
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: "#F8FAFC" }}>
-        {/* Map placeholder */}
-        <SkeletonBlock width="100%" height={200} borderRadius={0} />
-        <View style={{ padding: 16, gap: 14 }}>
-          {/* Delivery info card skeleton */}
-          <View
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: 16,
-              padding: 16,
-              gap: 14,
-            }}
-          >
-            {[1, 2, 3].map((i) => (
-              <View
-                key={i}
-                style={{ flexDirection: "row", gap: 12, alignItems: "center" }}
-              >
-                <SkeletonBlock width={36} height={36} borderRadius={18} />
-                <View style={{ flex: 1, gap: 4 }}>
-                  <SkeletonBlock width="30%" height={11} borderRadius={4} />
-                  <SkeletonBlock width="80%" height={14} borderRadius={6} />
-                </View>
-              </View>
-            ))}
-          </View>
-          {/* Order details skeleton */}
-          <View
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: 16,
-              padding: 16,
-              gap: 12,
-            }}
-          >
-            <SkeletonBlock width="40%" height={16} borderRadius={6} />
-            <View
-              style={{ flexDirection: "row", gap: 10, alignItems: "center" }}
-            >
-              <SkeletonBlock width={40} height={40} borderRadius={20} />
-              <SkeletonBlock width="55%" height={14} borderRadius={6} />
-            </View>
-            {[1, 2].map((i) => (
-              <View
-                key={i}
-                style={{ flexDirection: "row", gap: 10, alignItems: "center" }}
-              >
-                <SkeletonBlock width={48} height={48} borderRadius={10} />
-                <View style={{ flex: 1, gap: 4 }}>
-                  <SkeletonBlock width="65%" height={14} borderRadius={6} />
-                  <SkeletonBlock width="35%" height={12} borderRadius={6} />
-                </View>
-                <SkeletonBlock width={50} height={14} borderRadius={6} />
-              </View>
-            ))}
-            <View
-              style={{
-                height: 1,
-                backgroundColor: "#F1F5F9",
-                marginVertical: 4,
-              }}
-            />
-            {[1, 2, 3].map((i) => (
-              <View
-                key={i}
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                }}
-              >
-                <SkeletonBlock width="35%" height={13} borderRadius={6} />
-                <SkeletonBlock width={60} height={13} borderRadius={6} />
-              </View>
-            ))}
-          </View>
-          {/* Payment method skeleton */}
-          <View
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: 16,
-              padding: 16,
-              gap: 10,
-            }}
-          >
-            <SkeletonBlock width="45%" height={16} borderRadius={6} />
-            <SkeletonBlock width="100%" height={48} borderRadius={12} />
-          </View>
-          {/* Place order button skeleton */}
-          <SkeletonBlock width="100%" height={52} borderRadius={14} />
-        </View>
+      <View style={styles.center}>
+        <ActivityIndicator size="large" />
+        <Text style={styles.muted}>Loading checkout...</Text>
       </View>
-    );
-  }
-
-  if (orderSuccess) {
-    return (
-      <OrderSuccessScreen
-        order={orderSuccess}
-        cart={cart}
-        position={position}
-        address={address}
-        navigation={navigation}
-        formatPrice={formatPrice}
-      />
     );
   }
 
@@ -1061,15 +409,7 @@ export default function CheckoutScreen({ route, navigation }) {
       <View style={[styles.page, styles.center]}>
         <Text style={styles.errTitle}>Error</Text>
         <Text style={styles.errText}>{error}</Text>
-        <Pressable
-          onPress={() =>
-            navigation.navigate("MainTabs", {
-              screen: "Cart",
-              params: { screen: "CartMain" },
-            })
-          }
-          style={styles.primaryBtn}
-        >
+        <Pressable onPress={() => navigation.navigate("MainTabs", { screen: "Cart" })} style={styles.primaryBtn}>
           <Text style={styles.primaryText}>Back to Cart</Text>
         </Pressable>
       </View>
@@ -1080,24 +420,18 @@ export default function CheckoutScreen({ route, navigation }) {
     <View style={styles.page}>
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
         {/* ✅ Map */}
-        <View
-          style={[
-            styles.mapWrap,
-            isMapEditMode ? { height: 280 } : { height: 200 },
-          ]}
-        >
-          <FreeMapView
+        <View style={[styles.mapWrap, isMapEditMode ? { height: 280 } : { height: 200 }]}>
+          <OSMMapView
             ref={mapRef}
             style={{ flex: 1 }}
-            region={{
+            initialRegion={{
               latitude: position.latitude,
               longitude: position.longitude,
               latitudeDelta: 0.01,
               longitudeDelta: 0.01,
             }}
-            scrollEnabled={true}
-            zoomEnabled={true}
-            showsUserLocation={true}
+            scrollEnabled={isMapEditMode}
+            zoomEnabled={isMapEditMode}
             onPress={(e) => {
               if (!isMapEditMode) return;
               const { latitude, longitude } = e.nativeEvent.coordinate;
@@ -1105,17 +439,14 @@ export default function CheckoutScreen({ route, navigation }) {
             }}
             markers={[
               {
-                id: "position",
+                id: "delivery",
                 coordinate: position,
-                type: "location-pin",
+                type: "customer",
+                title: "Delivery Location",
+                emoji: "📍",
               },
             ]}
           />
-
-          {/* Back Button - Top Left */}
-          <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="#111827" />
-          </Pressable>
 
           {/* Find My Location Button */}
           <Pressable
@@ -1124,7 +455,7 @@ export default function CheckoutScreen({ route, navigation }) {
             style={[styles.locationBtn, fetchingLocation && { opacity: 0.7 }]}
           >
             {fetchingLocation ? (
-              <ActivityIndicator size="small" color="#10B981" />
+              <ActivityIndicator size="small" color="#06C168" />
             ) : (
               <Text style={styles.locationBtnIcon}>📍</Text>
             )}
@@ -1158,29 +489,15 @@ export default function CheckoutScreen({ route, navigation }) {
           </Pressable>
         </View>
 
-        {/* ✅ Delivery Info - Address, Phone, ETA in one block */}
+        {/* ✅ Address card */}
         <View style={styles.card}>
-          {/* Address Row */}
           <View style={styles.rowBetween}>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                flex: 1,
-                gap: 10,
-              }}
-            >
-              <View style={styles.infoIcon}>
-                <Ionicons name="location-outline" size={18} color="#10B981" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Delivery Address</Text>
-                <Text style={styles.value} numberOfLines={2}>
-                  {address || "Add delivery address"}
-                </Text>
-                {!!city && <Text style={styles.muted}>{city}</Text>}
-              </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Delivery Address</Text>
+              <Text style={styles.value}>{address || "Add delivery address"}</Text>
+              {!!city && <Text style={styles.muted}>{city}</Text>}
             </View>
+
             <Pressable
               onPress={() => {
                 setEditAddress(address);
@@ -1192,176 +509,20 @@ export default function CheckoutScreen({ route, navigation }) {
               <Text style={{ fontSize: 16 }}>✏️</Text>
             </Pressable>
           </View>
-
-          <View style={styles.infoDivider} />
-
-          {/* Phone Row */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <View style={styles.infoIcon}>
-              <Ionicons name="call-outline" size={18} color="#10B981" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Phone Number</Text>
-              <Text style={styles.value}>{phone || "No phone number"}</Text>
-            </View>
-          </View>
-
-          <View style={styles.infoDivider} />
-
-          {/* Estimated Delivery Row */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <View style={styles.infoIcon}>
-              <Ionicons name="time-outline" size={18} color="#10B981" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Estimated Delivery</Text>
-              <Text style={styles.value}>
-                {routeLoading
-                  ? "Calculating..."
-                  : routeInfo
-                    ? `~${Math.ceil(routeInfo.duration) + 15} mins`
-                    : "—"}
-              </Text>
-            </View>
-          </View>
         </View>
 
-        {/* ✅ Order Details - Food items */}
+        {/* ✅ Phone */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Order Details</Text>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 12,
-            }}
-          >
-            {cart?.restaurant?.logo_url ? (
-              <Image
-                source={{ uri: cart.restaurant.logo_url }}
-                style={{ width: 32, height: 32, borderRadius: 16 }}
-              />
-            ) : (
-              <View
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  backgroundColor: "#F0FDF4",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text
-                  style={{ fontSize: 14, fontWeight: "700", color: "#10B981" }}
-                >
-                  {(cart?.restaurant?.restaurant_name || "R").charAt(0)}
-                </Text>
-              </View>
-            )}
-            <Text
-              style={{ fontSize: 14, fontWeight: "700", color: "#0F172A" }}
-              numberOfLines={1}
-            >
-              {cart?.restaurant?.restaurant_name || "Restaurant"}
-            </Text>
-          </View>
+          <Text style={styles.label}>Phone Number</Text>
+          <Text style={styles.value}>{phone || "No phone number"}</Text>
+        </View>
 
-          {(cart?.items || []).map((item, index) => (
-            <View key={item.id || index}>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  paddingVertical: 8,
-                }}
-              >
-                {item.image_url ? (
-                  <Image
-                    source={{ uri: item.image_url }}
-                    style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 8,
-                      marginRight: 10,
-                    }}
-                  />
-                ) : (
-                  <View
-                    style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 8,
-                      marginRight: 10,
-                      backgroundColor: "#F1F5F9",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Ionicons
-                      name="fast-food-outline"
-                      size={20}
-                      color="#94A3B8"
-                    />
-                  </View>
-                )}
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontWeight: "600",
-                      color: "#0F172A",
-                    }}
-                    numberOfLines={1}
-                  >
-                    {item.food_name || item.name}
-                  </Text>
-                  {item.size && item.size !== "regular" && (
-                    <Text style={{ fontSize: 12, color: "#64748B" }}>
-                      Size: {item.size}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: "700",
-                      color: "#0F172A",
-                    }}
-                  >
-                    {formatPrice((item.unit_price || 0) * (item.quantity || 1))}
-                  </Text>
-                  <Text style={{ fontSize: 11, color: "#64748B" }}>
-                    {item.quantity}x {formatPrice(item.unit_price)}
-                  </Text>
-                </View>
-              </View>
-              {index < (cart?.items || []).length - 1 && (
-                <View
-                  style={{
-                    height: 1,
-                    backgroundColor: "#F1F5F9",
-                    marginVertical: 2,
-                  }}
-                />
-              )}
-            </View>
-          ))}
-
-          <View style={styles.divider} />
-          <View
-            style={{ flexDirection: "row", justifyContent: "space-between" }}
-          >
-            <Text style={{ fontSize: 13, fontWeight: "600", color: "#64748B" }}>
-              {(cart?.items || []).reduce((s, it) => s + (it.quantity || 0), 0)}{" "}
-              item(s)
-            </Text>
-            <Text style={{ fontSize: 14, fontWeight: "700", color: "#0F172A" }}>
-              {formatPrice(subtotal)}
-            </Text>
-          </View>
+        {/* ✅ Estimated */}
+        <View style={styles.card}>
+          <Text style={styles.label}>Estimated Delivery</Text>
+          <Text style={styles.value}>
+            {routeLoading ? "Calculating..." : routeInfo ? `~${Math.ceil(routeInfo.duration) + 15} mins` : "—"}
+          </Text>
         </View>
 
         {/* ✅ Price summary */}
@@ -1371,29 +532,18 @@ export default function CheckoutScreen({ route, navigation }) {
           <Row label="Subtotal" value={formatPrice(subtotal)} />
           <Row
             label={`Delivery fee${routeInfo ? ` (${routeInfo.distance.toFixed(1)} km)` : ""}`}
-            value={
-              routeLoading
-                ? "..."
-                : deliveryFee !== null
-                  ? formatPrice(deliveryFee)
-                  : "--"
-            }
+            value={routeLoading ? "..." : deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
           />
           <Row label="Service fee" value={formatPrice(serviceFee)} />
 
           <View style={styles.divider} />
-          <Row
-            label="Total"
-            value={finalTotal !== null ? formatPrice(finalTotal) : "--"}
-            isBold
-          />
+          <Row label="Total" value={finalTotal !== null ? formatPrice(finalTotal) : "--"} isBold />
         </View>
 
         {!isSubtotalValid && (
           <View style={styles.warn}>
             <Text style={styles.warnText}>
-              Minimum order: Rs. {MINIMUM_SUBTOTAL}. Add Rs.{" "}
-              {(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more.
+              Minimum order: Rs. {MINIMUM_SUBTOTAL}. Add Rs. {(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more.
             </Text>
           </View>
         )}
@@ -1409,60 +559,32 @@ export default function CheckoutScreen({ route, navigation }) {
       <View style={styles.bottomBar}>
         <Pressable
           onPress={handlePlaceOrder}
-          disabled={
-            !isSubtotalValid ||
-            deliveryFee === null ||
-            routeLoading ||
-            placing ||
-            !phone ||
-            !address
-          }
+          disabled={!isSubtotalValid || deliveryFee === null || routeLoading || placing || !phone || !address}
           style={[
             styles.cta,
-            (!isSubtotalValid ||
-              deliveryFee === null ||
-              routeLoading ||
-              placing ||
-              !phone ||
-              !address) &&
-              styles.ctaDisabled,
+            (!isSubtotalValid || deliveryFee === null || routeLoading || placing || !phone || !address) && styles.ctaDisabled,
           ]}
         >
-          <Text
-            style={[
-              styles.ctaText,
-              (!isSubtotalValid ||
-                deliveryFee === null ||
-                routeLoading ||
-                placing ||
-                !phone ||
-                !address) && { color: "#86EFAC" },
-            ]}
-          >
+          <Text style={[styles.ctaText, (!isSubtotalValid || deliveryFee === null || routeLoading || placing || !phone || !address) && { color: "#6EDE9A" }]}>
             {placing
               ? "Placing..."
               : routeLoading
-                ? "Calculating..."
-                : !isSubtotalValid
-                  ? `Add Rs. ${(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more`
-                  : finalTotal !== null
-                    ? `Place Order • ${formatPrice(finalTotal)}`
-                    : "Place Order"}
+              ? "Calculating..."
+              : !isSubtotalValid
+              ? `Add Rs. ${(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more`
+              : finalTotal !== null
+              ? `Place Order • ${formatPrice(finalTotal)}`
+              : "Place Order"}
           </Text>
         </Pressable>
 
-        <Text style={styles.tiny}>
-          By placing this order, you agree to our terms.
-        </Text>
+        <Text style={styles.tiny}>By placing this order, you agree to our terms.</Text>
       </View>
 
       {/* ✅ Address Modal */}
       <Modal transparent visible={showAddressModal} animationType="slide">
         <View style={styles.modalWrap}>
-          <Pressable
-            style={styles.modalBackdrop}
-            onPress={() => setShowAddressModal(false)}
-          />
+          <Pressable style={styles.modalBackdrop} onPress={() => setShowAddressModal(false)} />
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Edit Delivery Address</Text>
 
@@ -1476,12 +598,7 @@ export default function CheckoutScreen({ route, navigation }) {
             />
 
             <Text style={styles.inputLabel}>City</Text>
-            <TextInput
-              value={editCity}
-              onChangeText={setEditCity}
-              placeholder="Enter city"
-              style={styles.input}
-            />
+            <TextInput value={editCity} onChangeText={setEditCity} placeholder="Enter city" style={styles.input} />
 
             <Pressable
               disabled={savingAddress}
@@ -1499,15 +616,10 @@ export default function CheckoutScreen({ route, navigation }) {
               }}
               style={[styles.primaryBtn, savingAddress && { opacity: 0.7 }]}
             >
-              <Text style={styles.primaryText}>
-                {savingAddress ? "Saving..." : "Save"}
-              </Text>
+              <Text style={styles.primaryText}>{savingAddress ? "Saving..." : "Save"}</Text>
             </Pressable>
 
-            <Pressable
-              onPress={() => setShowAddressModal(false)}
-              style={styles.outlineBtn}
-            >
+            <Pressable onPress={() => setShowAddressModal(false)} style={styles.outlineBtn}>
               <Text style={styles.outlineText}>Cancel</Text>
             </Pressable>
           </View>
@@ -1520,17 +632,13 @@ export default function CheckoutScreen({ route, navigation }) {
 function Row({ label, value, isBold }) {
   return (
     <View style={styles.rowBetween}>
-      <Text style={[styles.rowLabel, isBold && { fontWeight: "900" }]}>
-        {label}
-      </Text>
-      <Text style={[styles.rowValue, isBold && { fontWeight: "900" }]}>
-        {value}
-      </Text>
+      <Text style={[styles.rowLabel, isBold && { fontWeight: "900" }]}>{label}</Text>
+      <Text style={[styles.rowValue, isBold && { fontWeight: "900" }]}>{value}</Text>
     </View>
   );
 }
 
-const GREEN = "#16A34A"; // main
+const GREEN = "#06C168";     // main
 const GREEN_DARK = "#0F7A34";
 const GREEN_SOFT = "#DCFCE7";
 const TEXT = "#111827";
@@ -1538,12 +646,7 @@ const MUTED = "#6B7280";
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#F9FAFB" },
-  center: {
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 18,
-    gap: 10,
-  },
+  center: { alignItems: "center", justifyContent: "center", padding: 18, gap: 10 },
 
   muted: { color: MUTED },
 
@@ -1552,41 +655,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: "hidden",
     backgroundColor: "#E5E7EB",
-  },
-  markerContainer: {
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-  markerPin: {
-    width: 30,
-    height: 40,
-    backgroundColor: "#10B981",
-    borderTopLeftRadius: 15,
-    borderTopRightRadius: 15,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 15,
-    transform: [{ rotate: "45deg" }],
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 6,
-  },
-  markerPinInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#fff",
-    transform: [{ rotate: "-45deg" }],
-  },
-  markerShadow: {
-    width: 14,
-    height: 6,
-    backgroundColor: "rgba(0,0,0,0.2)",
-    borderRadius: 7,
-    marginTop: -3,
   },
   locationBtn: {
     position: "absolute",
@@ -1609,26 +677,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   locationBtnText: {
-    color: "#10B981",
+    color: "#06C168",
     fontWeight: "700",
     fontSize: 13,
-  },
-  backBtn: {
-    position: "absolute",
-    top: 12,
-    left: 12,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    zIndex: 10,
   },
   mapBtn: {
     position: "absolute",
@@ -1654,19 +705,9 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: MUTED },
   value: { marginTop: 2, fontSize: 15, fontWeight: "900", color: TEXT },
 
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "900",
-    color: TEXT,
-    marginBottom: 10,
-  },
+  sectionTitle: { fontSize: 14, fontWeight: "900", color: TEXT, marginBottom: 10 },
 
-  rowBetween: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
+  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   rowLabel: { color: MUTED },
   rowValue: { color: TEXT, fontWeight: "800" },
 
@@ -1679,19 +720,6 @@ const styles = StyleSheet.create({
     backgroundColor: GREEN_SOFT,
     alignItems: "center",
     justifyContent: "center",
-  },
-  infoIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "#F0FDF4",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  infoDivider: {
-    height: 1,
-    backgroundColor: "#F1F5F9",
-    marginVertical: 12,
   },
 
   warn: {
@@ -1785,22 +813,14 @@ const styles = StyleSheet.create({
   },
 
   modalWrap: { flex: 1, justifyContent: "flex-end" },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.45)",
-  },
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.45)" },
   modalCard: {
     backgroundColor: "#fff",
     padding: 16,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
   },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: TEXT,
-    marginBottom: 10,
-  },
+  modalTitle: { fontSize: 16, fontWeight: "900", color: TEXT, marginBottom: 10 },
   inputLabel: { color: MUTED, fontSize: 12, marginTop: 10, marginBottom: 6 },
   input: {
     borderWidth: 1,

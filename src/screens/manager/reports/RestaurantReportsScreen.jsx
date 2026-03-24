@@ -42,7 +42,7 @@ const fmt = (v) =>
   `Rs.${parseFloat(v || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
 const STATUS_COLORS = {
-  active: "#10B981",
+  active: "#06C168",
   pending: "#F59E0B",
   suspended: "#EF4444",
   rejected: "#DC2626",
@@ -160,9 +160,9 @@ const RestaurantReportsScreen = () => {
                   {
                     label: "Active",
                     value: s.active_restaurants || 0,
-                    bg: "#ECFDF5",
-                    border: "#A7F3D0",
-                    color: "#065F46",
+                    bg: "#E6F9EE",
+                    border: "#86E5AF",
+                    color: "#04553C",
                   },
                   {
                     label: "Avg Orders",
@@ -415,7 +415,7 @@ const RestaurantReportsScreen = () => {
                         style={{
                           fontSize: 10,
                           fontWeight: "700",
-                          color: "#059669",
+                          color: "#06C168",
                         }}
                       >
                         {fmt(r.commission_earned)}
@@ -496,7 +496,7 @@ const styles = StyleSheet.create({
   heroValue: {
     fontSize: 34,
     fontWeight: "900",
-    color: "#065F46",
+    color: "#04553C",
     marginVertical: 4,
   },
   heroGrid: { flexDirection: "row", gap: 8, marginTop: 10, width: "100%" },

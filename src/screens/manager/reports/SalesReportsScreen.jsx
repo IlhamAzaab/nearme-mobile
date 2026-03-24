@@ -152,13 +152,13 @@ const SalesReportsScreen = () => {
                 <View
                   style={[
                     styles.heroStat,
-                    { backgroundColor: "#ECFDF5", borderColor: "#A7F3D0" },
+                    { backgroundColor: "#E6F9EE", borderColor: "#86E5AF" },
                   ]}
                 >
-                  <Text style={[styles.heroStatLabel, { color: "#059669" }]}>
+                  <Text style={[styles.heroStatLabel, { color: "#06C168" }]}>
                     Delivered
                   </Text>
-                  <Text style={[styles.heroStatVal, { color: "#065F46" }]}>
+                  <Text style={[styles.heroStatVal, { color: "#04553C" }]}>
                     {s.delivered_orders || 0}
                   </Text>
                 </View>
@@ -379,7 +379,7 @@ const styles = StyleSheet.create({
   heroValue: {
     fontSize: 32,
     fontWeight: "900",
-    color: "#065F46",
+    color: "#04553C",
     marginVertical: 4,
   },
   heroGrid: { flexDirection: "row", gap: 8, marginTop: 10, width: "100%" },
@@ -470,7 +470,7 @@ const styles = StyleSheet.create({
   rankNum: { fontSize: 11, fontWeight: "800", color: "#fff" },
   rankName: { fontSize: 13, fontWeight: "700", color: "#111827" },
   rankSub: { fontSize: 10, color: "#9CA3AF" },
-  rankValue: { fontSize: 13, fontWeight: "700", color: "#059669" },
+  rankValue: { fontSize: 13, fontWeight: "700", color: "#06C168" },
 
   emptyWrap: { alignItems: "center", paddingTop: 60 },
   emptyText: { color: "#9CA3AF", marginTop: 8, fontSize: 13 },

@@ -155,8 +155,8 @@ const CustomerReportsScreen = () => {
                   label: "Avg Orders",
                   value: parseFloat(s.avg_orders_per_customer || 0).toFixed(1),
                   sub: "per customer",
-                  bg: "#ECFDF5",
-                  color: "#059669",
+                  bg: "#E6F9EE",
+                  color: "#06C168",
                 },
                 {
                   icon: "receipt-outline",
@@ -362,7 +362,7 @@ const CustomerReportsScreen = () => {
                         style={{
                           fontSize: 12,
                           fontWeight: "700",
-                          color: "#065F46",
+                          color: "#04553C",
                         }}
                       >
                         Rs.{parseFloat(c.total_spent || 0).toFixed(0)}
@@ -505,7 +505,7 @@ const styles = StyleSheet.create({
   heroValue: {
     fontSize: 40,
     fontWeight: "900",
-    color: "#065F46",
+    color: "#04553C",
     marginVertical: 4,
   },
 

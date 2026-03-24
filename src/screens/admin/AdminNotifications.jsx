@@ -12,6 +12,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../../services/supabaseClient";
 import { API_URL } from "../../config/env";
 
+const ADMIN_UNREAD_KEY = "@admin_notifications_unread_count";
+
 export default function AdminNotifications() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +30,8 @@ export default function AdminNotifications() {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}` },
       });
+      // Persist 0 unread count after server confirms read
+      await AsyncStorage.setItem(ADMIN_UNREAD_KEY, "0");
     } catch (e) {
       console.error("Mark all read error:", e);
     }
@@ -276,8 +280,8 @@ export default function AdminNotifications() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={["#22c55e"]}
-            tintColor="#22c55e"
+            colors={["#06C168"]}
+            tintColor="#06C168"
           />
         }
         showsVerticalScrollIndicator={false}
@@ -412,7 +416,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   notificationCardUnread: {
-    backgroundColor: "#f0fdf4",
+    backgroundColor: "#EDFBF2",
   },
   notificationCardRead: {
     backgroundColor: "#fff",
@@ -421,7 +425,7 @@ const styles = StyleSheet.create({
     width: 4,
   },
   borderUnread: {
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
   },
   borderRead: {
     backgroundColor: "#e5e7eb",
@@ -474,7 +478,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
   },
   notificationMessage: {
     fontSize: 14,

@@ -25,7 +25,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_GAP = 12;
 const CARD_PADDING = 16;
 const CARD_WIDTH = (SCREEN_WIDTH - CARD_PADDING * 2 - CARD_GAP) / 2;
-const GREEN = "#10b981";
+const GREEN = "#06C168";
 
 /** Convert "14:00" or "14:00:00" to "2:00 PM" */
 const formatTime = (t) => {
@@ -214,7 +214,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
             <Image source={{ uri: item.image_url }} style={styles.foodImage} />
           ) : (
             <LinearGradient
-              colors={[GREEN, "#059669"]}
+              colors={[GREEN, "#06C168"]}
               style={[styles.foodImage, styles.foodImagePlaceholder]}
             >
               <Ionicons
@@ -443,7 +443,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
                 />
               ) : (
                 <LinearGradient
-                  colors={[GREEN, "#059669"]}
+                  colors={[GREEN, "#06C168"]}
                   style={styles.coverImage}
                 />
               )}
@@ -465,7 +465,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
                     />
                   ) : (
                     <LinearGradient
-                      colors={[GREEN, "#059669"]}
+                      colors={[GREEN, "#06C168"]}
                       style={[styles.restaurantLogo, styles.logoPlaceholder]}
                     >
                       <Text style={styles.logoLetter}>
@@ -770,7 +770,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#ECFDF5",
+    backgroundColor: "#E6F9EE",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -867,7 +867,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 3,
-    backgroundColor: "#16A34A",
+    backgroundColor: "#06C168",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
@@ -1156,7 +1156,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: "#ECFDF5",
+    backgroundColor: "#E6F9EE",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 14,

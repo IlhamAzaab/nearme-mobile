@@ -142,7 +142,7 @@ const progressStyles = StyleSheet.create({
   percentText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#16a34a',
+    color: '#06C168',
   },
   barContainer: {
     height: 10,
@@ -152,7 +152,7 @@ const progressStyles = StyleSheet.create({
   },
   barFill: {
     height: '100%',
-    backgroundColor: '#22c55e',
+    backgroundColor: '#06C168',
     borderRadius: 5,
   },
   stepsRow: {
@@ -172,12 +172,12 @@ const progressStyles = StyleSheet.create({
     alignItems: 'center',
   },
   stepCompleted: {
-    backgroundColor: '#22c55e',
+    backgroundColor: '#06C168',
   },
   stepCurrent: {
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderWidth: 4,
-    borderColor: '#bbf7d0',
+    borderColor: '#9EEBBE',
   },
   stepPending: {
     backgroundColor: '#d1d5db',
@@ -411,7 +411,7 @@ export default function Step4() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
   },
   bgDecoration1: {
     position: 'absolute',
@@ -486,7 +486,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#dcfce7',
     borderRadius: 12,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
     marginBottom: 20,
     overflow: 'hidden',
   },
@@ -497,7 +497,7 @@ const styles = StyleSheet.create({
   contractHeader: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#16a34a',
+    color: '#06C168',
     marginBottom: 16,
     textAlign: 'center',
   },
@@ -525,7 +525,7 @@ const styles = StyleSheet.create({
   checkboxContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
     borderWidth: 2,
     borderColor: '#dcfce7',
     borderRadius: 12,
@@ -533,7 +533,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   checkboxContainerActive: {
-    borderColor: '#22c55e',
+    borderColor: '#06C168',
     backgroundColor: '#dcfce7',
   },
   checkbox: {
@@ -548,8 +548,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   checkboxChecked: {
-    backgroundColor: '#22c55e',
-    borderColor: '#22c55e',
+    backgroundColor: '#06C168',
+    borderColor: '#06C168',
   },
   checkboxIcon: {
     color: '#ffffff',
@@ -604,17 +604,17 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     flex: 2,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderRadius: 12,
     paddingVertical: 16,
-    shadowColor: '#16a34a',
+    shadowColor: '#06C168',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: '#86efac',
+    backgroundColor: '#6EDE9A',
     shadowOpacity: 0.1,
   },
   buttonContent: {

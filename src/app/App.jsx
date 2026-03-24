@@ -6,6 +6,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import UrgentNotificationModal from "../components/common/UrgentNotificationModal";
 import { API_URL } from "../config/env";
 import { CustomAlertProvider } from "../context/CustomAlertContext";
+import { FavouritesProvider } from "../context/FavouritesContext";
 import { OrderProvider } from "../context/OrderContext";
 import RootNavigator from "../navigation/RootNavigator";
 import orderTrackingService from "../services/orderTrackingService";
@@ -328,19 +329,21 @@ export default function App() {
           <AuthProvider>
             <NotificationProvider>
               <OrderProvider>
-                <NavigationContainer ref={navigationRef}>
-                  <RootNavigator />
-                  {/* Urgent notification modal - renders above everything */}
-                  <UrgentNotificationModal
-                    visible={!!urgentNotification}
-                    title={urgentNotification?.title}
-                    body={urgentNotification?.body}
-                    data={urgentNotification?.data}
-                    onAccept={handleAcceptUrgent}
-                    onReject={handleRejectUrgent}
-                    onDismiss={handleDismissUrgent}
-                  />
-                </NavigationContainer>
+                <FavouritesProvider>
+                  <NavigationContainer ref={navigationRef}>
+                    <RootNavigator />
+                    {/* Urgent notification modal - renders above everything */}
+                    <UrgentNotificationModal
+                      visible={!!urgentNotification}
+                      title={urgentNotification?.title}
+                      body={urgentNotification?.body}
+                      data={urgentNotification?.data}
+                      onAccept={handleAcceptUrgent}
+                      onReject={handleRejectUrgent}
+                      onDismiss={handleDismissUrgent}
+                    />
+                  </NavigationContainer>
+                </FavouritesProvider>
               </OrderProvider>
             </NotificationProvider>
           </AuthProvider>

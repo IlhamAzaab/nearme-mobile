@@ -1,115 +1,359 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAuth } from '../../app/providers/AuthProvider';
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../../app/providers/AuthProvider";
 
-export default function ProfileScreen() {
+/* ─────────────────────── PROFILE SCREEN ─────────────────────── */
+
+export default function ProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
+  const [profilePic, setProfilePic] = useState(null);
+  const [phone, setPhone] = useState(null);
+  const [savedAddress, setSavedAddress] = useState(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  // Load persisted profile data
+  useEffect(() => {
+    (async () => {
+      try {
+        const pic = await AsyncStorage.getItem("@profile_pic");
+        const ph = await AsyncStorage.getItem("@profile_phone");
+        const addr = await AsyncStorage.getItem("@saved_address");
+        if (pic) setProfilePic(pic);
+        if (ph) setPhone(ph);
+        if (addr) setSavedAddress(JSON.parse(addr));
+      } catch {}
+    })();
+  }, []);
+
+  // Refresh when coming back from edit / address screens
+  useEffect(() => {
+    const unsubscribe = navigation?.addListener?.("focus", async () => {
+      try {
+        const pic = await AsyncStorage.getItem("@profile_pic");
+        const ph = await AsyncStorage.getItem("@profile_phone");
+        const addr = await AsyncStorage.getItem("@saved_address");
+        if (pic) setProfilePic(pic);
+        if (ph) setPhone(ph);
+        if (addr) setSavedAddress(JSON.parse(addr));
+      } catch {}
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+  const handleLogout = useCallback(() => {
+    Alert.alert("Logout", "Are you sure you want to logout?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          setLoggingOut(true);
+          try {
+            await logout();
+          } finally {
+            setLoggingOut(false);
+          }
+        },
+      },
+    ]);
+  }, [logout]);
+
+  const initial = (user?.name || "U").charAt(0).toUpperCase();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Profile</Text>
-        
-        <View style={styles.profileCard}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {user?.name?.charAt(0) || 'U'}
-            </Text>
-          </View>
-          <Text style={styles.userName}>{user?.name || 'User'}</Text>
-          <Text style={styles.userEmail}>{user?.email || 'user@example.com'}</Text>
-        </View>
-        
-        <View style={styles.menuCard}>
-          <TouchableOpacity style={styles.menuItem}>
-            <Text>Edit Profile</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuItem}>
-            <Text>Saved Addresses</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuItem}>
-            <Text>Payment Methods</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuItem}>
-            <Text>Settings</Text>
-          </TouchableOpacity>
-        </View>
-        
-        <TouchableOpacity style={styles.logoutButton} onPress={logout}>
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+    <SafeAreaView style={st.root} edges={["top"]}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+
+      {/* ── Header ── */}
+      <View style={st.header}>
+        <Text style={st.headerTitle}>Profile</Text>
       </View>
+
+      <ScrollView
+        contentContainerStyle={st.scroll}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ══════ PROFILE CARD ══════ */}
+        <View style={st.profileCard}>
+          <View style={st.avatarWrap}>
+            {profilePic ? (
+              <Image source={{ uri: profilePic }} style={st.avatarImg} />
+            ) : (
+              <View style={st.avatarFallback}>
+                <Text style={st.avatarInitial}>{initial}</Text>
+              </View>
+            )}
+            <View style={st.onlineDot} />
+          </View>
+          <Text style={st.userName}>{user?.name || "User"}</Text>
+          <Text style={st.userSub}>
+            {phone || user?.email || "user@example.com"}
+          </Text>
+          <Pressable
+            style={st.editBtn}
+            onPress={() => navigation.navigate("EditProfile")}
+          >
+            <Ionicons name="create-outline" size={16} color="#fff" />
+            <Text style={st.editBtnTxt}>Edit Profile</Text>
+          </Pressable>
+        </View>
+
+        {/* ══════ SAVED ADDRESS ══════ */}
+        <View style={st.sectionCard}>
+          <View style={st.sectionHeader}>
+            <View style={st.sectionIconWrap}>
+              <Ionicons name="location" size={18} color="#06C168" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={st.sectionTitle}>Saved Address</Text>
+              <Text style={st.sectionSubtitle} numberOfLines={2}>
+                {savedAddress?.label || "No address saved yet"}
+              </Text>
+            </View>
+            <Pressable
+              style={st.sectionAction}
+              onPress={() => navigation.navigate("AddressPicker")}
+            >
+              <Text style={st.sectionActionTxt}>
+                {savedAddress ? "Change" : "Add"}
+              </Text>
+              <Ionicons name="chevron-forward" size={14} color="#06C168" />
+            </Pressable>
+          </View>
+        </View>
+
+        {/* ══════ MENU ITEMS ══════ */}
+        <View style={st.menuCard}>
+          <MenuItem
+            icon="notifications-outline"
+            label="Notifications"
+            onPress={() =>
+              navigation.navigate("Home", { screen: "Notifications" })
+            }
+          />
+          <MenuItem
+            icon="help-circle-outline"
+            label="Help & Support"
+            onPress={() => navigation.navigate("WebView", {
+              url: "https://shimmering-sunshine-63d746.netlify.app",
+              title: "Help & Support"
+            })}
+          />
+          <MenuItem
+            icon="document-text-outline"
+            label="Terms of Service"
+            onPress={() => navigation.navigate("WebView", {
+              url: "https://lucent-bombolone-2fa396.netlify.app",
+              title: "Terms of Service"
+            })}
+          />
+          <MenuItem
+            icon="shield-checkmark-outline"
+            label="Privacy Policy"
+            onPress={() => navigation.navigate("WebView", {
+              url: "https://melodious-klepon-a7c816.netlify.app",
+              title: "Privacy Policy"
+            })}
+          />
+        </View>
+
+        {/* ══════ LOGOUT ══════ */}
+        <Pressable
+          style={st.logoutBtn}
+          onPress={handleLogout}
+          disabled={loggingOut}
+        >
+          {loggingOut ? (
+            <ActivityIndicator size="small" color="#EF4444" />
+          ) : (
+            <>
+              <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+              <Text style={st.logoutTxt}>Logout</Text>
+            </>
+          )}
+        </Pressable>
+
+        <Text style={st.version}>Version 1.0.0</Text>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
+/* ─── Menu Item ─── */
+function MenuItem({ icon, label, onPress, color = "#374151" }) {
+  return (
+    <Pressable
+      style={({ pressed }) => [st.menuItem, pressed && { opacity: 0.6 }]}
+      onPress={onPress}
+    >
+      <Ionicons name={icon} size={20} color={color} />
+      <Text style={[st.menuLabel, { color }]}>{label}</Text>
+      <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
+    </Pressable>
+  );
+}
+
+/* ═══════════════════════ STYLES ═══════════════════════ */
+
+const st = StyleSheet.create({
+  root: { flex: 1, backgroundColor: "#FFFFFF" },
+
+  /* header */
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 14,
+    backgroundColor: "#FFFFFF",
   },
-  content: {
-    flex: 1,
-    padding: 20,
-    paddingBottom: 100,
+  headerTitle: {
+    fontSize: 26,
+    fontWeight: "800",
+    color: "#111827",
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 20,
-  },
+
+  scroll: { paddingHorizontal: 16, paddingBottom: 40 },
+
+  /* ── profile card ── */
   profileCard: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginBottom: 20,
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    marginBottom: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#2563eb',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 15,
+  avatarWrap: { marginBottom: 14, position: "relative" },
+  avatarImg: { width: 88, height: 88, borderRadius: 44 },
+  avatarFallback: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: "#06C168",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  avatarText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
+  avatarInitial: { fontSize: 36, fontWeight: "800", color: "#fff" },
+  onlineDot: {
+    position: "absolute",
+    bottom: 4,
+    right: 4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#06C168",
+    borderWidth: 3,
+    borderColor: "#fff",
   },
-  userName: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
+  userName: { fontSize: 20, fontWeight: "700", color: "#111827" },
+  userSub: { fontSize: 13, color: "#6B7280", marginTop: 3 },
+  editBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#06C168",
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 999,
+    marginTop: 14,
   },
-  userEmail: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 5,
+  editBtnTxt: { fontSize: 13, fontWeight: "600", color: "#fff" },
+
+  /* ── section card ── */
+  sectionCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  sectionIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "#E6F9EE",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  sectionTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  sectionSubtitle: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  sectionAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  sectionActionTxt: { fontSize: 13, fontWeight: "600", color: "#06C168" },
+
+  /* ── menu card ── */
   menuCard: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    marginBottom: 20,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    overflow: "hidden",
+    marginBottom: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   menuItem: {
-    padding: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: "#F3F4F6",
   },
-  logoutButton: {
-    backgroundColor: '#ef4444',
-    padding: 16,
-    borderRadius: 10,
-    alignItems: 'center',
+  menuLabel: { flex: 1, fontSize: 14, fontWeight: "500" },
+
+  /* ── logout ── */
+  logoutBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#FEF2F2",
+    borderRadius: 14,
+    paddingVertical: 15,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#FECACA",
   },
-  logoutText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+  logoutTxt: { fontSize: 15, fontWeight: "600", color: "#EF4444" },
+
+  version: {
+    textAlign: "center",
+    fontSize: 11,
+    color: "#9CA3AF",
+    marginTop: 4,
+    marginBottom: 20,
   },
 });

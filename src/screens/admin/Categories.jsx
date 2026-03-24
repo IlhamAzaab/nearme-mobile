@@ -159,7 +159,7 @@ export default function Categories() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={["#22c55e"]}
+            colors={["#06C168"]}
           />
         }
       >
@@ -332,11 +332,11 @@ const styles = StyleSheet.create({
   addButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#16a34a",
+    backgroundColor: "#06C168",
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 12,
-    shadowColor: "#16a34a",
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 6,

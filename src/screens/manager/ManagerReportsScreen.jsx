@@ -31,8 +31,8 @@ const ManagerReportsScreen = ({ navigation }) => {
       icon: "options-outline",
       title: "Operations Config",
       desc: "Configure driver earnings, fees, thresholds, and working hours",
-      iconBg: "#D1FAE5",
-      iconColor: "#059669",
+      iconBg: "#B8F0D0",
+      iconColor: "#06C168",
       screen: "OperationsConfig",
     },
     {
@@ -75,8 +75,8 @@ const ManagerReportsScreen = ({ navigation }) => {
       icon: "card-outline",
       title: "Financial Reports",
       desc: "View payment summaries and commission breakdowns",
-      iconBg: "#D1FAE5",
-      iconColor: "#059669",
+      iconBg: "#B8F0D0",
+      iconColor: "#06C168",
       screen: "FinancialReports",
     },
     {
@@ -175,7 +175,7 @@ const styles = StyleSheet.create({
 
   // Hero
   hero: {
-    backgroundColor: "#059669",
+    backgroundColor: "#06C168",
     borderRadius: 16,
     padding: 24,
     alignItems: "center",

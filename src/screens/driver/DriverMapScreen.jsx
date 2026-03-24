@@ -759,7 +759,7 @@ export default function DriverMapScreen({ route, navigation }) {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#10B981" />
+        <ActivityIndicator size="large" color="#06C168" />
         <Text style={styles.loadingText}>Loading delivery...</Text>
       </View>
     );
@@ -818,7 +818,7 @@ export default function DriverMapScreen({ route, navigation }) {
                   {
                     id: "route",
                     coordinates: routeCoords,
-                    strokeColor: mode === "pickup" ? "#EF4444" : "#10B981",
+                    strokeColor: mode === "pickup" ? "#EF4444" : "#06C168",
                     strokeWidth: 4,
                   },
                 ]
@@ -1317,7 +1317,7 @@ var styles = StyleSheet.create({
   emptyEmoji: { fontSize: 64, marginBottom: 16 },
   emptyText: { fontSize: 18, color: "#6B7280", marginBottom: 24 },
   goBackBtn: {
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     paddingHorizontal: 28,
     paddingVertical: 14,
     borderRadius: 14,
@@ -1355,7 +1355,7 @@ var styles = StyleSheet.create({
     ...SHADOW,
   },
   pickupBadge: { backgroundColor: "#FEF3C7" },
-  deliverBadge: { backgroundColor: "#D1FAE5" },
+  deliverBadge: { backgroundColor: "#B8F0D0" },
   modeBadgeText: {
     fontSize: 13,
     fontWeight: "800",
@@ -1378,7 +1378,7 @@ var styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: "#D1D5DB",
   },
-  trackingDotActive: { backgroundColor: "#10B981" },
+  trackingDotActive: { backgroundColor: "#06C168" },
   trackingText: { fontSize: 12, fontWeight: "700", color: "#374151" },
 
   // Route Info
@@ -1394,7 +1394,7 @@ var styles = StyleSheet.create({
   routeInfoText: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#10B981",
+    color: "#06C168",
     textAlign: "center",
   },
 
@@ -1546,7 +1546,7 @@ var styles = StyleSheet.create({
   itemsCard: { backgroundColor: "#F9FAFB", borderRadius: 14, padding: 14 },
   itemRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8 },
   itemRowBorder: { borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  itemQty: { fontSize: 14, fontWeight: "700", color: "#10B981", width: 36 },
+  itemQty: { fontSize: 14, fontWeight: "700", color: "#06C168", width: 36 },
   itemNameText: { flex: 1, fontSize: 14, color: "#374151" },
   itemPrice: { fontSize: 14, fontWeight: "700", color: "#111827" },
 
@@ -1570,7 +1570,7 @@ var styles = StyleSheet.create({
     marginVertical: 8,
   },
   pricingTotalLabel: { fontSize: 16, fontWeight: "700", color: "#111827" },
-  pricingTotalValue: { fontSize: 16, fontWeight: "700", color: "#10B981" },
+  pricingTotalValue: { fontSize: 16, fontWeight: "700", color: "#06C168" },
 
   // Action
   actionBtn: {
@@ -1581,7 +1581,7 @@ var styles = StyleSheet.create({
     marginTop: 4,
   },
   pickupActionBtn: { backgroundColor: "#F59E0B" },
-  deliverActionBtn: { backgroundColor: "#10B981" },
+  deliverActionBtn: { backgroundColor: "#06C168" },
   actionBtnDisabled: { opacity: 0.55 },
   actionBtnText: { color: "#fff", fontSize: 17, fontWeight: "800" },
 
@@ -1620,7 +1620,7 @@ var styles = StyleSheet.create({
   upcomingName: { fontSize: 14, fontWeight: "600", color: "#111827" },
   upcomingMeta: { fontSize: 12, color: "#9CA3AF", marginTop: 2 },
   upcomingRight: { alignItems: "flex-end" },
-  upcomingDist: { fontSize: 12, fontWeight: "700", color: "#10B981" },
+  upcomingDist: { fontSize: 12, fontWeight: "700", color: "#06C168" },
   upcomingTime: { fontSize: 11, color: "#6B7280", marginTop: 2 },
 
   // Start Delivery button
@@ -1656,12 +1656,12 @@ var styles = StyleSheet.create({
   orderHeaderValue: { fontSize: 15, fontWeight: "700", color: "#111827" },
   orderHeaderBadges: { flexDirection: "row", gap: 6 },
   distBadge: {
-    backgroundColor: "#D1FAE5",
+    backgroundColor: "#B8F0D0",
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
   },
-  distBadgeText: { fontSize: 12, fontWeight: "700", color: "#065F46" },
+  distBadgeText: { fontSize: 12, fontWeight: "700", color: "#04553C" },
 
   // Info card row layout
   infoCardRow: {
@@ -1676,7 +1676,7 @@ var styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1687,7 +1687,7 @@ var styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 10,
-    backgroundColor: "#D1FAE5",
+    backgroundColor: "#B8F0D0",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 10,
@@ -1711,5 +1711,5 @@ var styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 4,
   },
-  totalAmountValue: { fontSize: 24, fontWeight: "800", color: "#10B981" },
+  totalAmountValue: { fontSize: 24, fontWeight: "800", color: "#06C168" },
 });

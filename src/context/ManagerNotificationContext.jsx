@@ -14,7 +14,7 @@ export const ManagerNotificationProvider = ({ children }) => {
 
   const addNotification = useCallback((notification) => {
     setNotifications((prev) => [
-      { ...notification, id: notification.id || Date.now(), read: false },
+      { ...notification, id: notification.id || Date.now(), is_read: false },
       ...prev,
     ]);
     setUnreadCount((prev) => prev + 1);
@@ -22,13 +22,13 @@ export const ManagerNotificationProvider = ({ children }) => {
 
   const markAsRead = useCallback((notificationId) => {
     setNotifications((prev) =>
-      prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
+      prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
     );
     setUnreadCount((prev) => Math.max(0, prev - 1));
   }, []);
 
   const markAllAsRead = useCallback(() => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     setUnreadCount(0);
   }, []);
 

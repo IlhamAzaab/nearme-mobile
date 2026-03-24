@@ -182,7 +182,7 @@ const DriverVerificationScreen = () => {
               <Text style={styles.actionBtnText}>Reject</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: "#059669" }]}
+              style={[styles.actionBtn, { backgroundColor: "#06C168" }]}
               onPress={() => handleVerifyDriver("approve")}
               disabled={verifyLoading}
             >
@@ -554,7 +554,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   docLink: { fontSize: 11, color: "#4F46E5", fontWeight: "500" },
-  docVerified: { fontSize: 10, color: "#059669", marginTop: 4 },
+  docVerified: { fontSize: 10, color: "#06C168", marginTop: 4 },
 
   emptyWrap: { alignItems: "center", paddingVertical: 32 },
   emptyText: { color: "#9CA3AF", fontSize: 13, marginTop: 6 },

@@ -89,7 +89,7 @@ const progressStyles = StyleSheet.create({
   percentText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#16a34a',
+    color: '#06C168',
   },
   barContainer: {
     height: 10,
@@ -99,7 +99,7 @@ const progressStyles = StyleSheet.create({
   },
   barFill: {
     height: '100%',
-    backgroundColor: '#22c55e',
+    backgroundColor: '#06C168',
     borderRadius: 5,
   },
   stepsRow: {
@@ -119,12 +119,12 @@ const progressStyles = StyleSheet.create({
     alignItems: 'center',
   },
   stepCompleted: {
-    backgroundColor: '#22c55e',
+    backgroundColor: '#06C168',
   },
   stepCurrent: {
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderWidth: 4,
-    borderColor: '#bbf7d0',
+    borderColor: '#9EEBBE',
   },
   stepPending: {
     backgroundColor: '#d1d5db',
@@ -444,7 +444,7 @@ export default function Step1() {
             </View>
           ) : isUploading ? (
             <View style={styles.uploadingContainer}>
-              <ActivityIndicator size="large" color="#22c55e" />
+              <ActivityIndicator size="large" color="#06C168" />
               <Text style={styles.uploadingText}>Uploading...</Text>
             </View>
           ) : (
@@ -688,7 +688,7 @@ export default function Step1() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
   },
   bgDecoration1: {
     position: 'absolute',
@@ -764,7 +764,7 @@ const styles = StyleSheet.create({
   sectionIndicator: {
     width: 4,
     height: 48,
-    backgroundColor: '#22c55e',
+    backgroundColor: '#06C168',
     borderRadius: 2,
     marginRight: 12,
   },
@@ -845,13 +845,13 @@ const styles = StyleSheet.create({
   },
   verifiedIcon: {
     fontSize: 12,
-    color: '#16a34a',
+    color: '#06C168',
     marginRight: 4,
   },
   verifiedText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#16a34a',
+    color: '#06C168',
   },
   errorContainer: {
     flexDirection: 'row',
@@ -905,7 +905,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#22c55e',
+    backgroundColor: '#06C168',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -945,18 +945,18 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
   submitButton: {
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderRadius: 12,
     paddingVertical: 16,
     marginTop: 8,
-    shadowColor: '#16a34a',
+    shadowColor: '#06C168',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: '#86efac',
+    backgroundColor: '#6EDE9A',
     shadowOpacity: 0.1,
   },
   buttonContent: {

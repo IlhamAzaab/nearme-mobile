@@ -1,4 +1,4 @@
-﻿import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useState } from "react";
 import {
   ActivityIndicator, Alert, ScrollView, StyleSheet, Text,
@@ -115,25 +115,25 @@ export default function OnboardingStep4Screen({ navigation }) {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#1db95b" },
+  container: { flex: 1, backgroundColor: "#06C168" },
   scroll: { flexGrow: 1, padding: 20 },
   title: { fontSize: 26, fontWeight: "800", color: "#fff", textAlign: "center", marginBottom: 4 },
   subtitle: { fontSize: 14, color: "rgba(255,255,255,0.8)", textAlign: "center", marginBottom: 24 },
   card: { backgroundColor: "#fff", borderRadius: 20, padding: 20, elevation: 8 },
   field: { marginBottom: 16 },
   label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 6 },
-  input: { borderWidth: 1.5, borderColor: "#d1fae5", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: "#111827", backgroundColor: "#f0fdf4" },
+  input: { borderWidth: 1.5, borderColor: "#B8F0D0", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: "#111827", backgroundColor: "#EDFBF2" },
   inputError: { borderColor: "#fca5a5" },
   errorText: { fontSize: 12, color: "#ef4444", marginTop: 4 },
   pickerBtn: { justifyContent: "center" },
   pickerText: { fontSize: 15, color: "#111827" },
   placeholder: { color: "#9ca3af" },
-  bankList: { maxHeight: 220, borderWidth: 1.5, borderColor: "#d1fae5", borderRadius: 10, overflow: "hidden", marginTop: 4 },
-  bankOption: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f0fdf4" },
+  bankList: { maxHeight: 220, borderWidth: 1.5, borderColor: "#B8F0D0", borderRadius: 10, overflow: "hidden", marginTop: 4 },
+  bankOption: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#EDFBF2" },
   bankOptionActive: { backgroundColor: "#dcfce7" },
   bankOptionText: { fontSize: 14, color: "#374151" },
-  bankOptionTextActive: { color: "#16a34a", fontWeight: "600" },
-  nextBtn: { backgroundColor: "#1db95b", borderRadius: 12, paddingVertical: 15, alignItems: "center", marginTop: 8 },
+  bankOptionTextActive: { color: "#06C168", fontWeight: "600" },
+  nextBtn: { backgroundColor: "#06C168", borderRadius: 12, paddingVertical: 15, alignItems: "center", marginTop: 8 },
   btnDisabled: { opacity: 0.6 },
   nextBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
   backBtn: { marginTop: 10, alignItems: "center", paddingVertical: 10 },

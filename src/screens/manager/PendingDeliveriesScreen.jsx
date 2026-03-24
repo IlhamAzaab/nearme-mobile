@@ -118,7 +118,7 @@ export default function PendingDeliveriesScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#059669" />
+          <ActivityIndicator size="large" color="#06C168" />
         </View>
       </SafeAreaView>
     );
@@ -135,7 +135,7 @@ export default function PendingDeliveriesScreen() {
               setRefreshing(true);
               fetchDeliveries();
             }}
-            colors={["#059669"]}
+            colors={["#06C168"]}
           />
         }
       >
@@ -350,10 +350,10 @@ export default function PendingDeliveriesScreen() {
                     </Text>
                   </View>
                   <View style={[styles.infoBox, styles.infoBoxEarning]}>
-                    <Text style={[styles.infoLabel, { color: "#059669" }]}>
+                    <Text style={[styles.infoLabel, { color: "#06C168" }]}>
                       EARNING
                     </Text>
-                    <Text style={[styles.infoValue, { color: "#047857" }]}>
+                    <Text style={[styles.infoValue, { color: "#046B4D" }]}>
                       Rs.{(d.manager_earning || 0).toFixed(0)}
                     </Text>
                   </View>
@@ -400,7 +400,7 @@ export default function PendingDeliveriesScreen() {
                   <TouchableOpacity
                     style={[
                       styles.tipSubmitBtn,
-                      successMap[d.id] && { backgroundColor: "#22C55E" },
+                      successMap[d.id] && { backgroundColor: "#06C168" },
                       (!tipInputs[d.id] || parseFloat(tipInputs[d.id]) < 0) && {
                         opacity: 0.4,
                       },
@@ -596,12 +596,12 @@ export default function PendingDeliveriesScreen() {
                     <View style={styles.breakdownDivider} />
                     <View style={styles.breakdownRow}>
                       <Text
-                        style={[styles.breakdownKeyBold, { color: "#047857" }]}
+                        style={[styles.breakdownKeyBold, { color: "#046B4D" }]}
                       >
                         Your Earning
                       </Text>
                       <Text
-                        style={[styles.breakdownValBold, { color: "#047857" }]}
+                        style={[styles.breakdownValBold, { color: "#046B4D" }]}
                       >
                         Rs.{(d.manager_earning || 0).toFixed(0)}
                       </Text>
@@ -826,7 +826,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  tipBadgeText: { fontSize: 11, fontWeight: "700", color: "#065F46" },
+  tipBadgeText: { fontSize: 11, fontWeight: "700", color: "#04553C" },
 
   // Pending Banner
   pendingBanner: {
@@ -855,9 +855,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   infoBoxEarning: {
-    backgroundColor: "#ECFDF5",
+    backgroundColor: "#E6F9EE",
     borderWidth: 1,
-    borderColor: "#D1FAE5",
+    borderColor: "#B8F0D0",
   },
   infoLabel: {
     fontSize: 8,

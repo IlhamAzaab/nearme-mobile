@@ -231,7 +231,7 @@ export default function Products() {
               <Switch
                 value={food.is_available}
                 onValueChange={() => toggleAvailability(food)}
-                trackColor={{ false: '#d1d5db', true: '#22c55e' }}
+                trackColor={{ false: '#d1d5db', true: '#06C168' }}
                 thumbColor="#ffffff"
                 ios_backgroundColor="#d1d5db"
               />
@@ -855,7 +855,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
   },
   header: {
     flexDirection: 'row',
@@ -870,13 +870,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
     justifyContent: 'center',
     alignItems: 'center',
   },
   backButtonText: {
     fontSize: 24,
-    color: '#16a34a',
+    color: '#06C168',
   },
   headerTitleContainer: {
     flex: 1,
@@ -885,7 +885,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#16a34a',
+    color: '#06C168',
   },
   headerSubtitle: {
     fontSize: 12,
@@ -896,10 +896,10 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#16a34a',
+    shadowColor: '#06C168',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,

@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -135,7 +135,7 @@ export default function DriverEarningsScreen({ navigation }) {
       <SafeAreaView style={s.container}>
         <ActivityIndicator
           size="large"
-          color="#1db95b"
+          color="#06C168"
           style={{ marginTop: 40 }}
         />
       </SafeAreaView>
@@ -158,7 +158,7 @@ export default function DriverEarningsScreen({ navigation }) {
               setRefreshing(true);
               fetchData();
             }}
-            colors={["#1db95b"]}
+            colors={["#06C168"]}
           />
         }
       >
@@ -179,7 +179,7 @@ export default function DriverEarningsScreen({ navigation }) {
             Rs {Number(summary?.total_earnings || 0).toFixed(2)}
           </Text>
           <View style={s.earningsStatRow}>
-            <Text style={s.earningsCheckmark}>✓</Text>
+            <Text style={s.earningsCheckmark}>?</Text>
             <Text style={s.earningsDeliveries}>
               {summary?.total_deliveries || 0} deliveries
             </Text>
@@ -192,7 +192,7 @@ export default function DriverEarningsScreen({ navigation }) {
           onPress={() => navigation.navigate("DriverWithdrawals")}
         >
           <View style={s.withdrawalsContent}>
-            <Ionicons name="arrow-down-circle" size={24} color="#1db95b" />
+            <Ionicons name="arrow-down-circle" size={24} color="#06C168" />
             <View style={{ marginLeft: 12, flex: 1 }}>
               <Text style={s.withdrawalsTitle}>My Withdrawals</Text>
               <Text style={s.withdrawalsSubtitle}>
@@ -219,14 +219,14 @@ export default function DriverEarningsScreen({ navigation }) {
             <View style={s.todayCard}>
               <View style={s.todayGrid}>
                 <View style={s.todayStat}>
-                  <Text style={s.todayStatIcon}>💷</Text>
+                  <Text style={s.todayStatIcon}>??</Text>
                   <Text style={s.todayStatValue}>
                     Rs {Number(todayPerformance.earnings || 0).toFixed(2)}
                   </Text>
                   <Text style={s.todayStatLabel}>EARNINGS</Text>
                 </View>
                 <View style={s.todayStat}>
-                  <Text style={s.todayStatIcon}>📦</Text>
+                  <Text style={s.todayStatIcon}>??</Text>
                   <Text style={s.todayStatValue}>
                     {todayPerformance.deliveries || 0}
                   </Text>
@@ -305,7 +305,7 @@ export default function DriverEarningsScreen({ navigation }) {
                 propsForDots: {
                   r: "4",
                   strokeWidth: "2",
-                  stroke: "#1db95b",
+                  stroke: "#06C168",
                 },
               }}
               bezier
@@ -316,7 +316,7 @@ export default function DriverEarningsScreen({ navigation }) {
             />
           ) : (
             <View style={s.chartPlaceholder}>
-              <Text style={s.chartText}>📊 No data available</Text>
+              <Text style={s.chartText}>?? No data available</Text>
             </View>
           )}
         </View>
@@ -366,13 +366,13 @@ export default function DriverEarningsScreen({ navigation }) {
                   <Ionicons
                     name="swap-horizontal"
                     size={24}
-                    color="#1db95b"
+                    color="#06C168"
                     style={{ marginRight: 12 }}
                   />
                   <View>
                     <Text style={s.earningItemTitle}>Order #{orderNum}</Text>
                     <Text style={s.earningItemDate}>
-                      {new Date(dateStr).toLocaleDateString()} • {location}
+                      {new Date(dateStr).toLocaleDateString()} � {location}
                     </Text>
                   </View>
                 </View>
@@ -406,7 +406,7 @@ const s = StyleSheet.create({
 
   /* Period Indicator */
   periodIndicator: {
-    backgroundColor: "#1db95b",
+    backgroundColor: "#06C168",
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -421,7 +421,7 @@ const s = StyleSheet.create({
 
   /* Earnings Card */
   earningsCard: {
-    backgroundColor: "#1db95b",
+    backgroundColor: "#06C168",
     borderRadius: 20,
     padding: 20,
     marginBottom: 16,
@@ -496,7 +496,7 @@ const s = StyleSheet.create({
   },
   sectionDate: {
     fontSize: 12,
-    color: "#1db95b",
+    color: "#06C168",
     fontWeight: "600",
   },
 
@@ -513,7 +513,7 @@ const s = StyleSheet.create({
   },
   earningItemBonus: {
     fontSize: 12,
-    color: "#1db95b",
+    color: "#06C168",
     fontWeight: "600",
     marginTop: 4,
   },
@@ -563,7 +563,7 @@ const s = StyleSheet.create({
   todayAverageValue: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#1db95b",
+    color: "#06C168",
   },
 
   /* Stats Cards Grid */
@@ -654,11 +654,11 @@ const s = StyleSheet.create({
   earningItemAmount: {
     fontSize: 15,
     fontWeight: "700",
-    color: "#1db95b",
+    color: "#06C168",
   },
   earningItemBonus: {
     fontSize: 12,
-    color: "#1db95b",
+    color: "#06C168",
     fontWeight: "600",
     marginTop: 4,
   },

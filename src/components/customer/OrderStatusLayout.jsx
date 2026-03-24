@@ -75,13 +75,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  dotCompleted: { backgroundColor: '#10B981' },
+  dotCompleted: { backgroundColor: '#06C168' },
   dotCurrent: { backgroundColor: '#FF6B35', borderWidth: 3, borderColor: '#FF6B3540' },
   stepIcon: { fontSize: 14 },
   line: { width: 2, height: 24, backgroundColor: '#E5E7EB', marginVertical: 2 },
-  lineCompleted: { backgroundColor: '#10B981' },
+  lineCompleted: { backgroundColor: '#06C168' },
   stepLabel: { fontSize: 14, color: '#9CA3AF', paddingTop: 6, flex: 1 },
-  labelCompleted: { color: '#10B981', fontWeight: '500' },
+  labelCompleted: { color: '#06C168', fontWeight: '500' },
   labelCurrent: { color: '#FF6B35', fontWeight: '700' },
 });
 

@@ -81,7 +81,7 @@ const styles = StyleSheet.create({
   etaBanner: { backgroundColor: '#FFF7ED', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 16 },
   etaValue: { fontSize: 24, fontWeight: '800', color: '#FF6B35' },
   etaDist: { fontSize: 13, color: '#9A3412', marginTop: 4 },
-  driverCard: { backgroundColor: '#F0FDF4', borderRadius: 12, padding: 16, marginBottom: 16 },
+  driverCard: { backgroundColor: '#EDFBF2', borderRadius: 12, padding: 16, marginBottom: 16 },
   driverName: { fontSize: 16, fontWeight: '700', color: '#166534' },
   driverPhone: { fontSize: 14, color: '#166534', marginTop: 4 },
   driverVehicle: { fontSize: 13, color: '#6B7280', marginTop: 4 },

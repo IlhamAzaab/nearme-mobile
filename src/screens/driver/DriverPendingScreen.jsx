@@ -1,4 +1,4 @@
-﻿import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -119,7 +119,7 @@ export default function DriverPendingScreen({ navigation }) {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <ActivityIndicator size="large" color="#1db95b" style={{ flex: 1 }} />
+        <ActivityIndicator size="large" color="#06C168" style={{ flex: 1 }} />
       </SafeAreaView>
     );
   }
@@ -326,7 +326,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  timelineNumDone: { backgroundColor: "#22c55e" },
+  timelineNumDone: { backgroundColor: "#06C168" },
   timelineNumActive: { backgroundColor: "#eab308" },
   timelineNumPending: { backgroundColor: "#e5e7eb" },
   timelineNumText: { fontSize: 13, fontWeight: "700" },
