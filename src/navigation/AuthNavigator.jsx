@@ -4,6 +4,8 @@ import WelcomeScreen from '../screens/auth/WelcomeScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
 import VerifyEmailScreen from '../screens/auth/VerifyEmailScreen';
+import CompleteProfileScreen from '../screens/auth/CompleteProfileScreen';
+import VerifyOtpScreen from '../screens/auth/VerifyOtpScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -14,7 +16,8 @@ export default function AuthNavigator() {
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Signup" component={SignupScreen} />
       <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
-      
+      <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
+      <Stack.Screen name="VerifyOtp" component={VerifyOtpScreen} />
     </Stack.Navigator>
   );
 }

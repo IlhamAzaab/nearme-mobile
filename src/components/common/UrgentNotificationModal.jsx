@@ -98,7 +98,8 @@ export default function UrgentNotificationModal({
 
   if (!visible) return null;
 
-  const isNewOrder = data?.type === "new_order";
+  const isNewOrder =
+    data?.type === "new_order" || data?.type === "order_reminder";
   const isNewDelivery = data?.type === "new_delivery";
   const hasTip = data?.tipAmount && parseFloat(data.tipAmount) > 0;
 
@@ -190,6 +191,14 @@ export default function UrgentNotificationModal({
                   {data.orderDate} at {data.orderTime}
                 </Text>
               </View>
+            </View>
+          )}
+
+          {isNewOrder && data?.waitingMinutes && (
+            <View style={styles.waitingContainer}>
+              <Text style={styles.waitingText}>
+                ⏰ Waiting {Number(data.waitingMinutes)} min
+              </Text>
             </View>
           )}
 
@@ -427,6 +436,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#1e40af",
+  },
+  waitingContainer: {
+    width: "100%",
+    backgroundColor: "#fffbeb",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#fde68a",
+  },
+  waitingText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#b45309",
+    textAlign: "center",
   },
   // ── Reason input ──────────────────────────────────────────────
   reasonBox: {

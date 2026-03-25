@@ -1,5 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -27,6 +27,36 @@ export default function SignupScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [signupUserId, setSignupUserId] = useState(null);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const pollRef = useRef(null);
+
+  // Poll for email verification when on the success screen
+  useEffect(() => {
+    if (success && signupUserId && !emailVerified) {
+      const checkVerification = async () => {
+        try {
+          const res = await fetch(
+            `${API_BASE_URL}/auth/check-email-verified?userId=${encodeURIComponent(signupUserId)}`,
+          );
+          const data = await res.json();
+          if (data.verified) {
+            setEmailVerified(true);
+            if (pollRef.current) clearInterval(pollRef.current);
+          }
+        } catch (err) {
+          // Silently ignore polling errors
+        }
+      };
+
+      checkVerification();
+      pollRef.current = setInterval(checkVerification, 5000);
+
+      return () => {
+        if (pollRef.current) clearInterval(pollRef.current);
+      };
+    }
+  }, [success, signupUserId, emailVerified]);
 
   // shake animation
   const shakeX = useRef(new Animated.Value(0)).current;
@@ -135,6 +165,7 @@ export default function SignupScreen({ navigation }) {
       }
 
       setLoading(false);
+      setSignupUserId(data.userId);
       setSuccess(true);
     } catch (err) {
       console.error("Signup error:", err);
@@ -153,42 +184,74 @@ export default function SignupScreen({ navigation }) {
       >
         <View style={styles.successWrap}>
           <View style={styles.successCard}>
-            <View style={styles.mailIconCircle}>
-              <Text style={styles.mailIcon}>📧</Text>
-            </View>
+            {emailVerified ? (
+              <>
+                <View style={[styles.mailIconCircle, { backgroundColor: "#22c55e" }]}>
+                  <Text style={styles.mailIcon}>✓</Text>
+                </View>
 
-            <Text style={styles.successTitle}>Check Your Email!</Text>
-            <Text style={styles.successText}>
-              We've sent a verification link to{" "}
-              <Text style={styles.emailHighlight}>{formData.email.trim()}</Text>
-            </Text>
+                <Text style={styles.successTitle}>Email Verified!</Text>
+                <Text style={styles.successText}>
+                  Your email has been verified successfully. You can now login to
+                  your account.
+                </Text>
 
-            <View style={styles.stepsBox}>
-              <Text style={styles.stepsTitle}>Next steps:</Text>
-              <Text style={styles.stepItem}>1) Open your email inbox</Text>
-              <Text style={styles.stepItem}>
-                2) Click the verification link
-              </Text>
-              <Text style={styles.stepItem}>3) Complete your profile</Text>
-              <Text style={styles.stepItem}>
-                4) Start ordering delicious food!
-              </Text>
-            </View>
+                <Pressable
+                  onPress={() => navigation.navigate("Login")}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    { marginTop: 20, width: "100%" },
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.primaryBtnText}>Go to Login</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <View style={styles.mailIconCircle}>
+                  <Text style={styles.mailIcon}>📧</Text>
+                </View>
 
-            <Text style={styles.smallNote}>
-              Didn't receive the email? Check spam folder or try again in a few
-              minutes.
-            </Text>
+                <Text style={styles.successTitle}>Check Your Email!</Text>
+                <Text style={styles.successText}>
+                  We've sent a verification link to{" "}
+                  <Text style={styles.emailHighlight}>{formData.email.trim()}</Text>
+                </Text>
 
-            <Pressable
-              onPress={() => navigation.navigate("Login")}
-              style={({ pressed }) => [
-                styles.primaryBtn,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={styles.primaryBtnText}>Go to Login</Text>
-            </Pressable>
+                <View style={styles.stepsBox}>
+                  <Text style={styles.stepsTitle}>Next steps:</Text>
+                  <Text style={styles.stepItem}>1) Open your email inbox</Text>
+                  <Text style={styles.stepItem}>
+                    2) Click the verification link
+                  </Text>
+                  <Text style={styles.stepItem}>3) Come back and login</Text>
+                  <Text style={styles.stepItem}>
+                    4) Complete your profile
+                  </Text>
+                </View>
+
+                <View style={styles.pollingRow}>
+                  <ActivityIndicator size="small" color="#1db95b" />
+                  <Text style={styles.pollingText}>Waiting for email verification...</Text>
+                </View>
+
+                <Text style={styles.smallNote}>
+                  Didn't receive the email? Check spam folder or try again in a few
+                  minutes.
+                </Text>
+
+                <Pressable
+                  onPress={() => navigation.navigate("Login")}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.primaryBtnText}>Go to Login</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
       </LinearGradient>
@@ -512,5 +575,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: "center",
     marginTop: 12,
+    marginBottom: 12,
+  },
+  pollingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 14,
+  },
+  pollingText: {
+    color: "#1db95b",
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

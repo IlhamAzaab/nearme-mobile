@@ -17,6 +17,7 @@ import {
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
 import pushNotificationService from "../../services/pushNotificationService";
+import { persistAuthSession } from "../../lib/authStorage";
 
 export default function LoginScreen({ navigation }) {
   const { refreshAuthState } = useAuth();
@@ -82,7 +83,10 @@ export default function LoginScreen({ navigation }) {
 
       const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-client-platform": "react-native",
+        },
         body: JSON.stringify({ email, password }),
         signal: controller.signal,
       });
@@ -117,21 +121,21 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
+      // If profile not completed, navigate to CompleteProfile screen
+      if (data?.profileCompleted === false && data?.role === "customer") {
+        setIsLoading(false);
+        navigation.navigate("CompleteProfile", {
+          userId: data.userId,
+          accessToken: data.access_token || null,
+        });
+        return;
+      }
+
       // Save session
-      if (data?.token) await AsyncStorage.setItem("token", data.token);
-      if (data?.role) await AsyncStorage.setItem("role", data.role);
-      await AsyncStorage.setItem("userEmail", email);
-
-      if (data?.userId)
-        await AsyncStorage.setItem("userId", String(data.userId));
-      if (data?.userName)
-        await AsyncStorage.setItem("userName", String(data.userName));
-
-      // Save profile completion status for admin onboarding
-      await AsyncStorage.setItem(
-        "profileCompleted",
-        data?.profileCompleted ? "true" : "false",
-      );
+      await persistAuthSession(data, {
+        userEmail: email,
+        profileCompleted: !!data?.profileCompleted,
+      });
 
       // Initialize push notifications after successful login
       if (data?.token) {

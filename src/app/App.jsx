@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NavigationContainer } from "@react-navigation/native";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, StatusBar } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -13,6 +14,10 @@ import pushNotificationService from "../services/pushNotificationService";
 import { AuthProvider } from "./providers/AuthProvider";
 import { NotificationProvider } from "./providers/NotificationProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
+import { mobileQueryClient } from "../lib/queryClient";
+import { initializeApiAuthFetch } from "../lib/apiAuthFetch";
+
+initializeApiAuthFetch();
 
 // Safe import — requires native rebuild to work
 let NavigationBar = null;
@@ -42,13 +47,19 @@ export default function App() {
     // Mark order as handled (remove from displayed tracking)
     if (data?.orderId) {
       await orderTrackingService.markAsHandled(data.orderId);
+      await orderTrackingService.markAsHandled(
+        `order_reminder:${data.orderId}`,
+      );
     }
 
     const token = await AsyncStorage.getItem("token");
     if (!token) return;
 
     try {
-      if (data?.type === "new_order" && data?.orderId) {
+      if (
+        (data?.type === "new_order" || data?.type === "order_reminder") &&
+        data?.orderId
+      ) {
         // Accept order (admin)
         const response = await fetch(
           `${API_URL}/orders/restaurant/orders/${data.orderId}/status`,
@@ -112,9 +123,15 @@ export default function App() {
     // Mark order as handled (remove from displayed tracking)
     if (data?.orderId) {
       await orderTrackingService.markAsHandled(data.orderId);
+      await orderTrackingService.markAsHandled(
+        `order_reminder:${data.orderId}`,
+      );
     }
 
-    if (data?.type === "new_order" && data?.orderId) {
+    if (
+      (data?.type === "new_order" || data?.type === "order_reminder") &&
+      data?.orderId
+    ) {
       const token = await AsyncStorage.getItem("token");
       if (token) {
         try {
@@ -173,17 +190,21 @@ export default function App() {
 
       // Check if this order has already been displayed
       if (notification.data?.orderId) {
-        const alreadyDisplayed = await orderTrackingService.hasBeenDisplayed(
-          notification.data.orderId,
-        );
+        const trackingKey =
+          notification.data?.type === "order_reminder"
+            ? `order_reminder:${notification.data.orderId}`
+            : String(notification.data.orderId);
+
+        const alreadyDisplayed =
+          await orderTrackingService.hasBeenDisplayed(trackingKey);
         if (alreadyDisplayed) {
           console.log(
-            `[App] Order ${notification.data.orderId} already displayed, skipping`,
+            `[App] Urgent notification already displayed for key ${trackingKey}, skipping`,
           );
           return;
         }
         // Mark as displayed
-        await orderTrackingService.markAsDisplayed(notification.data.orderId);
+        await orderTrackingService.markAsDisplayed(trackingKey);
       }
 
       setUrgentNotification(notification);
@@ -225,9 +246,28 @@ export default function App() {
               : order.deliveries;
             if (delivery?.status === "placed") {
               // Check if already displayed
+              const waitingMinutes = Math.max(
+                0,
+                Math.floor(
+                  (Date.now() -
+                    new Date(
+                      order.placed_at || order.created_at || Date.now(),
+                    ).getTime()) /
+                    60000,
+                ),
+              );
+              const localType =
+                waitingMinutes >= 10 ? "order_reminder" : "new_order";
+              const trackingKey =
+                localType === "order_reminder"
+                  ? `order_reminder:${String(order.id)}`
+                  : String(order.id);
+
               const alreadyDisplayed =
-                await orderTrackingService.hasBeenDisplayed(String(order.id));
+                await orderTrackingService.hasBeenDisplayed(trackingKey);
               if (!alreadyDisplayed) {
+                order.__localUrgentType = localType;
+                order.__localWaitingMinutes = waitingMinutes;
                 pendingOrder = order;
                 break;
               }
@@ -236,7 +276,13 @@ export default function App() {
 
           if (pendingOrder) {
             // Mark as displayed
-            await orderTrackingService.markAsDisplayed(String(pendingOrder.id));
+            const pendingType = pendingOrder.__localUrgentType || "new_order";
+            const pendingKey =
+              pendingType === "order_reminder"
+                ? `order_reminder:${String(pendingOrder.id)}`
+                : String(pendingOrder.id);
+
+            await orderTrackingService.markAsDisplayed(pendingKey);
 
             // Show modal for the first pending order
             const items = pendingOrder.order_items || [];
@@ -264,22 +310,28 @@ export default function App() {
             });
 
             setUrgentNotification({
-              title: "🔔 New Order Received",
+              title:
+                pendingType === "order_reminder"
+                  ? "⏰ Order Waiting Alert"
+                  : "🔔 New Order Received",
               body: `Order #${pendingOrder.order_number || pendingOrder.id?.slice(-6)} · Rs. ${parseFloat(pendingOrder.subtotal || 0).toFixed(2)} · ${items.length} item(s)`,
               data: {
-                type: "new_order",
+                type: pendingType,
                 orderId: String(pendingOrder.id),
                 orderNumber: pendingOrder.order_number,
                 itemsSummary,
                 itemsCount: String(items.length),
                 orderDate: formattedDate,
                 orderTime: formattedTime,
+                waitingMinutes: String(pendingOrder.__localWaitingMinutes || 0),
               },
             });
             pushNotificationService.startAlarm(
-              "🔔 New Order",
+              pendingType === "order_reminder"
+                ? "⏰ Order Reminder"
+                : "🔔 New Order",
               `Order #${pendingOrder.order_number}`,
-              { type: "new_order" },
+              { type: pendingType },
             );
           }
         }
@@ -317,35 +369,37 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <CustomAlertProvider>
-        <StatusBar
-          barStyle="dark-content"
-          backgroundColor="transparent"
-          translucent={true}
-        />
-        <ThemeProvider>
-          <AuthProvider>
-            <NotificationProvider>
-              <OrderProvider>
-                <NavigationContainer ref={navigationRef}>
-                  <RootNavigator />
-                  {/* Urgent notification modal - renders above everything */}
-                  <UrgentNotificationModal
-                    visible={!!urgentNotification}
-                    title={urgentNotification?.title}
-                    body={urgentNotification?.body}
-                    data={urgentNotification?.data}
-                    onAccept={handleAcceptUrgent}
-                    onReject={handleRejectUrgent}
-                    onDismiss={handleDismissUrgent}
-                  />
-                </NavigationContainer>
-              </OrderProvider>
-            </NotificationProvider>
-          </AuthProvider>
-        </ThemeProvider>
-      </CustomAlertProvider>
-    </SafeAreaProvider>
+    <QueryClientProvider client={mobileQueryClient}>
+      <SafeAreaProvider>
+        <CustomAlertProvider>
+          <StatusBar
+            barStyle="dark-content"
+            backgroundColor="transparent"
+            translucent={true}
+          />
+          <ThemeProvider>
+            <AuthProvider>
+              <NotificationProvider>
+                <OrderProvider>
+                  <NavigationContainer ref={navigationRef}>
+                    <RootNavigator />
+                    {/* Urgent notification modal - renders above everything */}
+                    <UrgentNotificationModal
+                      visible={!!urgentNotification}
+                      title={urgentNotification?.title}
+                      body={urgentNotification?.body}
+                      data={urgentNotification?.data}
+                      onAccept={handleAcceptUrgent}
+                      onReject={handleRejectUrgent}
+                      onDismiss={handleDismissUrgent}
+                    />
+                  </NavigationContainer>
+                </OrderProvider>
+              </NotificationProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </CustomAlertProvider>
+      </SafeAreaProvider>
+    </QueryClientProvider>
   );
 }

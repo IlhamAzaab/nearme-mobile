@@ -2,6 +2,15 @@
 # This Dockerfile creates a ready-to-use development environment
 # Your friend can run this without installing Node.js or any dependencies
 # Updated: March 2026
+#
+# KEY DEPENDENCIES & VERSIONS (auto-sync from package.json):
+#   - react-native-svg: 15.12.1 (SVG rendering, imports: SvgXml from "react-native-svg")
+#   - expo: ~54.0.33
+#   - react: 19.1.0
+#   - react-native: 0.81.5
+#   - @supabase/supabase-js: ^2.95.3
+#   - axios: ^1.13.4
+# IMPORTANT: When updating dependencies, ensure this comment is updated as well
 
 # Node 22 LTS (Active LTS until April 2027) on Alpine 3.22 for smallest image
 FROM node:22-alpine
@@ -63,7 +72,7 @@ ENV NODE_ENV=development
 
 # Healthcheck – verify Metro bundler is responding
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8081/status || exit 1
+    CMD curl -f http://localhost:8081/status || exit 1
 
 # Default command – start Expo with tunnel for mobile access
 CMD ["npx", "expo", "start", "--tunnel"]

@@ -29,9 +29,12 @@ const isExpoGo = Constants.appOwnership === "expo";
 // Types not listed here are considered role-agnostic (shown to everyone).
 const NOTIFICATION_ROLE_MAP = {
   new_order: "admin",
+  order_reminder: "admin",
   new_delivery: "driver",
   unassigned_delivery_alert: "manager",
   payment_received: "driver",
+  deposit_approved: "driver",
+  admin_payment_received: "admin",
   restaurant_approval: "admin",
   admin_approval: "admin",
   driver_approval: "driver",
@@ -500,7 +503,9 @@ class PushNotificationService {
         const isPersistent =
           data?.persistent === "true" || data?.persistent === true;
         const isUrgent =
-          data?.type === "new_order" || data?.type === "new_delivery";
+          data?.type === "new_order" ||
+          data?.type === "order_reminder" ||
+          data?.type === "new_delivery";
 
         if (isPersistent || isUrgent) {
           // Start persistent alarm (sound + modal)
@@ -544,7 +549,9 @@ class PushNotificationService {
         const isPersistent =
           notifData?.persistent === "true" || notifData?.persistent === true;
         const isUrgent =
-          notifData?.type === "new_order" || notifData?.type === "new_delivery";
+          notifData?.type === "new_order" ||
+          notifData?.type === "order_reminder" ||
+          notifData?.type === "new_delivery";
         if (isPersistent || isUrgent) {
           this.startAlarm(content.title, content.body, notifData);
           if (this._onUrgentNotification) {
@@ -584,7 +591,9 @@ class PushNotificationService {
         const isPersistent =
           notifData?.persistent === "true" || notifData?.persistent === true;
         const isUrgent =
-          notifData?.type === "new_order" || notifData?.type === "new_delivery";
+          notifData?.type === "new_order" ||
+          notifData?.type === "order_reminder" ||
+          notifData?.type === "new_delivery";
         if (isPersistent || isUrgent) {
           this.startAlarm(content.title, content.body, notifData);
           if (this._onUrgentNotification) {
@@ -620,6 +629,7 @@ class PushNotificationService {
         if (orderId) nav.navigate("OrderDetails", { orderId });
         break;
       case "new_order":
+      case "order_reminder":
         // AdminTabs screen is 'Orders' inside the 'AdminMain' stack screen
         nav.navigate("AdminMain", { screen: "Orders" });
         break;
@@ -629,6 +639,12 @@ class PushNotificationService {
         break;
       case "payment_received":
         nav.navigate("DriverTabs", { screen: "Earnings" });
+        break;
+      case "deposit_approved":
+        nav.navigate("DriverDeposits");
+        break;
+      case "admin_payment_received":
+        nav.navigate("AdminWithdrawals");
         break;
       case "unassigned_delivery_alert":
         nav.navigate("Reports", { screen: "PendingDeliveries" });
