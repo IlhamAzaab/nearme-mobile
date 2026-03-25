@@ -16,6 +16,7 @@ import { useIsFocused } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Dimensions,
   Image,
@@ -31,6 +32,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import AnimatedAlert from "../../components/common/AnimatedAlert";
 import FreeMapView from "../../components/maps/FreeMapView";
+import { useAuth } from "../../app/providers/AuthProvider";
 import { API_URL } from "../../config/env";
 import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNotificationContext";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
@@ -123,7 +125,7 @@ function MiniDeliveryMap({ delivery }) {
     polylines.push({
       id: "route",
       coordinates,
-      strokeColor: "#22c55e",
+      strokeColor: "#06C168",
       strokeWidth: 3,
     });
   } else if (restaurant?.latitude && customerLocation?.latitude) {
@@ -137,7 +139,7 @@ function MiniDeliveryMap({ delivery }) {
           longitude: customerLocation.longitude,
         },
       ],
-      strokeColor: "#22c55e",
+      strokeColor: "#06C168",
       strokeWidth: 2,
     });
   }
@@ -165,6 +167,7 @@ function MiniDeliveryMap({ delivery }) {
 
 export default function DashboardScreen({ navigation }) {
   const isFocused = useIsFocused();
+  const { logout } = useAuth();
   const [isOnline, setIsOnline] = useState(false);
   const [statusInfo, setStatusInfo] = useState(null);
   const [stats, setStats] = useState({
@@ -658,7 +661,7 @@ export default function DashboardScreen({ navigation }) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#22c55e" />
+          <ActivityIndicator size="large" color="#06C168" />
           <Text style={styles.loadingText}>Loading...</Text>
         </View>
       </SafeAreaView>
@@ -735,7 +738,7 @@ export default function DashboardScreen({ navigation }) {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={["#22c55e"]}
+            colors={["#06C168"]}
           />
         }
       >
@@ -847,7 +850,7 @@ export default function DashboardScreen({ navigation }) {
                   styles.statusMessageSuccess,
                 ]}
               >
-                <Ionicons name="checkmark-circle" size={16} color="#059669" />
+                <Ionicons name="checkmark-circle" size={16} color="#06C168" />
                 <Text
                   style={[
                     styles.statusMessageText,
@@ -879,7 +882,7 @@ export default function DashboardScreen({ navigation }) {
                     size={16}
                     color={
                       withinWorkingHours
-                        ? "#059669"
+                        ? "#06C168"
                         : manualOverrideActive
                           ? "#d97706"
                           : "#64748b"
@@ -1155,7 +1158,7 @@ export default function DashboardScreen({ navigation }) {
                     <Ionicons
                       name="checkmark-circle"
                       size={24}
-                      color="#10b981"
+                      color="#06C168"
                     />
                   </View>
                   <View style={styles.recentDeliveryInfo}>
@@ -1198,6 +1201,24 @@ export default function DashboardScreen({ navigation }) {
             </View>
           </>
         )}
+
+        {/* Logout */}
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={() =>
+            Alert.alert("Logout", "Are you sure you want to logout?", [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Logout",
+                style: "destructive",
+                onPress: async () => await logout(),
+              },
+            ])
+          }
+        >
+          <Ionicons name="log-out-outline" size={20} color="#dc2626" />
+          <Text style={styles.logoutBtnText}>Logout</Text>
+        </TouchableOpacity>
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -1289,7 +1310,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     borderWidth: 2,
     borderColor: "#fff",
   },
@@ -1336,7 +1357,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   toggleContainerActive: {
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
   },
   toggleContainerDisabled: {
     opacity: 0.6,
@@ -1372,8 +1393,8 @@ const styles = StyleSheet.create({
     borderColor: "#93c5fd",
   },
   statusMessageSuccess: {
-    backgroundColor: "#d1fae5",
-    borderColor: "#86efac",
+    backgroundColor: "#B8F0D0",
+    borderColor: "#6EDE9A",
   },
   statusMessageText: {
     flex: 1,
@@ -1385,7 +1406,7 @@ const styles = StyleSheet.create({
     color: "#1e40af",
   },
   statusMessageTextSuccess: {
-    color: "#065f46",
+    color: "#04553C",
   },
   nextStatusChangeInfo: {
     marginTop: 12,
@@ -1408,8 +1429,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   workingHoursStatusActive: {
-    backgroundColor: "#d1fae5",
-    borderColor: "#86efac",
+    backgroundColor: "#B8F0D0",
+    borderColor: "#6EDE9A",
   },
   workingHoursStatusWarning: {
     backgroundColor: "#fef3c7",
@@ -1425,7 +1446,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   workingHoursTextActive: {
-    color: "#059669",
+    color: "#06C168",
   },
   workingHoursTextWarning: {
     color: "#d97706",
@@ -1463,7 +1484,7 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 24,
     fontWeight: "700",
-    color: "#22c55e",
+    color: "#06C168",
     letterSpacing: -0.5,
   },
   statValueBlack: {
@@ -1488,7 +1509,7 @@ const styles = StyleSheet.create({
   sectionLink: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#22c55e",
+    color: "#06C168",
   },
   activeDeliveryCard: {
     flexDirection: "row",
@@ -1582,7 +1603,7 @@ const styles = StyleSheet.create({
   newBadgeText: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#16a34a",
+    color: "#06C168",
     letterSpacing: 0.5,
   },
   bulkBadge: {
@@ -1607,7 +1628,7 @@ const styles = StyleSheet.create({
   earningsAmount: {
     fontSize: 24,
     fontWeight: "700",
-    color: "#22c55e",
+    color: "#06C168",
     letterSpacing: -0.5,
     marginBottom: 8,
   },
@@ -1669,10 +1690,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     borderRadius: 12,
     height: 48,
-    shadowColor: "#22c55e",
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
@@ -1703,7 +1724,7 @@ const styles = StyleSheet.create({
   },
   monthlyEarningsCard: {
     backgroundColor: "#dcfce7",
-    borderColor: "#86efac",
+    borderColor: "#6EDE9A",
   },
   monthlyDeliveriesCard: {
     backgroundColor: "#dbeafe",
@@ -1712,7 +1733,7 @@ const styles = StyleSheet.create({
   monthlyStatLabel: {
     fontSize: 11,
     fontWeight: "700",
-    color: "#047857",
+    color: "#046B4D",
     textTransform: "uppercase",
     letterSpacing: 0.5,
     marginBottom: 8,
@@ -1720,7 +1741,7 @@ const styles = StyleSheet.create({
   monthlyStatValue: {
     fontSize: 24,
     fontWeight: "700",
-    color: "#047857",
+    color: "#046B4D",
     letterSpacing: -0.5,
   },
   recentDeliveryCard: {
@@ -1743,7 +1764,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#d1fae5",
+    backgroundColor: "#B8F0D0",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1764,7 +1785,7 @@ const styles = StyleSheet.create({
   recentDeliveryEarnings: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#10b981",
+    color: "#06C168",
   },
   recentDeliveryTime: {
     alignItems: "flex-end",
@@ -1851,7 +1872,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     alignItems: "center",
   },
   modalConfirmText: {
@@ -1881,5 +1902,21 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: "#fff",
+  },
+  logoutBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    backgroundColor: "#fee2e2",
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  logoutBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#dc2626",
   },
 });

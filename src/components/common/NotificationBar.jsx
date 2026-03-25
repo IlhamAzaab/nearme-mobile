@@ -15,7 +15,7 @@ const NotificationBar = ({
 
   const colors = {
     info: '#3B82F6',
-    success: '#10B981',
+    success: '#06C168',
     warning: '#F59E0B',
     error: '#EF4444',
   };

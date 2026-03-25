@@ -45,7 +45,7 @@ const ADMIN_DRAWER_ITEMS = [
 ];
 
 const statusColors = {
-  active: { bg: "#ECFDF5", text: "#059669" },
+  active: { bg: "#E6F9EE", text: "#06C168" },
   pending: { bg: "#FFF7ED", text: "#D97706" },
   suspended: { bg: "#FFF7ED", text: "#EA580C" },
   rejected: { bg: "#FEF2F2", text: "#DC2626" },
@@ -210,7 +210,7 @@ const RestaurantManagementScreen = () => {
         <View style={{ marginTop: 12, gap: 8 }}>
           {r.restaurant_status !== "active" && (
             <TouchableOpacity
-              style={[styles.statusBtn, { backgroundColor: "#059669" }]}
+              style={[styles.statusBtn, { backgroundColor: "#06C168" }]}
               onPress={() => updateStatus(r.id, "active")}
               disabled={actionLoading === r.id}
             >

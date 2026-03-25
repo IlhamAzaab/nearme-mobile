@@ -223,7 +223,7 @@ const s = StyleSheet.create({
 
   // ── Primary (green) ──
   btnPrimary: {
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
   },
   btnTextPrimary: {
     color: "#fff",

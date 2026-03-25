@@ -70,9 +70,37 @@ export const formatETARange = (minMinutes, maxMinutes) => {
   return `${min}-${max} mins`;
 };
 
+/**
+ * Format ETA as clock arrival time(s).
+ * @param {number} etaRangeMin - Minimum ETA in minutes
+ * @param {number} etaRangeMax - Maximum ETA in minutes
+ * @param {Object} [options]
+ * @param {boolean} [options.isOnTheWay] - If true, show single time
+ * @returns {string} e.g. "10:42 PM - 10:52 PM" or "10:36 PM"
+ */
+export const formatETAClockTime = (etaRangeMin, etaRangeMax, options = {}) => {
+  const now = new Date();
+  const arriveEarly = new Date(now.getTime() + etaRangeMin * 60000);
+  const arriveLate = new Date(now.getTime() + etaRangeMax * 60000);
+
+  const fmt = (d) =>
+    d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+  if (etaRangeMin === etaRangeMax || options.isOnTheWay) {
+    return fmt(arriveEarly);
+  }
+
+  return `${fmt(arriveEarly)} - ${fmt(arriveLate)}`;
+};
+
 export default {
   formatETA,
   formatRelativeTime,
   calculateETAFromDistance,
   formatETARange,
+  formatETAClockTime,
 };

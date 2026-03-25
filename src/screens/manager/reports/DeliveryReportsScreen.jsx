@@ -150,13 +150,13 @@ const DeliveryReportsScreen = () => {
                 <View
                   style={[
                     styles.heroStat,
-                    { backgroundColor: "#ECFDF5", borderColor: "#A7F3D0" },
+                    { backgroundColor: "#E6F9EE", borderColor: "#86E5AF" },
                   ]}
                 >
-                  <Text style={[styles.heroStatLabel, { color: "#059669" }]}>
+                  <Text style={[styles.heroStatLabel, { color: "#06C168" }]}>
                     Completed
                   </Text>
-                  <Text style={[styles.heroStatVal, { color: "#065F46" }]}>
+                  <Text style={[styles.heroStatVal, { color: "#04553C" }]}>
                     {s.delivered || 0}
                   </Text>
                 </View>
@@ -184,8 +184,8 @@ const DeliveryReportsScreen = () => {
                   icon: "cash-outline",
                   label: "Driver Pay",
                   value: fmt(s.total_driver_earnings),
-                  bg: "#ECFDF5",
-                  color: "#059669",
+                  bg: "#E6F9EE",
+                  color: "#06C168",
                 },
                 {
                   icon: "heart-outline",
@@ -237,9 +237,9 @@ const DeliveryReportsScreen = () => {
                 {
                   label: "Total Distance Covered",
                   value: `${(s.total_distance || 0).toFixed(1)} km`,
-                  bg: "#ECFDF5",
+                  bg: "#E6F9EE",
                   icon: "bicycle-outline",
-                  color: "#059669",
+                  color: "#06C168",
                 },
                 {
                   label: "Pending Deliveries",
@@ -342,7 +342,7 @@ const DeliveryReportsScreen = () => {
                         style={{
                           fontSize: 12,
                           fontWeight: "700",
-                          color: "#059669",
+                          color: "#06C168",
                         }}
                       >
                         {d.delivered} done
@@ -425,7 +425,7 @@ const styles = StyleSheet.create({
   heroValue: {
     fontSize: 40,
     fontWeight: "900",
-    color: "#065F46",
+    color: "#04553C",
     marginVertical: 4,
   },
   heroGrid: { flexDirection: "row", gap: 8, marginTop: 10, width: "100%" },

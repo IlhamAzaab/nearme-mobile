@@ -423,7 +423,7 @@ export default function FoodDetailScreen({ route, navigation }) {
               </View>
               {selectedSize === "regular" && (
                 <View style={styles.sizeCheck}>
-                  <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                  <Ionicons name="checkmark-circle" size={16} color="#06C168" />
                 </View>
               )}
             </Pressable>
@@ -503,7 +503,7 @@ export default function FoodDetailScreen({ route, navigation }) {
                     <Ionicons
                       name="checkmark-circle"
                       size={16}
-                      color="#10b981"
+                      color="#06C168"
                     />
                   </View>
                 )}
@@ -675,7 +675,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: "#10b981",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -744,7 +744,7 @@ const styles = StyleSheet.create({
   ratingText: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#10b981",
+    color: "#06C168",
   },
   reviewText: {
     fontSize: 14,
@@ -758,7 +758,7 @@ const styles = StyleSheet.create({
   productPrice: {
     fontSize: 22,
     fontWeight: "800",
-    color: "#10b981",
+    color: "#06C168",
   },
   priceLabel: {
     fontSize: 10,
@@ -804,9 +804,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   sizeOptionActive: {
-    borderColor: "#10b981",
-    backgroundColor: "#ECFDF5",
-    shadowColor: "#10b981",
+    borderColor: "#06C168",
+    backgroundColor: "#E6F9EE",
+    shadowColor: "#06C168",
     shadowOpacity: 0.12,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
@@ -818,7 +818,7 @@ const styles = StyleSheet.create({
     color: "#64748B",
   },
   sizeOptionNameActive: {
-    color: "#059669",
+    color: "#06C168",
     fontWeight: "800",
   },
   sizeOptionPrice: {
@@ -827,7 +827,7 @@ const styles = StyleSheet.create({
     color: "#94A3B8",
   },
   sizeOptionPriceActive: {
-    color: "#059669",
+    color: "#06C168",
     fontWeight: "800",
   },
   sizePriceWrap: {
@@ -850,7 +850,7 @@ const styles = StyleSheet.create({
     marginTop: -2,
   },
   sizePortionTextActive: {
-    color: "#059669",
+    color: "#06C168",
     fontWeight: "600",
   },
   sizeCheck: {
@@ -901,10 +901,10 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#10b981",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#10b981",
+    shadowColor: "#06C168",
     shadowOpacity: 0.2,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
@@ -954,11 +954,11 @@ const styles = StyleSheet.create({
     flex: 2,
     height: 52,
     borderRadius: 999,
-    backgroundColor: "#10b981",
+    backgroundColor: "#06C168",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#10b981",
+    shadowColor: "#06C168",
     shadowOpacity: 0.2,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -976,7 +976,7 @@ const styles = StyleSheet.create({
   primaryBtn: {
     height: 52,
     borderRadius: 999,
-    backgroundColor: "#10b981",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
     marginTop: 12,

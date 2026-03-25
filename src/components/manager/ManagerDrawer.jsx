@@ -145,7 +145,7 @@ const ManagerDrawer = ({
                   <Ionicons
                     name={item.icon || "ellipse-outline"}
                     size={18}
-                    color={isActive ? "#059669" : "#6B7280"}
+                    color={isActive ? "#06C168" : "#6B7280"}
                     style={styles.navIcon}
                   />
                   <Text
@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 8,
-    backgroundColor: "#059669",
+    backgroundColor: "#06C168",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   navItemActive: {
-    backgroundColor: "#F0FDF4",
+    backgroundColor: "#EDFBF2",
   },
   activeBar: {
     position: "absolute",
@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
     bottom: 6,
     width: 3,
     borderRadius: 2,
-    backgroundColor: "#059669",
+    backgroundColor: "#06C168",
   },
   navIcon: {
     marginRight: 12,
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   navTextActive: {
-    color: "#059669",
+    color: "#06C168",
     fontWeight: "600",
   },
 });

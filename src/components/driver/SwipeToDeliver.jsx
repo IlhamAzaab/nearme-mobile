@@ -18,7 +18,7 @@ const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.6;
 const SwipeToDeliver = ({
   onSwipeComplete,
   text = 'Swipe to Deliver',
-  color = '#10B981',
+  color = '#06C168',
   disabled = false,
 }) => {
   const pan = useRef(new Animated.Value(0)).current;

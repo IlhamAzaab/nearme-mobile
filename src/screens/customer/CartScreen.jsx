@@ -38,7 +38,7 @@ async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
   }
 }
 
-const PRIMARY = "#10b981";
+const PRIMARY = "#06C168";
 const TEXT_DARK = "#0F172A";
 const MUTED = "#64748B";
 const BORDER = "#F1F5F9";
@@ -844,13 +844,10 @@ function CartHeader({ cartCount, onClose }) {
             <Ionicons name="close" size={22} color="#0F172A" />
           </Pressable>
         )}
-        <View style={styles.headerIconBox}>
-          <Ionicons name="bag-handle" size={20} color="#fff" />
-        </View>
       </View>
       <View style={styles.headerCartWrap}>
         <View style={styles.headerCartBtn}>
-          <Ionicons name="cart" size={22} color="#64748B" />
+          <Ionicons name="cart" size={22} color={PRIMARY} />
         </View>
         {cartCount > 0 && (
           <View style={styles.headerBadge}>
@@ -897,14 +894,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#E2E8F0",
-  },
-  headerIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: PRIMARY,
-    alignItems: "center",
-    justifyContent: "center",
   },
   headerTitle: {
     fontSize: 18,

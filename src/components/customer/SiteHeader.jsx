@@ -1,12 +1,14 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useNotifications } from '../../app/providers/NotificationProvider';
 
 /**
  * SiteHeader - Customer app top header bar
  */
 const SiteHeader = ({ title = 'NearMe', showBack = false, showNotifications = true, rightAction }) => {
   const navigation = useNavigation();
+  const { unreadCount } = useNotifications();
 
   return (
     <View style={styles.container}>
@@ -30,6 +32,13 @@ const SiteHeader = ({ title = 'NearMe', showBack = false, showNotifications = tr
             style={styles.iconBtn}
           >
             <Text style={styles.iconText}>🔔</Text>
+            {unreadCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         )}
       </View>
@@ -55,6 +64,25 @@ const styles = StyleSheet.create({
   rightContainer: { flexDirection: 'row', alignItems: 'center' },
   iconBtn: { padding: 4, marginLeft: 8 },
   iconText: { fontSize: 20 },
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    backgroundColor: '#EF4444',
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+  },
 });
 
 export default SiteHeader;

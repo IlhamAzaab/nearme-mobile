@@ -1,517 +1,326 @@
 /**
- * FreeMapView Component
+ * FreeMapView Component — Leaflet WebView (NO Google Maps / react-native-maps)
  *
- * 100% FREE - NO Google Maps SDK required!
- * Uses WebView + Leaflet + OpenStreetMap tiles
- *
- * - OpenStreetMap tiles (FREE)
- * - OSRM routing (FREE)
- * - No API keys needed
+ * Drop-in replacement: same props & ref API as the old react-native-maps version.
+ * Uses OpenStreetMap tiles via Leaflet loaded inside a WebView.
  */
 
-import {
+import React, {
   forwardRef,
-  useEffect,
-  useImperativeHandle,
   useRef,
   useState,
+  useEffect,
+  useImperativeHandle,
 } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { View, StyleSheet, ActivityIndicator } from "react-native";
 import { WebView } from "react-native-webview";
 
-// Leaflet HTML template - loads OpenStreetMap tiles
-const createLeafletHTML = () => `
+// ─── Leaflet HTML ──────────────────────────────────────────────────────────
+const LEAFLET_HTML = `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body, #map { width: 100%; height: 100%; }
-    .leaflet-control-attribution { display: none !important; }
-    
-    .marker-container { 
-      display: flex; 
-      align-items: center; 
-      justify-content: center; 
-    }
-    
-    .marker-pin {
-      width: 44px; 
-      height: 44px; 
-      border-radius: 22px;
-      display: flex; 
-      align-items: center; 
-      justify-content: center;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      font-size: 20px;
-    }
-    
-    .driver-pin { background: #10B981; }
-    .restaurant-pin { background: #EF4444; }
-    .customer-pin { background: #3B82F6; }
-    .pickup-pin { background: #F59E0B; }
-    .delivery-pin { background: #10B981; }
-    .default-pin { background: #6B7280; }
-    
-    /* Professional red teardrop location pin */
-    .location-pin-container {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 36px;
-      height: 48px;
-      position: relative;
-    }
-    .location-pin-svg {
-      width: 36px;
-      height: 48px;
-      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
-    }
-    
-    .user-location {
-      width: 16px; 
-      height: 16px; 
-      background: #3B82F6;
-      border-radius: 50%; 
-      border: 3px solid white;
-      box-shadow: 0 0 0 3px rgba(59,130,246,0.3);
-    }
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body,#map{width:100%;height:100%}
+    .cm{display:flex;align-items:center;justify-content:center;font-size:16px}
+    .cm-pin{border-radius:50%;padding:4px;border:2px solid #fff;
+      box-shadow:0 2px 6px rgba(0,0,0,.3);width:32px;height:32px;
+      display:flex;align-items:center;justify-content:center;font-size:15px}
+    .cm-driver{background:#06C168}
+    .cm-driver.live{background:#06C168;width:38px;height:38px;font-size:18px;
+      box-shadow:0 0 0 6px rgba(6,193,104,.25),0 2px 8px rgba(0,0,0,.3)}
+    .cm-restaurant{background:#EF4444}
+    .cm-customer{background:#3B82F6}
+    .cm-pickup{background:#F59E0B}
+    .leaflet-marker-icon{transition:transform .8s ease-in-out}
   </style>
 </head>
 <body>
-  <div id="map"></div>
-  <script>
-    let map = null;
-    let markers = {};
-    let polylines = {};
-    let userMarker = null;
-    let isMapReady = false;
+<div id="map"></div>
+<script>
+  var map, markers={}, polylines={}, userLocMarker=null;
 
-    // Initialize map
-    function initMap(lat, lng, zoom) {
-      try {
-        if (map) { 
-          map.remove(); 
-          map = null;
-        }
-        
-        map = L.map('map', { 
-          zoomControl: false, 
-          attributionControl: false 
-        }).setView([lat, lng], zoom || 15);
-        
-        // OpenStreetMap tiles - 100% FREE
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
-          maxZoom: 19,
-          crossOrigin: true
-        }).addTo(map);
-        
-        // Handle map click
-        map.on('click', function(e) {
-          sendMessage('press', { 
-            coordinate: { latitude: e.latlng.lat, longitude: e.latlng.lng } 
-          });
-        });
-        
-        // Handle region change
-        map.on('moveend', function() {
-          const c = map.getCenter();
-          const b = map.getBounds();
-          sendMessage('regionChange', {
-            region: { 
-              latitude: c.lat, 
-              longitude: c.lng, 
-              latitudeDelta: b.getNorth() - b.getSouth(), 
-              longitudeDelta: b.getEast() - b.getWest() 
-            }
-          });
-        });
-        
-        isMapReady = true;
-        sendMessage('ready', {});
-      } catch (error) {
-        sendMessage('error', { message: error.message });
-      }
-    }
+  function initMap(lat,lng,zoom){
+    if(map) map.remove();
+    map=L.map('map',{zoomControl:false,attributionControl:false}).setView([lat,lng],zoom);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+    map.on('click',function(e){
+      window.ReactNativeWebView.postMessage(JSON.stringify({type:'mapPress',coordinate:{latitude:e.latlng.lat,longitude:e.latlng.lng}}));
+    });
+    map.on('moveend',function(){
+      var c=map.getCenter(),b=map.getBounds();
+      window.ReactNativeWebView.postMessage(JSON.stringify({type:'regionChange',region:{latitude:c.lat,longitude:c.lng,latitudeDelta:b.getNorth()-b.getSouth(),longitudeDelta:b.getEast()-b.getWest()}}));
+    });
+  }
 
-    // Send message to React Native
-    function sendMessage(type, data) {
-      try {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type, ...data }));
-      } catch (e) {
-        console.log('Message send error:', e);
-      }
-    }
+  function emoji4type(t){
+    switch(t){case 'driver':return '🚗';case 'restaurant':return '🍽️';case 'customer':return '📍';case 'pickup':return '📦';default:return '📍'}
+  }
 
-    // Add marker
-    function addMarker(id, lat, lng, type, emoji, title) {
-      if (!map || !isMapReady) return;
-      
-      removeMarker(id);
-      
-      var icon;
-      if (type === 'location-pin') {
-        // Professional red teardrop pin
-        icon = L.divIcon({
-          className: 'location-pin-container',
-          html: '<svg class="location-pin-svg" viewBox="0 0 36 48" xmlns="http://www.w3.org/2000/svg">' +
-            '<path d="M18 0C8.06 0 0 8.06 0 18c0 12.6 18 30 18 30s18-17.4 18-30C36 8.06 27.94 0 18 0z" fill="#E53E3E"/>' +
-            '<path d="M18 1C8.61 1 1 8.61 1 18c0 5.8 3.4 12.5 8.3 19.1C13.2 42.4 17 46 18 47c1-1 4.8-4.6 8.7-9.9C31.6 30.5 35 23.8 35 18 35 8.61 27.39 1 18 1z" fill="#C53030" opacity="0.3"/>' +
-            '<circle cx="18" cy="18" r="8" fill="white"/>' +
-            '<circle cx="18" cy="18" r="4" fill="#E53E3E"/>' +
-            '</svg>',
-          iconSize: [36, 48],
-          iconAnchor: [18, 48]
-        });
-      } else {
-        var pinClass = type ? type + '-pin' : 'default-pin';
-        icon = L.divIcon({
-          className: 'marker-container',
-          html: '<div class="marker-pin ' + pinClass + '">' + (emoji || '📍') + '</div>',
-          iconSize: [44, 44],
-          iconAnchor: [22, 44]
-        });
-      }
-      
-      markers[id] = L.marker([lat, lng], { icon }).addTo(map);
-      if (title) {
-        markers[id].bindPopup(title);
-      }
-    }
+  function mkIcon(type,emoji){
+    var cls='cm-pin cm-'+(type||'customer');
+    if(type==='driver') cls+=' live';
+    return L.divIcon({className:'cm',html:'<div class="'+cls+'">'+(emoji||emoji4type(type))+'</div>',iconSize:[32,32],iconAnchor:[16,16]});
+  }
 
-    // Update marker position
-    function updateMarker(id, lat, lng) {
-      if (markers[id]) {
-        markers[id].setLatLng([lat, lng]);
-      }
-    }
+  function addMarker(id,lat,lng,type,title,emoji){
+    if(markers[id]) map.removeLayer(markers[id]);
+    markers[id]=L.marker([lat,lng],{icon:mkIcon(type,emoji)}).addTo(map);
+    if(title) markers[id].bindPopup(title);
+  }
 
-    // Remove marker
-    function removeMarker(id) {
-      if (markers[id]) {
-        map.removeLayer(markers[id]);
-        delete markers[id];
-      }
-    }
+  function smoothMoveMarker(id,lat,lng,type,title,emoji){
+    if(markers[id]) markers[id].setLatLng([lat,lng]);
+    else addMarker(id,lat,lng,type,title,emoji);
+  }
 
-    // Clear all markers
-    function clearMarkers() {
-      Object.keys(markers).forEach(id => removeMarker(id));
-    }
+  function removeMarker(id){if(markers[id]){map.removeLayer(markers[id]);delete markers[id]}}
 
-    // Add polyline (route)
-    function addPolyline(id, coords, color, width, dashArray) {
-      if (!map || !isMapReady || !coords || coords.length < 2) return;
-      
-      removePolyline(id);
-      
-      var opts = { 
-        color: color || '#3B82F6', 
-        weight: width || 4, 
-        opacity: 0.8,
-        lineCap: 'round',
-        lineJoin: 'round'
-      };
-      if (dashArray) { opts.dashArray = dashArray; }
-      
-      var latlngs = coords.map(c => [c.latitude, c.longitude]);
-      polylines[id] = L.polyline(latlngs, opts).addTo(map);
-    }
+  function addPolyline(id,coords,color,width,dash){
+    if(polylines[id]) map.removeLayer(polylines[id]);
+    var ll=coords.map(function(c){return[c.latitude,c.longitude]});
+    var o={color:color||'#3B82F6',weight:width||4,opacity:.8};
+    if(dash) o.dashArray=dash;
+    polylines[id]=L.polyline(ll,o).addTo(map);
+  }
 
-    // Remove polyline
-    function removePolyline(id) {
-      if (polylines[id]) {
-        map.removeLayer(polylines[id]);
-        delete polylines[id];
-      }
-    }
+  function removePolyline(id){if(polylines[id]){map.removeLayer(polylines[id]);delete polylines[id]}}
 
-    // Clear all polylines
-    function clearPolylines() {
-      Object.keys(polylines).forEach(id => removePolyline(id));
-    }
+  function updatePolyline(id,coords,color,width,dash){
+    var ll=coords.map(function(c){return[c.latitude,c.longitude]});
+    if(polylines[id]) polylines[id].setLatLngs(ll);
+    else addPolyline(id,coords,color,width,dash);
+  }
 
-    // Set map center
-    function setCenter(lat, lng, zoom) {
-      if (!map || !isMapReady) return;
-      
-      if (zoom !== undefined && zoom !== null) {
-        map.setView([lat, lng], zoom);
-      } else {
-        map.panTo([lat, lng]);
-      }
-    }
+  function fitBounds(coords,pad){
+    if(!coords.length) return;
+    map.fitBounds(L.latLngBounds(coords.map(function(c){return[c.latitude,c.longitude]})),{padding:[pad||50,pad||50]});
+  }
 
-    // Animate to region
-    function animateToRegion(lat, lng, latDelta, lngDelta) {
-      if (!map || !isMapReady) return;
-      
-      const zoom = Math.round(Math.log2(360 / (latDelta || 0.05)));
-      map.flyTo([lat, lng], Math.min(zoom, 18), { duration: 0.5 });
-    }
+  function fitBoundsAsym(coords,top,right,bottom,left){
+    if(!coords.length) return;
+    map.fitBounds(L.latLngBounds(coords.map(function(c){return[c.latitude,c.longitude]})),{paddingTopLeft:[left||40,top||40],paddingBottomRight:[right||40,bottom||40]});
+  }
 
-    // Fit bounds to coordinates
-    function fitBounds(coords, padding) {
-      if (!map || !isMapReady || !coords || coords.length === 0) return;
-      
-      const bounds = L.latLngBounds(coords.map(c => [c.latitude, c.longitude]));
-      map.fitBounds(bounds, { 
-        padding: [padding || 50, padding || 50],
-        maxZoom: 16
-      });
-    }
+  function setCenter(lat,lng,zoom){
+    if(zoom) map.setView([lat,lng],zoom);
+    else map.setView([lat,lng]);
+  }
 
-    // Show user location marker
-    function showUserLocation(lat, lng) {
-      if (!map || !isMapReady) return;
-      
-      if (userMarker) {
-        userMarker.setLatLng([lat, lng]);
-      } else {
-        const icon = L.divIcon({
-          className: 'marker-container',
-          html: '<div class="user-location"></div>',
-          iconSize: [22, 22],
-          iconAnchor: [11, 11]
-        });
-        userMarker = L.marker([lat, lng], { icon }).addTo(map);
-      }
-    }
+  function panTo(lat,lng,zoom){
+    if(map){map.panTo([lat,lng],{animate:true,duration:.8});if(zoom) map.setZoom(zoom)}
+  }
 
-    // Get current zoom level
-    function getZoom() {
-      return map ? map.getZoom() : 15;
+  function showUserLocation(lat,lng){
+    if(userLocMarker) userLocMarker.setLatLng([lat,lng]);
+    else{
+      userLocMarker=L.marker([lat,lng],{icon:L.divIcon({className:'cm',html:'<div style="background:#3B82F6;width:16px;height:16px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 3px rgba(59,130,246,.3)"></div>',iconSize:[22,22],iconAnchor:[11,11]})}).addTo(map);
     }
-  </script>
+  }
+
+  function toggleInteraction(scroll,zoom){
+    if(scroll){map.dragging.enable();map.touchZoom.enable()}else{map.dragging.disable();map.touchZoom.disable()}
+    if(zoom){map.scrollWheelZoom.enable();map.doubleClickZoom.enable()}else{map.scrollWheelZoom.disable();map.doubleClickZoom.disable()}
+  }
+</script>
 </body>
 </html>
 `;
 
-// ============================================================================
-// MAIN COMPONENT
-// ============================================================================
+// ─── Zoom from delta ───────────────────────────────────────────────────────
+function zoomFromDelta(delta) {
+  if (!delta || delta <= 0) return 13;
+  return Math.round(Math.log2(360 / delta));
+}
 
+// ─── Component ─────────────────────────────────────────────────────────────
 const FreeMapView = forwardRef(
   (
     {
       initialRegion,
       region,
       style,
-      children,
+      children, // ignored (no native children in WebView)
+      markers: markersProp = [],
+      polylines: polylinesProp = [],
       scrollEnabled = true,
       zoomEnabled = true,
       showsUserLocation = false,
+      userLocation,
       onPress,
+      onMapPress, // alias used by some driver screens
+      onPanDrag,
       onRegionChange,
       onRegionChangeComplete,
-      onMapReady,
-      markers: markersProp = [],
-      polylines: polylinesProp = [],
-      userLocation,
-      ...props
+      ...rest
     },
     ref,
   ) => {
-    const webViewRef = useRef(null);
-    const [isReady, setIsReady] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
-    const prevMarkersRef = useRef([]);
-    const prevPolylinesRef = useRef([]);
+    const webRef = useRef(null);
+    const [ready, setReady] = useState(false);
 
-    // Default region (Sri Lanka)
     const defaultRegion = {
       latitude: 7.8731,
       longitude: 80.7718,
       latitudeDelta: 0.05,
       longitudeDelta: 0.05,
     };
+    const curRegion = region || initialRegion || defaultRegion;
 
-    const currentRegion = region || initialRegion || defaultRegion;
-
-    // Calculate zoom from delta
-    const getZoomFromDelta = (delta) => {
-      const zoom = Math.round(Math.log2(360 / (delta || 0.05)));
-      return Math.min(Math.max(zoom, 1), 18);
-    };
-
-    // Inject JavaScript into WebView
-    const injectJS = (js) => {
-      if (webViewRef.current && isReady) {
-        webViewRef.current.injectJavaScript(`${js}; true;`);
-      }
-    };
-
-    // Expose methods via ref
+    // ── Imperative ref (same API as OSMMapView + old FreeMapView) ──
     useImperativeHandle(ref, () => ({
-      animateToRegion: (newRegion, duration) => {
-        injectJS(
-          `animateToRegion(${newRegion.latitude}, ${newRegion.longitude}, ${newRegion.latitudeDelta}, ${newRegion.longitudeDelta})`,
-        );
-      },
-      fitToCoordinates: (coordinates, options) => {
-        if (coordinates?.length > 0) {
-          const padding = options?.edgePadding?.top || 50;
-          injectJS(`fitBounds(${JSON.stringify(coordinates)}, ${padding})`);
+      animateToRegion: (r) => {
+        if (webRef.current && ready) {
+          webRef.current.injectJavaScript(
+            `setCenter(${r.latitude},${r.longitude},${zoomFromDelta(r.latitudeDelta)});true;`,
+          );
         }
       },
-      setCamera: (camera) => {
-        const lat = camera.center?.latitude || currentRegion.latitude;
-        const lng = camera.center?.longitude || currentRegion.longitude;
-        const zoom = camera.zoom || 15;
-        injectJS(`setCenter(${lat}, ${lng}, ${zoom})`);
+      fitToCoordinates: (coords, options) => {
+        if (webRef.current && ready && coords?.length) {
+          const ep = options?.edgePadding;
+          if (ep && (ep.top !== ep.bottom || ep.left !== ep.right)) {
+            webRef.current.injectJavaScript(
+              `fitBoundsAsym(${JSON.stringify(coords)},${ep.top || 40},${ep.right || 40},${ep.bottom || 40},${ep.left || 40});true;`,
+            );
+          } else {
+            webRef.current.injectJavaScript(
+              `fitBounds(${JSON.stringify(coords)},${ep?.top || 50});true;`,
+            );
+          }
+        }
       },
-      getCamera: () => ({
-        center: {
-          latitude: currentRegion.latitude,
-          longitude: currentRegion.longitude,
-        },
-        zoom: getZoomFromDelta(currentRegion.latitudeDelta),
-      }),
-      animateCamera: (camera, options) => {
-        const lat = camera.center?.latitude || currentRegion.latitude;
-        const lng = camera.center?.longitude || currentRegion.longitude;
-        const zoom = camera.zoom || 15;
-        injectJS(`setCenter(${lat}, ${lng}, ${zoom})`);
+      setCamera: (cam) => {
+        if (webRef.current && ready) {
+          webRef.current.injectJavaScript(
+            `setCenter(${cam.center.latitude},${cam.center.longitude},${cam.zoom || 15});true;`,
+          );
+        }
+      },
+      panTo: (lat, lng, zoom) => {
+        if (webRef.current && ready) {
+          webRef.current.injectJavaScript(
+            `panTo(${lat},${lng},${zoom || 0});true;`,
+          );
+        }
+      },
+      removeMarker: (id) => {
+        if (webRef.current && ready) {
+          webRef.current.injectJavaScript(`removeMarker('${id}');true;`);
+        }
+      },
+      removePolyline: (id) => {
+        if (webRef.current && ready) {
+          webRef.current.injectJavaScript(`removePolyline('${id}');true;`);
+        }
+      },
+      updatePolyline: (id, coords, color, width, dash) => {
+        if (webRef.current && ready && coords?.length) {
+          webRef.current.injectJavaScript(
+            `updatePolyline('${id}',${JSON.stringify(coords)},'${color || "#3B82F6"}',${width || 3},'${dash || ""}');true;`,
+          );
+        }
       },
     }));
 
-    // Initialize map when WebView loads
+    // ── Init map once WebView is ready ──
     const handleLoad = () => {
+      setReady(true);
       setTimeout(() => {
-        if (webViewRef.current) {
-          const zoom = getZoomFromDelta(currentRegion.latitudeDelta);
-          webViewRef.current.injectJavaScript(`
-          initMap(${currentRegion.latitude}, ${currentRegion.longitude}, ${zoom});
-          true;
-        `);
-        }
-      }, 100);
+        webRef.current?.injectJavaScript(
+          `initMap(${curRegion.latitude},${curRegion.longitude},${zoomFromDelta(curRegion.latitudeDelta)});true;`,
+        );
+      }, 80);
     };
 
-    // Handle messages from WebView
-    const handleMessage = (event) => {
-      try {
-        const data = JSON.parse(event.nativeEvent.data);
-
-        switch (data.type) {
-          case "ready":
-            setIsReady(true);
-            setIsLoading(false);
-            onMapReady?.();
-            break;
-          case "press":
-            onPress?.({ nativeEvent: { coordinate: data.coordinate } });
-            break;
-          case "regionChange":
-            onRegionChange?.(data.region);
-            onRegionChangeComplete?.(data.region);
-            break;
-          case "error":
-            console.warn("Map error:", data.message);
-            break;
-        }
-      } catch (e) {
-        console.log("Map message parse error:", e);
+    // Re-init when ready changes
+    useEffect(() => {
+      if (webRef.current && ready) {
+        webRef.current.injectJavaScript(
+          `initMap(${curRegion.latitude},${curRegion.longitude},${zoomFromDelta(curRegion.latitudeDelta)});true;`,
+        );
       }
+    }, [ready]);
+
+    // ── Sync interaction flags ──
+    useEffect(() => {
+      if (webRef.current && ready) {
+        webRef.current.injectJavaScript(
+          `toggleInteraction(${!!scrollEnabled},${!!zoomEnabled});true;`,
+        );
+      }
+    }, [ready, scrollEnabled, zoomEnabled]);
+
+    // ── Sync markers ──
+    useEffect(() => {
+      if (!webRef.current || !ready) return;
+      markersProp.forEach((m, i) => {
+        const id = m.id ?? i;
+        const fn = m.smooth ? "smoothMoveMarker" : "addMarker";
+        webRef.current.injectJavaScript(
+          `${fn}('${id}',${m.coordinate.latitude},${m.coordinate.longitude},'${m.type || "customer"}','${(m.title || "").replace(/'/g, "\\'")}','${m.emoji || ""}');true;`,
+        );
+      });
+    }, [ready, markersProp]);
+
+    // ── Sync polylines ──
+    useEffect(() => {
+      if (!webRef.current || !ready) return;
+      polylinesProp.forEach((p, i) => {
+        webRef.current.injectJavaScript(
+          `addPolyline('${p.id || i}',${JSON.stringify(p.coordinates)},'${p.strokeColor || "#3B82F6"}',${p.strokeWidth || 4},'${p.dashArray || ""}');true;`,
+        );
+      });
+    }, [ready, polylinesProp]);
+
+    // ── User location blue dot ──
+    useEffect(() => {
+      if (webRef.current && ready && showsUserLocation && userLocation) {
+        webRef.current.injectJavaScript(
+          `showUserLocation(${userLocation.latitude},${userLocation.longitude});true;`,
+        );
+      }
+    }, [ready, showsUserLocation, userLocation]);
+
+    // ── Messages from WebView ──
+    const handleMessage = (e) => {
+      try {
+        const data = JSON.parse(e.nativeEvent.data);
+        if (data.type === "mapPress") {
+          const evt = { nativeEvent: { coordinate: data.coordinate } };
+          onPress?.(evt);
+          onMapPress?.(evt);
+        } else if (data.type === "regionChange") {
+          onRegionChange?.(data.region);
+          onRegionChangeComplete?.(data.region);
+        }
+      } catch {}
     };
-
-    // Update markers when props change
-    useEffect(() => {
-      if (!isReady) return;
-
-      // Clear old markers and add new ones
-      injectJS("clearMarkers()");
-
-      markersProp.forEach((marker) => {
-        if (marker.coordinate) {
-          const { latitude, longitude } = marker.coordinate;
-          const type = marker.type || "default";
-          const emoji = marker.emoji || "📍";
-          const title = marker.title || "";
-          injectJS(
-            `addMarker('${marker.id}', ${latitude}, ${longitude}, '${type}', '${emoji}', '${title}')`,
-          );
-        }
-      });
-
-      prevMarkersRef.current = markersProp;
-    }, [isReady, JSON.stringify(markersProp)]);
-
-    // Update polylines when props change
-    useEffect(() => {
-      if (!isReady) return;
-
-      // Clear old polylines and add new ones
-      injectJS("clearPolylines()");
-
-      polylinesProp.forEach((polyline, index) => {
-        if (polyline.coordinates?.length > 1) {
-          const id = polyline.id || `polyline_${index}`;
-          const color = polyline.strokeColor || "#3B82F6";
-          const width = polyline.strokeWidth || 4;
-          const dashArray = polyline.dashArray || "";
-          injectJS(
-            `addPolyline('${id}', ${JSON.stringify(polyline.coordinates)}, '${color}', ${width}, '${dashArray}')`,
-          );
-        }
-      });
-
-      prevPolylinesRef.current = polylinesProp;
-    }, [isReady, JSON.stringify(polylinesProp)]);
-
-    // Update user location
-    useEffect(() => {
-      if (!isReady || !showsUserLocation || !userLocation) return;
-
-      injectJS(
-        `showUserLocation(${userLocation.latitude}, ${userLocation.longitude})`,
-      );
-    }, [
-      isReady,
-      showsUserLocation,
-      userLocation?.latitude,
-      userLocation?.longitude,
-    ]);
-
-    // Update region when prop changes
-    useEffect(() => {
-      if (!isReady || !region) return;
-
-      injectJS(
-        `animateToRegion(${region.latitude}, ${region.longitude}, ${region.latitudeDelta}, ${region.longitudeDelta})`,
-      );
-    }, [isReady, region?.latitude, region?.longitude]);
 
     return (
       <View style={[styles.container, style]}>
         <WebView
-          ref={webViewRef}
-          source={{ html: createLeafletHTML() }}
+          ref={webRef}
+          source={{ html: LEAFLET_HTML }}
           style={styles.webview}
           onLoad={handleLoad}
           onMessage={handleMessage}
           scrollEnabled={scrollEnabled}
-          javaScriptEnabled={true}
-          domStorageEnabled={true}
-          startInLoadingState={false}
+          javaScriptEnabled
+          domStorageEnabled
+          startInLoadingState
+          renderLoading={() => (
+            <View style={styles.loading}>
+              <ActivityIndicator size="large" color="#06C168" />
+            </View>
+          )}
           originWhitelist={["*"]}
-          cacheEnabled={true}
-          mixedContentMode="compatibility"
-          allowsInlineMediaPlayback={true}
-          mediaPlaybackRequiresUserAction={false}
-          androidLayerType="hardware"
         />
-
-        {isLoading && (
-          <View style={styles.loading}>
-            <ActivityIndicator size="large" color="#10B981" />
-          </View>
-        )}
       </View>
     );
   },
@@ -520,47 +329,29 @@ const FreeMapView = forwardRef(
 FreeMapView.displayName = "FreeMapView";
 
 // ============================================================================
-// MARKER COMPONENTS (for compatibility - render nothing, use markers prop)
+// Legacy named exports (kept for backward-compat — they are no longer rendered
+// as children; maps now use the declarative `markers` / `polylines` props).
 // ============================================================================
-
-export const DriverMarker = ({ coordinate, title }) => null;
-DriverMarker.displayName = "DriverMarker";
-
-export const RestaurantMarker = ({ coordinate, title, label }) => null;
-RestaurantMarker.displayName = "RestaurantMarker";
-
-export const CustomerMarker = ({ coordinate, title, label }) => null;
-CustomerMarker.displayName = "CustomerMarker";
-
-export const DeliveryLocationMarker = ({ coordinate, title }) => null;
-DeliveryLocationMarker.displayName = "DeliveryLocationMarker";
-
-export const PickupMarker = ({ coordinate, title }) => null;
-PickupMarker.displayName = "PickupMarker";
-
-export const RoutePolyline = ({ coordinates, strokeColor, strokeWidth }) =>
-  null;
-RoutePolyline.displayName = "RoutePolyline";
-
-// ============================================================================
-// STYLES
-// ============================================================================
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    overflow: "hidden",
-  },
-  webview: {
-    flex: 1,
-    backgroundColor: "#E8E8E8",
-  },
-  loading: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F9FAFB",
-  },
-});
+export const DriverMarker = () => null;
+export const RestaurantMarker = () => null;
+export const CustomerMarker = () => null;
+export const DeliveryLocationMarker = () => null;
+export const RoutePolyline = () => null;
 
 export default FreeMapView;
+
+// ============================================================================
+const styles = StyleSheet.create({
+  container: { flex: 1, overflow: "hidden" },
+  webview: { flex: 1, backgroundColor: "#f0f0f0" },
+  loading: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f9fafb",
+  },
+});

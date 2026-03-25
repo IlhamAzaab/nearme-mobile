@@ -452,7 +452,7 @@ export default function Settings() {
     if (loading) {
       return (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#16a34a" />
+          <ActivityIndicator size="large" color="#06C168" />
           <Text style={styles.loadingText}>Loading restaurant details...</Text>
         </View>
       );
@@ -833,8 +833,8 @@ export default function Settings() {
           onValueChange={(value) =>
             setNotifications({ ...notifications, orderNotifications: value })
           }
-          trackColor={{ false: '#d1d5db', true: '#86efac' }}
-          thumbColor={notifications.orderNotifications ? '#22c55e' : '#9ca3af'}
+          trackColor={{ false: '#d1d5db', true: '#6EDE9A' }}
+          thumbColor={notifications.orderNotifications ? '#06C168' : '#9ca3af'}
         />
       </View>
 
@@ -848,8 +848,8 @@ export default function Settings() {
           onValueChange={(value) =>
             setNotifications({ ...notifications, emailNotifications: value })
           }
-          trackColor={{ false: '#d1d5db', true: '#86efac' }}
-          thumbColor={notifications.emailNotifications ? '#22c55e' : '#9ca3af'}
+          trackColor={{ false: '#d1d5db', true: '#6EDE9A' }}
+          thumbColor={notifications.emailNotifications ? '#06C168' : '#9ca3af'}
         />
       </View>
 
@@ -863,8 +863,8 @@ export default function Settings() {
           onValueChange={(value) =>
             setNotifications({ ...notifications, smsNotifications: value })
           }
-          trackColor={{ false: '#d1d5db', true: '#86efac' }}
-          thumbColor={notifications.smsNotifications ? '#22c55e' : '#9ca3af'}
+          trackColor={{ false: '#d1d5db', true: '#6EDE9A' }}
+          thumbColor={notifications.smsNotifications ? '#06C168' : '#9ca3af'}
         />
       </View>
 
@@ -949,7 +949,7 @@ export default function Settings() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
   },
   header: {
     paddingHorizontal: 20,
@@ -958,7 +958,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#16a34a',
+    color: '#06C168',
   },
   headerSubtitle: {
     fontSize: 14,
@@ -995,7 +995,7 @@ const styles = StyleSheet.create({
     color: '#6b7280',
   },
   tabButtonTextActive: {
-    color: '#16a34a',
+    color: '#06C168',
   },
   contentCard: {
     flex: 1,
@@ -1062,13 +1062,13 @@ const styles = StyleSheet.create({
   saveButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderRadius: 8,
     minWidth: 70,
     alignItems: 'center',
   },
   saveButtonDisabled: {
-    backgroundColor: '#86efac',
+    backgroundColor: '#6EDE9A',
   },
   saveButtonText: {
     color: '#ffffff',
@@ -1209,7 +1209,7 @@ const styles = StyleSheet.create({
   timePickerSeparator: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#16a34a',
+    color: '#06C168',
   },
   timePickerItem: {
     paddingVertical: 10,
@@ -1224,7 +1224,7 @@ const styles = StyleSheet.create({
     color: '#374151',
   },
   timePickerItemTextSelected: {
-    color: '#16a34a',
+    color: '#06C168',
     fontWeight: '600',
   },
   mapSection: {
@@ -1334,13 +1334,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   primaryButton: {
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 20,
     marginBottom: 32,
-    shadowColor: '#16a34a',
+    shadowColor: '#06C168',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,

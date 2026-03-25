@@ -1,4 +1,4 @@
-﻿import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 export default function StepProgress({ currentStep, totalSteps = 5 }) {
   return (
@@ -38,7 +38,7 @@ const styles = StyleSheet.create({
   stepCompleted: { backgroundColor: "#fff" },
   stepActive: { backgroundColor: "#fff", shadowColor: "#fff", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 8, elevation: 4 },
   stepText: { fontSize: 13, fontWeight: "700", color: "rgba(255,255,255,0.6)" },
-  stepTextActive: { color: "#1db95b" },
+  stepTextActive: { color: "#06C168" },
   stepLine: { width: 28, height: 2, backgroundColor: "rgba(255,255,255,0.3)", marginHorizontal: 4 },
   stepLineActive: { backgroundColor: "#fff" },
 });

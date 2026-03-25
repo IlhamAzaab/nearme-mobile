@@ -8,8 +8,8 @@ const OrderContext = createContext(null);
 // ─── Status Constants (shared across app) ─────────────────────────────────
 export const ACTIVE_STATUSES = [
   "placed", "pending", "accepted", "preparing", "ready", "picked_up", "on_the_way",
-  "driver_accepted", "received",
-  "PLACED", "PENDING", "DRIVER_ACCEPTED", "RECEIVED", "ACCEPTED", "PREPARING", "READY", "PICKED_UP", "ON_THE_WAY",
+  "driver_accepted", "driver_assigned", "received",
+  "PLACED", "PENDING", "DRIVER_ACCEPTED", "DRIVER_ASSIGNED", "RECEIVED", "ACCEPTED", "PREPARING", "READY", "PICKED_UP", "ON_THE_WAY",
 ];
 export const PAST_STATUSES = [
   "delivered", "cancelled", "rejected", "failed",
@@ -17,7 +17,11 @@ export const PAST_STATUSES = [
 ];
 
 // Helper to get the displayable status from an order object
-export const getOrderStatus = (order) => order?.effective_status || order?.status || "placed";
+// Priority: effective_status > delivery_status > status (normalised to lowercase)
+export const getOrderStatus = (order) => {
+  const raw = order?.effective_status || order?.delivery_status || order?.status || "placed";
+  return typeof raw === "string" ? raw.toLowerCase() : "placed";
+};
 
 export function OrderProvider({ children }) {
   const [orders, setOrders] = useState([]);
@@ -46,6 +50,39 @@ export function OrderProvider({ children }) {
       if (res.ok) {
         const list = data.orders || data || [];
         const orderList = Array.isArray(list) ? list : [];
+
+        // For active orders, also fetch /delivery-status to get effective_status
+        const activeIds = orderList
+          .filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o)))
+          .map((o) => o.id)
+          .slice(0, 10); // cap at 10 to avoid too many requests
+
+        if (activeIds.length > 0) {
+          const results = await Promise.allSettled(
+            activeIds.map(async (id) => {
+              try {
+                const r = await fetch(`${API_BASE_URL}/orders/${id}/delivery-status`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!r.ok) return null;
+                const d = await r.json().catch(() => null);
+                if (!d) return null;
+                return { id, effective_status: d.effective_status || d.delivery_status || d.status || null };
+              } catch { return null; }
+            }),
+          );
+          // Merge effective_status back into the order objects
+          const statusMap = {};
+          results.forEach((r) => {
+            if (r.status === "fulfilled" && r.value?.effective_status) {
+              statusMap[r.value.id] = r.value.effective_status;
+            }
+          });
+          orderList.forEach((o) => {
+            if (statusMap[o.id]) o.effective_status = statusMap[o.id];
+          });
+        }
+
         setOrders(orderList);
 
         // Update badge count (active orders)
@@ -106,12 +143,8 @@ export function OrderProvider({ children }) {
             setOrders((prev) =>
               prev.map((o) => (o.id === payload.new.id ? { ...o, ...payload.new } : o))
             );
-            // Update badge count
-            setOrders((current) => {
-              const activeCount = current.filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))).length;
-              setOrdersBadgeCount(activeCount);
-              return current;
-            });
+            // Re-fetch to get effective_status from delivery-status endpoint
+            fetchOrders("silent");
           }
         )
         .on(
@@ -135,6 +168,15 @@ export function OrderProvider({ children }) {
       cleanup.then?.((fn) => fn?.());
     };
   }, [fetchOrders, addNewOrder]);
+
+  // ── Background polling: keep active orders in sync (every 10s) ──────────
+  useEffect(() => {
+    const hasActive = orders.some((o) => ACTIVE_STATUSES.includes(getOrderStatus(o)));
+    if (!hasActive) return;
+
+    const interval = setInterval(() => fetchOrders("silent"), 10000);
+    return () => clearInterval(interval);
+  }, [orders, fetchOrders]);
 
   const value = {
     orders,

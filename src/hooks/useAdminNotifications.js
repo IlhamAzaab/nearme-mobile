@@ -32,7 +32,7 @@ const useAdminNotifications = (restaurantId) => {
     try {
       await api.put(`/admin/notifications/${notificationId}/read`);
       setNotifications((prev) =>
-        prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
+        prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
       );
       setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (error) {
@@ -43,7 +43,7 @@ const useAdminNotifications = (restaurantId) => {
   const markAllAsRead = useCallback(async () => {
     try {
       await api.put('/admin/notifications/read-all', { restaurantId });
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
     } catch (error) {
       console.warn('[useAdminNotifications] markAllAsRead error:', error.message);

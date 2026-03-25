@@ -108,7 +108,7 @@ const progressStyles = StyleSheet.create({
   percentText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#16a34a',
+    color: '#06C168',
   },
   barContainer: {
     height: 10,
@@ -118,7 +118,7 @@ const progressStyles = StyleSheet.create({
   },
   barFill: {
     height: '100%',
-    backgroundColor: '#22c55e',
+    backgroundColor: '#06C168',
     borderRadius: 5,
   },
   stepsRow: {
@@ -138,12 +138,12 @@ const progressStyles = StyleSheet.create({
     alignItems: 'center',
   },
   stepCompleted: {
-    backgroundColor: '#22c55e',
+    backgroundColor: '#06C168',
   },
   stepCurrent: {
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderWidth: 4,
-    borderColor: '#bbf7d0',
+    borderColor: '#9EEBBE',
   },
   stepPending: {
     backgroundColor: '#d1d5db',
@@ -487,7 +487,7 @@ export default function Step3() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
   },
   bgDecoration1: {
     position: 'absolute',
@@ -569,7 +569,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#dcfce7',
     borderRadius: 12,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
     overflow: 'hidden',
   },
   input: {
@@ -634,17 +634,17 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     flex: 2,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#06C168',
     borderRadius: 12,
     paddingVertical: 16,
-    shadowColor: '#16a34a',
+    shadowColor: '#06C168',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: '#86efac',
+    backgroundColor: '#6EDE9A',
     shadowOpacity: 0.1,
   },
   buttonContent: {

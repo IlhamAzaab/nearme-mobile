@@ -16,7 +16,7 @@ const Toast = ({
 
   const colors = {
     info: '#333',
-    success: '#10B981',
+    success: '#06C168',
     error: '#EF4444',
   };
 

@@ -231,7 +231,7 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
             </View>
             <View style={styles.breakdownCard}>
               <Text style={styles.breakdownLabel}>TOTAL PAID</Text>
-              <Text style={[styles.breakdownValue, { color: "#059669" }]}>
+              <Text style={[styles.breakdownValue, { color: "#06C168" }]}>
                 Rs.{driver.total_paid?.toFixed(2)}
               </Text>
             </View>
@@ -395,7 +395,7 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
                         <Ionicons
                           name="checkmark-circle"
                           size={18}
-                          color="#059669"
+                          color="#06C168"
                         />
                       </View>
                       <View style={{ flex: 1 }}>
@@ -481,7 +481,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: -2,
     right: -2,
-    backgroundColor: "#22C55E",
+    backgroundColor: "#06C168",
     borderRadius: 10,
     padding: 3,
   },
@@ -494,7 +494,7 @@ const styles = StyleSheet.create({
   profileId: { fontSize: 11, color: "#6B7280", marginTop: 2 },
   verifiedTag: {
     marginTop: 6,
-    backgroundColor: "#F0FDF4",
+    backgroundColor: "#EDFBF2",
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
   verifiedTagText: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#16A34A",
+    color: "#06C168",
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },

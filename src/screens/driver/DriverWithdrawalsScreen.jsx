@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -55,7 +55,7 @@ export default function DriverWithdrawalsScreen({ navigation }) {
   const getStatusColors = (status) => {
     switch (status) {
       case "completed":
-        return { bg: "#dcfce7", text: "#16a34a" };
+        return { bg: "#dcfce7", text: "#06C168" };
       case "pending":
         return { bg: "#fef9c3", text: "#ca8a04" };
       case "rejected":

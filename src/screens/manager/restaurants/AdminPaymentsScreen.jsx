@@ -130,7 +130,7 @@ const AdminPaymentsScreen = () => {
           <Text
             style={[
               styles.amount,
-              { color: item.withdrawal_balance > 0 ? "#DC2626" : "#059669" },
+              { color: item.withdrawal_balance > 0 ? "#DC2626" : "#06C168" },
             ]}
           >
             Rs.{item.withdrawal_balance?.toFixed(2)}
@@ -182,18 +182,18 @@ const AdminPaymentsScreen = () => {
           <View
             style={[
               styles.summaryCard,
-              { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" },
+              { backgroundColor: "#EDFBF2", borderColor: "#9EEBBE" },
             ]}
           >
             <View style={styles.summaryIconRow}>
               <Ionicons
                 name="checkmark-circle-outline"
                 size={16}
-                color="#22C55E"
+                color="#06C168"
               />
               <Text style={styles.summaryLabel}>Paid Today</Text>
             </View>
-            <Text style={[styles.summaryValue, { color: "#16A34A" }]}>
+            <Text style={[styles.summaryValue, { color: "#06C168" }]}>
               Rs.{summary.paid_today?.toFixed(2)}
             </Text>
             <Text style={styles.summaryNote}>Transfers completed today</Text>

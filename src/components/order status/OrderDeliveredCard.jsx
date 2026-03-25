@@ -249,6 +249,6 @@ const styles = StyleSheet.create({
     marginRight: 6,
     marginBottom: 6,
   },
-  devBtnActive: { backgroundColor: "#22C55E" },
+  devBtnActive: { backgroundColor: "#06C168" },
   devBtnText: { color: "white", fontSize: 11 },
 });

@@ -22,12 +22,19 @@ const LEAFLET_HTML = `
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 24px;
+      font-size: 16px;
     }
-    .driver-marker { background: #3B82F6; border-radius: 50%; padding: 8px; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-    .restaurant-marker { background: #10B981; border-radius: 50%; padding: 8px; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-    .customer-marker { background: #EF4444; border-radius: 50%; padding: 8px; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-    .pickup-marker { background: #F59E0B; border-radius: 50%; padding: 8px; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    .driver-marker, .restaurant-marker, .customer-marker, .pickup-marker {
+      border-radius: 50%; padding: 4px; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .driver-marker { background: #3B82F6; }
+    .driver-marker.live { background: #06C168; width: 36px; height: 36px; font-size: 18px; box-shadow: 0 0 0 6px rgba(16,185,129,0.25), 0 2px 8px rgba(0,0,0,0.3); }
+    .restaurant-marker { background: #06C168; }
+    .customer-marker { background: #EF4444; }
+    .pickup-marker { background: #F59E0B; }
+    .leaflet-marker-icon { transition: transform 0.8s ease-in-out; }
   </style>
 </head>
 <body>
@@ -74,8 +81,8 @@ const LEAFLET_HTML = `
       return L.divIcon({
         className: 'custom-marker',
         html: '<div class="' + type + '-marker">' + emoji + '</div>',
-        iconSize: [44, 44],
-        iconAnchor: [22, 22]
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
       });
     }
 
@@ -88,6 +95,21 @@ const LEAFLET_HTML = `
         .addTo(map);
       if (title) {
         markers[id].bindPopup(title);
+      }
+    }
+
+    function smoothMoveMarker(id, lat, lng, type, title, emoji) {
+      if (markers[id]) {
+        markers[id].setLatLng([lat, lng]);
+      } else {
+        addMarker(id, lat, lng, type, title, emoji);
+      }
+    }
+
+    function panTo(lat, lng, zoom) {
+      if (map) {
+        map.panTo([lat, lng], { animate: true, duration: 0.8 });
+        if (zoom) map.setZoom(zoom);
       }
     }
 
@@ -114,16 +136,20 @@ const LEAFLET_HTML = `
       }
     }
 
-    function addPolyline(id, coordinates, color, width) {
+    function addPolyline(id, coordinates, color, width, dashArray) {
       if (polylines[id]) {
         map.removeLayer(polylines[id]);
       }
       const latlngs = coordinates.map(c => [c.latitude, c.longitude]);
-      polylines[id] = L.polyline(latlngs, {
+      let options = {
         color: color || '#3B82F6',
         weight: width || 4,
         opacity: 0.8
-      }).addTo(map);
+      };
+      if (dashArray) {
+        options.dashArray = dashArray;
+      }
+      polylines[id] = L.polyline(latlngs, options).addTo(map);
     }
 
     function removePolyline(id) {
@@ -133,10 +159,29 @@ const LEAFLET_HTML = `
       }
     }
 
+    function updatePolyline(id, coordinates, color, width, dashArray) {
+      const latlngs = coordinates.map(c => [c.latitude, c.longitude]);
+      if (polylines[id]) {
+        polylines[id].setLatLngs(latlngs);
+      } else {
+        addPolyline(id, coordinates, color, width, dashArray);
+      }
+    }
+
     function fitBounds(coordinates, padding) {
       if (coordinates.length > 0) {
         const bounds = L.latLngBounds(coordinates.map(c => [c.latitude, c.longitude]));
         map.fitBounds(bounds, { padding: [padding || 50, padding || 50] });
+      }
+    }
+
+    function fitBoundsAsym(coordinates, top, right, bottom, left) {
+      if (coordinates.length > 0) {
+        const bounds = L.latLngBounds(coordinates.map(c => [c.latitude, c.longitude]));
+        map.fitBounds(bounds, {
+          paddingTopLeft: [left || 40, top || 40],
+          paddingBottomRight: [right || 40, bottom || 40]
+        });
       }
     }
 
@@ -204,17 +249,57 @@ const OSMMapView = forwardRef(({
     },
     fitToCoordinates: (coordinates, options) => {
       if (webViewRef.current && isReady && coordinates.length > 0) {
-        const padding = options?.edgePadding?.top || 50;
-        webViewRef.current.injectJavaScript(`
-          fitBounds(${JSON.stringify(coordinates)}, ${padding});
-          true;
-        `);
+        const ep = options?.edgePadding;
+        if (ep && (ep.top !== ep.bottom || ep.left !== ep.right)) {
+          webViewRef.current.injectJavaScript(`
+            fitBoundsAsym(${JSON.stringify(coordinates)}, ${ep.top || 40}, ${ep.right || 40}, ${ep.bottom || 40}, ${ep.left || 40});
+            true;
+          `);
+        } else {
+          const padding = ep?.top || 50;
+          webViewRef.current.injectJavaScript(`
+            fitBounds(${JSON.stringify(coordinates)}, ${padding});
+            true;
+          `);
+        }
       }
     },
     setCamera: (camera) => {
       if (webViewRef.current && isReady) {
         webViewRef.current.injectJavaScript(`
           setCenter(${camera.center.latitude}, ${camera.center.longitude}, ${camera.zoom || 15});
+          true;
+        `);
+      }
+    },
+    panTo: (lat, lng, zoom) => {
+      if (webViewRef.current && isReady) {
+        webViewRef.current.injectJavaScript(`
+          panTo(${lat}, ${lng}, ${zoom || 0});
+          true;
+        `);
+      }
+    },
+    removeMarker: (id) => {
+      if (webViewRef.current && isReady) {
+        webViewRef.current.injectJavaScript(`
+          removeMarker('${id}');
+          true;
+        `);
+      }
+    },
+    removePolyline: (id) => {
+      if (webViewRef.current && isReady) {
+        webViewRef.current.injectJavaScript(`
+          removePolyline('${id}');
+          true;
+        `);
+      }
+    },
+    updatePolyline: (id, coordinates, color, width, dashArray) => {
+      if (webViewRef.current && isReady && coordinates.length > 0) {
+        webViewRef.current.injectJavaScript(`
+          updatePolyline('${id}', ${JSON.stringify(coordinates)}, '${color || '#3B82F6'}', ${width || 3}, '${dashArray || ""}');
           true;
         `);
       }
@@ -238,8 +323,10 @@ const OSMMapView = forwardRef(({
   useEffect(() => {
     if (webViewRef.current && isReady && markersProp.length > 0) {
       markersProp.forEach((marker, index) => {
+        const id = marker.id || index;
+        const fn = marker.smooth ? 'smoothMoveMarker' : 'addMarker';
         webViewRef.current.injectJavaScript(`
-          addMarker('${marker.id || index}', ${marker.coordinate.latitude}, ${marker.coordinate.longitude}, '${marker.type || 'customer'}', '${marker.title || ''}', '${marker.emoji || ''}');
+          ${fn}('${id}', ${marker.coordinate.latitude}, ${marker.coordinate.longitude}, '${marker.type || 'customer'}', '${marker.title || ''}', '${marker.emoji || ''}');
           true;
         `);
       });
@@ -251,7 +338,7 @@ const OSMMapView = forwardRef(({
     if (webViewRef.current && isReady && polylinesProp.length > 0) {
       polylinesProp.forEach((polyline, index) => {
         webViewRef.current.injectJavaScript(`
-          addPolyline('${polyline.id || index}', ${JSON.stringify(polyline.coordinates)}, '${polyline.strokeColor || '#3B82F6'}', ${polyline.strokeWidth || 4});
+          addPolyline('${polyline.id || index}', ${JSON.stringify(polyline.coordinates)}, '${polyline.strokeColor || '#3B82F6'}', ${polyline.strokeWidth || 4}, '${polyline.dashArray || ""}');
           true;
         `);
       });
@@ -308,7 +395,7 @@ const OSMMapView = forwardRef(({
         startInLoadingState={true}
         renderLoading={() => (
           <View style={styles.loading}>
-            <ActivityIndicator size="large" color="#10b981" />
+            <ActivityIndicator size="large" color="#06C168" />
           </View>
         )}
         originWhitelist={['*']}

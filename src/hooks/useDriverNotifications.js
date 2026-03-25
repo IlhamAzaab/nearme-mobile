@@ -32,7 +32,7 @@ const useDriverNotifications = (driverId) => {
     try {
       await api.put(`/driver/notifications/${notificationId}/read`);
       setNotifications((prev) =>
-        prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
+        prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
       );
       setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (error) {
@@ -43,7 +43,7 @@ const useDriverNotifications = (driverId) => {
   const markAllAsRead = useCallback(async () => {
     try {
       await api.put('/driver/notifications/read-all', { driverId });
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
     } catch (error) {
       console.warn('[useDriverNotifications] markAllAsRead error:', error.message);

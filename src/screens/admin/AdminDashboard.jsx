@@ -335,7 +335,7 @@ export default function AdminDashboard() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#22c55e"]} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#06C168"]} />
         }
         showsVerticalScrollIndicator={false}
       >
@@ -508,7 +508,7 @@ export default function AdminDashboard() {
                   propsForDots: {
                     r: "4",
                     strokeWidth: "2",
-                    stroke: "#22c55e",
+                    stroke: "#06C168",
                   },
                   propsForBackgroundLines: {
                     strokeDasharray: "",
@@ -616,7 +616,7 @@ export default function AdminDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f0fdf4",
+    backgroundColor: "#EDFBF2",
   },
   scrollView: {
     flex: 1,
@@ -695,13 +695,13 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: "#bbf7d0",
+    borderColor: "#9EEBBE",
   },
   restaurantLogoPlaceholder: {
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -716,7 +716,7 @@ const styles = StyleSheet.create({
   restaurantName: {
     fontSize: 22,
     fontWeight: "bold",
-    color: "#16a34a",
+    color: "#06C168",
   },
   dateText: {
     fontSize: 12,
@@ -735,8 +735,8 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   toggleButtonOpen: {
-    borderColor: "#86efac",
-    backgroundColor: "#f0fdf4",
+    borderColor: "#6EDE9A",
+    backgroundColor: "#EDFBF2",
   },
   toggleButtonClosed: {
     borderColor: "#fca5a5",
@@ -749,7 +749,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   toggleTrackOpen: {
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
   },
   toggleTrackClosed: {
     backgroundColor: "#f87171",
@@ -811,7 +811,7 @@ const styles = StyleSheet.create({
   sectionIndicator: {
     width: 4,
     height: 24,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     borderRadius: 2,
   },
   sectionTitle: {
@@ -825,7 +825,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#f0fdf4",
+    borderBottomColor: "#EDFBF2",
   },
   performanceIcon: {
     width: 48,
@@ -861,7 +861,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   salesValue: {
-    color: "#16a34a",
+    color: "#06C168",
   },
   ordersValue: {
     color: "#2563eb",
@@ -892,7 +892,7 @@ const styles = StyleSheet.create({
   },
   positiveArrow: {
     fontSize: 10,
-    color: "#16a34a",
+    color: "#06C168",
   },
   negativeArrow: {
     fontSize: 10,
@@ -903,7 +903,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   positiveText: {
-    color: "#16a34a",
+    color: "#06C168",
   },
   negativeText: {
     color: "#dc2626",
@@ -925,13 +925,13 @@ const styles = StyleSheet.create({
   },
   lifetimeCardRevenue: {
     flex: 1,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     borderRadius: 20,
     padding: 20,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    shadowColor: "#22c55e",
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -1006,12 +1006,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   periodButtonActive: {
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
   },
   periodButtonInactive: {
-    backgroundColor: "#f0fdf4",
+    backgroundColor: "#EDFBF2",
     borderWidth: 1,
-    borderColor: "#bbf7d0",
+    borderColor: "#9EEBBE",
   },
   periodButtonText: {
     fontSize: 12,
@@ -1077,7 +1077,7 @@ const styles = StyleSheet.create({
     color: "#ea580c",
   },
   availableProductsValue: {
-    color: "#16a34a",
+    color: "#06C168",
   },
   productSubtext: {
     fontSize: 10,
@@ -1160,7 +1160,7 @@ const styles = StyleSheet.create({
   },
   orderItemBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: "#f0fdf4",
+    borderBottomColor: "#EDFBF2",
   },
   orderCustomer: {
     flexDirection: "row",
@@ -1171,7 +1171,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1191,7 +1191,7 @@ const styles = StyleSheet.create({
   orderNumber: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#16a34a",
+    color: "#06C168",
   },
   orderDetails: {
     alignItems: "flex-end",
@@ -1199,7 +1199,7 @@ const styles = StyleSheet.create({
   orderAmount: {
     fontSize: 14,
     fontWeight: "bold",
-    color: "#16a34a",
+    color: "#06C168",
   },
   orderTime: {
     fontSize: 11,
@@ -1247,13 +1247,13 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: "#bbf7d0",
+    borderColor: "#9EEBBE",
   },
   fixedHeaderLogoPlaceholder: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1279,7 +1279,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: "#f0fdf4",
+    backgroundColor: "#EDFBF2",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,

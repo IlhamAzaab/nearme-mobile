@@ -7,9 +7,9 @@ export const Colors = {
   secondaryDark: '#475569',
   secondaryLight: '#94a3b8',
   
-  success: '#22c55e',
-  successDark: '#16a34a',
-  successLight: '#4ade80',
+  success: '#06C168',
+  successDark: '#06C168',
+  successLight: '#06C168',
   
   warning: '#f59e0b',
   warningDark: '#d97706',

@@ -44,7 +44,7 @@ const ADMIN_DRAWER_ITEMS = [
 ];
 
 const statusColors = {
-  active: { bg: "#ECFDF5", text: "#059669" },
+  active: { bg: "#E6F9EE", text: "#06C168" },
   pending: { bg: "#FFF7ED", text: "#D97706" },
   suspended: { bg: "#FFF7ED", text: "#EA580C" },
   rejected: { bg: "#FEF2F2", text: "#DC2626" },
@@ -170,7 +170,7 @@ const AdminManagementScreen = () => {
         <View style={styles.actionsRow}>
           {item.admin_status !== "active" && (
             <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: "#059669" }]}
+              style={[styles.actionBtn, { backgroundColor: "#06C168" }]}
               onPress={() => updateStatus(item.id, "active")}
               disabled={actionLoading === item.id}
             >

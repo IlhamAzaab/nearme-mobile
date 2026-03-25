@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
   customerName: { fontSize: 16, fontWeight: '700', color: '#1a1a1a' },
   address: { fontSize: 14, color: '#6B7280', marginTop: 4 },
   items: { fontSize: 15, color: '#374151' },
-  earnings: { fontSize: 16, fontWeight: '700', color: '#10B981', marginTop: 4 },
+  earnings: { fontSize: 16, fontWeight: '700', color: '#06C168', marginTop: 4 },
   navigateBtn: { backgroundColor: '#3B82F6', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 8 },
   navigateBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

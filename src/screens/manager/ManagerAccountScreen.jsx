@@ -119,13 +119,13 @@ export default function ManagerAccountScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => fetchEarnings(true)}
-            colors={["#059669"]}
+            colors={["#06C168"]}
           />
         }
       >
         {loading ? (
           <View style={styles.loadingBox}>
-            <ActivityIndicator size="large" color="#059669" />
+            <ActivityIndicator size="large" color="#06C168" />
           </View>
         ) : (
           <>
@@ -195,7 +195,7 @@ export default function ManagerAccountScreen() {
 
               {earningsLoading ? (
                 <View style={styles.loadingBox}>
-                  <ActivityIndicator size="large" color="#059669" />
+                  <ActivityIndicator size="large" color="#06C168" />
                 </View>
               ) : (
                 <>
@@ -291,9 +291,9 @@ export default function ManagerAccountScreen() {
                 activeOpacity={0.7}
               >
                 <View
-                  style={[styles.quickLinkIcon, { backgroundColor: "#D1FAE5" }]}
+                  style={[styles.quickLinkIcon, { backgroundColor: "#B8F0D0" }]}
                 >
-                  <Ionicons name="wallet" size={18} color="#059669" />
+                  <Ionicons name="wallet" size={18} color="#06C168" />
                 </View>
                 <Text style={styles.quickLinkText}>Manage Deposits</Text>
                 <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
@@ -459,24 +459,24 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: "#F3F4F6",
   },
-  periodPillActive: { backgroundColor: "#10B981" },
+  periodPillActive: { backgroundColor: "#06C168" },
   periodPillText: { fontSize: 12, fontWeight: "600", color: "#6B7280" },
   periodPillTextActive: { color: "#fff" },
 
   /* Hero Card */
   heroCard: {
-    backgroundColor: "#F0FDF4",
+    backgroundColor: "#EDFBF2",
     marginHorizontal: 16,
     borderRadius: 12,
     padding: 16,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#D1FAE5",
+    borderColor: "#B8F0D0",
   },
   heroLabel: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#059669",
+    color: "#06C168",
     letterSpacing: 0.8,
     textTransform: "uppercase",
     marginBottom: 4,
@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
   heroValue: {
     fontSize: 30,
     fontWeight: "900",
-    color: "#065F46",
+    color: "#04553C",
   },
 
   /* Stats Row */
@@ -542,7 +542,7 @@ const styles = StyleSheet.create({
   },
   formulaTotalLabel: { fontSize: 13, fontWeight: "700", color: "#111827" },
   formulaTotalValue: { fontSize: 13, fontWeight: "700", color: "#111827" },
-  formulaMyShare: { fontSize: 14, fontWeight: "800", color: "#065F46" },
+  formulaMyShare: { fontSize: 14, fontWeight: "800", color: "#04553C" },
 
   /* Quick Links */
   quickLinksSection: {

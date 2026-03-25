@@ -22,7 +22,7 @@ export const NotificationProvider = ({ children }) => {
       title: notification.title || '',
       message: notification.message || '',
       type: notification.type || 'info', // info, success, warning, error, delivery
-      read: false,
+      is_read: false,
       timestamp: new Date().toISOString(),
       data: notification.data || null,
       ...notification,
@@ -37,8 +37,8 @@ export const NotificationProvider = ({ children }) => {
   const markAsRead = useCallback((notificationId) => {
     setNotifications((prev) =>
       prev.map((n) => {
-        if (n.id === notificationId && !n.read) {
-          return { ...n, read: true };
+        if (n.id === notificationId && !n.is_read) {
+          return { ...n, is_read: true };
         }
         return n;
       })
@@ -47,14 +47,14 @@ export const NotificationProvider = ({ children }) => {
   }, []);
 
   const markAllAsRead = useCallback(() => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     setUnreadCount(0);
   }, []);
 
   const removeNotification = useCallback((notificationId) => {
     setNotifications((prev) => {
       const removed = prev.find((n) => n.id === notificationId);
-      if (removed && !removed.read) {
+      if (removed && !removed.is_read) {
         setUnreadCount((c) => Math.max(0, c - 1));
       }
       return prev.filter((n) => n.id !== notificationId);

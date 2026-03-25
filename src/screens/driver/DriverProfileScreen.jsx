@@ -1,4 +1,4 @@
-﻿import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -123,7 +123,7 @@ export default function DriverProfileScreen({ navigation }) {
       <SafeAreaView style={styles.container}>
         <ActivityIndicator
           size="large"
-          color="#1db95b"
+          color="#06C168"
           style={{ marginTop: 40 }}
         />
       </SafeAreaView>
@@ -193,6 +193,13 @@ export default function DriverProfileScreen({ navigation }) {
                   Save & Continue to Onboarding
                 </Text>
               )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.setupLogoutBtn}
+              onPress={handleLogout}
+            >
+              <Text style={styles.setupLogoutText}>Logout</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -278,7 +285,7 @@ export default function DriverProfileScreen({ navigation }) {
               <Text
                 style={{
                   color:
-                    profile?.driver_status === "active" ? "#16a34a" : "#dc2626",
+                    profile?.driver_status === "active" ? "#06C168" : "#dc2626",
                   fontSize: 12,
                   fontWeight: "700",
                 }}
@@ -309,7 +316,7 @@ export default function DriverProfileScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f9fafb" },
-  containerGreen: { flex: 1, backgroundColor: "#1db95b" },
+  containerGreen: { flex: 1, backgroundColor: "#06C168" },
   setupScroll: { flexGrow: 1, padding: 20 },
   setupHeader: { marginBottom: 24, alignItems: "center" },
   setupTitle: {
@@ -344,17 +351,17 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 6 },
   input: {
     borderWidth: 1.5,
-    borderColor: "#d1fae5",
+    borderColor: "#B8F0D0",
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
     color: "#111827",
-    backgroundColor: "#f0fdf4",
+    backgroundColor: "#EDFBF2",
     marginBottom: 16,
   },
   setupBtn: {
-    backgroundColor: "#1db95b",
+    backgroundColor: "#06C168",
     borderRadius: 12,
     paddingVertical: 15,
     alignItems: "center",
@@ -364,7 +371,7 @@ const styles = StyleSheet.create({
   setupBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
   profileScroll: { paddingBottom: 40 },
   profileHeader: {
-    backgroundColor: "#1db95b",
+    backgroundColor: "#06C168",
     paddingTop: 32,
     paddingBottom: 32,
     alignItems: "center",
@@ -435,4 +442,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   logoutText: { fontSize: 15, fontWeight: "700", color: "#dc2626" },
+  setupLogoutBtn: {
+    marginTop: 16,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  setupLogoutText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 });

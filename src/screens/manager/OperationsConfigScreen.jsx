@@ -330,7 +330,7 @@ const OperationsConfigScreen = ({ navigation }) => {
           {/* Banners */}
           {saved && (
             <View style={styles.successBanner}>
-              <Ionicons name="checkmark-circle" size={18} color="#059669" />
+              <Ionicons name="checkmark-circle" size={18} color="#06C168" />
               <Text style={styles.successText}>
                 Configuration saved successfully!
               </Text>
@@ -890,9 +890,9 @@ const styles = StyleSheet.create({
 
   // Banners
   successBanner: {
-    backgroundColor: "#F0FDF4",
+    backgroundColor: "#EDFBF2",
     borderWidth: 1,
-    borderColor: "#BBF7D0",
+    borderColor: "#9EEBBE",
     borderRadius: 12,
     padding: 12,
     flexDirection: "row",

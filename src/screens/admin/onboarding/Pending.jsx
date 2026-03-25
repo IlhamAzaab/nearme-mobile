@@ -74,8 +74,8 @@ export default function Pending() {
           <RefreshControl
             refreshing={checking}
             onRefresh={checkStatus}
-            colors={['#22c55e']}
-            tintColor="#22c55e"
+            colors={['#06C168']}
+            tintColor="#06C168"
           />
         }
       >
@@ -128,7 +128,7 @@ export default function Pending() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: '#EDFBF2',
   },
   scrollContent: {
     flexGrow: 1,
@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
     paddingLeft: 4,
   },
   refreshBtn: {
-    backgroundColor: '#22c55e',
+    backgroundColor: '#06C168',
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 12,

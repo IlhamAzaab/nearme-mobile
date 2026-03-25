@@ -50,7 +50,7 @@ export default function DeliveryMap({
   if (loading || !driverLocation) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#10B981" />
+        <ActivityIndicator size="large" color="#06C168" />
         <Text style={styles.loadingText}>Getting your location...</Text>
       </View>
     );
@@ -94,7 +94,7 @@ export default function DeliveryMap({
   const polylines = routeCoordinates.length > 1 ? [{
     id: 'route',
     coordinates: routeCoordinates,
-    strokeColor: mode === 'pickup' ? '#EF4444' : '#10B981',
+    strokeColor: mode === 'pickup' ? '#EF4444' : '#06C168',
     strokeWidth: 4,
   }] : [];
 
@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#9CA3AF",
   },
   trackingDotActive: {
-    backgroundColor: "#10B981",
+    backgroundColor: "#06C168",
   },
   trackingText: {
     fontSize: 12,

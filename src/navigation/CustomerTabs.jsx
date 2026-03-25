@@ -11,12 +11,17 @@ import NotificationsScreen from "../screens/customer/NotificationsScreen";
 import OrderTrackingScreen from "../screens/customer/OrderTrackingScreen";
 import OrdersScreen from "../screens/customer/OrdersScreen";
 import ProfileScreen from "../screens/customer/ProfileScreen";
+import EditProfileScreen from "../screens/customer/EditProfileScreen";
+import AddressPickerScreen from "../screens/customer/AddressPickerScreen";
+import FavouritesScreen from "../screens/customer/FavouritesScreen";
 import RestaurantFoodsScreen from "../screens/customer/RestaurantFoodsScreen";
+import WebViewScreen from "../screens/common/WebViewScreen";
 
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
 const OrdersStack = createNativeStackNavigator();
 const CartStack = createNativeStackNavigator();
+const ProfileStack = createNativeStackNavigator();
 
 /* ── Nested stacks so the tab bar stays visible on all screens ── */
 
@@ -77,13 +82,27 @@ function CartStackScreen() {
   );
 }
 
+function ProfileStackScreen() {
+  return (
+    <ProfileStack.Navigator
+      screenOptions={{ headerShown: false, animation: "slide_from_bottom" }}
+    >
+      <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} />
+      <ProfileStack.Screen name="EditProfile" component={EditProfileScreen} />
+      <ProfileStack.Screen name="AddressPicker" component={AddressPickerScreen} />
+      <ProfileStack.Screen name="Favourites" component={FavouritesScreen} />
+      <ProfileStack.Screen name="WebView" component={WebViewScreen} />
+    </ProfileStack.Navigator>
+  );
+}
+
 function TabIcon({ label, iconName, focused }) {
   return (
     <View style={styles.tabIconContainer}>
       <Ionicons
         name={iconName}
         size={24}
-        color={focused ? "#1db95b" : "#9ca3af"}
+        color={focused ? "#06C168" : "#9ca3af"}
         style={styles.tabIcon}
       />
       <Text style={[styles.tabLabel, focused && styles.tabLabelFocused]}>
@@ -101,7 +120,7 @@ export default function CustomerTabs() {
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarActiveTintColor: "#1db95b",
+        tabBarActiveTintColor: "#06C168",
         tabBarInactiveTintColor: "#9ca3af",
         animation: "fade",
         tabBarStyle: {
@@ -137,6 +156,13 @@ export default function CustomerTabs() {
             />
           ),
         }}
+        listeners={({ navigation }) => ({
+          tabPress: (e) => {
+            // Reset OrdersStack to root when tab is pressed,
+            // so stale screens like OrderTracking are cleared
+            navigation.navigate("Orders", { screen: "OrdersMain" });
+          },
+        })}
       />
       <Tab.Screen
         name="Cart"
@@ -153,7 +179,7 @@ export default function CustomerTabs() {
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
+        component={ProfileStackScreen}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon
@@ -194,7 +220,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   tabLabelFocused: {
-    color: "#1db95b",
+    color: "#06C168",
     fontWeight: "700",
   },
 });

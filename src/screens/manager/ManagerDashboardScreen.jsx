@@ -123,7 +123,7 @@ export default function ManagerDashboardScreen() {
       <SafeAreaView style={styles.container} edges={["top"]}>
         <ManagerHeader title="Dashboard" />
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#059669" />
+          <ActivityIndicator size="large" color="#06C168" />
         </View>
       </SafeAreaView>
     );
@@ -138,7 +138,7 @@ export default function ManagerDashboardScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => fetchData(false)}
-            colors={["#059669"]}
+            colors={["#06C168"]}
           />
         }
       >
@@ -150,7 +150,7 @@ export default function ManagerDashboardScreen() {
             <View style={styles.heroHeader}>
               <Text style={styles.heroLabel}>TODAY'S EARNINGS</Text>
               <View style={styles.heroIcon}>
-                <Ionicons name="cash-outline" size={20} color="#6EE7B7" />
+                <Ionicons name="cash-outline" size={20} color="#56D68A" />
               </View>
             </View>
             <Text style={styles.heroAmount}>
@@ -286,7 +286,7 @@ export default function ManagerDashboardScreen() {
             </View>
             <View style={styles.legendRow}>
               <View
-                style={[styles.legendDot, { backgroundColor: "#059669" }]}
+                style={[styles.legendDot, { backgroundColor: "#06C168" }]}
               />
               <Text style={styles.legendText}>Earnings</Text>
             </View>
@@ -295,7 +295,7 @@ export default function ManagerDashboardScreen() {
             <MiniBarChart
               data={stats.earningsGraph}
               dataKey="earnings"
-              color="#059669"
+              color="#06C168"
               maxHeight={100}
             />
           ) : (
@@ -341,7 +341,7 @@ export default function ManagerDashboardScreen() {
           activeOpacity={0.7}
           onPress={() => navigation.navigate("Drivers")}
         >
-          <View style={[styles.actionIcon, { backgroundColor: "#059669" }]}>
+          <View style={[styles.actionIcon, { backgroundColor: "#06C168" }]}>
             <Ionicons name="receipt-outline" size={20} color="#fff" />
           </View>
           <View style={styles.actionTextWrap}>
@@ -425,7 +425,7 @@ export default function ManagerDashboardScreen() {
             navigation.navigate("Reports", { screen: "SalesReports" })
           }
         >
-          <View style={[styles.actionIcon, { backgroundColor: "#059669" }]}>
+          <View style={[styles.actionIcon, { backgroundColor: "#06C168" }]}>
             <Ionicons name="trending-up-outline" size={20} color="#fff" />
           </View>
           <View style={styles.actionTextWrap}>
@@ -479,7 +479,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   heroLabel: {
-    color: "#6EE7B7",
+    color: "#56D68A",
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1.5,

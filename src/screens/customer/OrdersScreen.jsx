@@ -1,13 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
+  Easing,
   FlatList,
   Image,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -20,139 +22,48 @@ import {
   getOrderStatus,
   useOrders,
 } from "../../context/OrderContext";
+import { formatETAClockTime } from "../../utils/etaFormatter";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const PRIMARY = "#10B981";
-const PRIMARY_SOFT = "#F0FDF4";
-const TEXT_DARK = "#0F172A";
+const PRIMARY = "#06C168";
+const PRIMARY_DARK = "#06C168";
+const TEXT_DARK = "#111812";
 const TEXT_MUTED = "#64748B";
+const TEXT_GRAY = "#6B7280";
 const BORDER = "#F1F5F9";
 const BG = "#FFFFFF";
 
 const STATUS_CONFIG = {
-  PLACED: {
-    color: "#FEF3C7",
-    textColor: "#D97706",
-    label: "Order Placed",
-    icon: "time-outline",
-  },
-  DRIVER_ACCEPTED: {
-    color: "#DBEAFE",
-    textColor: "#2563EB",
-    label: "Driver Accepted",
-    icon: "checkmark-circle-outline",
-  },
-  RECEIVED: {
-    color: "#F3E8FF",
-    textColor: "#9333EA",
-    label: "Preparing",
-    icon: "restaurant-outline",
-  },
-  PICKED_UP: {
-    color: "#CFFAFE",
-    textColor: "#0891B2",
-    label: "Picked Up",
-    icon: "car-outline",
-  },
-  ON_THE_WAY: {
-    color: "#CFFAFE",
-    textColor: "#0891B2",
-    label: "On the Way",
-    icon: "bicycle-outline",
-  },
-  DELIVERED: {
-    color: "#D1FAE5",
-    textColor: "#059669",
-    label: "Delivered",
-    icon: "checkmark-done-outline",
-  },
-  CANCELLED: {
-    color: "#FEE2E2",
-    textColor: "#DC2626",
-    label: "Cancelled",
-    icon: "close-circle-outline",
-  },
-  REJECTED: {
-    color: "#FEE2E2",
-    textColor: "#DC2626",
-    label: "Rejected",
-    icon: "close-circle-outline",
-  },
-  placed: {
-    color: "#FEF3C7",
-    textColor: "#D97706",
-    label: "Order Placed",
-    icon: "time-outline",
-  },
-  driver_accepted: {
-    color: "#DBEAFE",
-    textColor: "#2563EB",
-    label: "Driver Accepted",
-    icon: "checkmark-circle-outline",
-  },
-  accepted: {
-    color: "#DBEAFE",
-    textColor: "#2563EB",
-    label: "Accepted",
-    icon: "checkmark-circle-outline",
-  },
-  received: {
-    color: "#F3E8FF",
-    textColor: "#9333EA",
-    label: "Preparing",
-    icon: "restaurant-outline",
-  },
-  preparing: {
-    color: "#F3E8FF",
-    textColor: "#9333EA",
-    label: "Preparing",
-    icon: "restaurant-outline",
-  },
-  ready: {
-    color: "#E0E7FF",
-    textColor: "#4F46E5",
-    label: "Ready",
-    icon: "cube-outline",
-  },
-  picked_up: {
-    color: "#CFFAFE",
-    textColor: "#0891B2",
-    label: "Picked Up",
-    icon: "car-outline",
-  },
-  on_the_way: {
-    color: "#CFFAFE",
-    textColor: "#0891B2",
-    label: "On the Way",
-    icon: "bicycle-outline",
-  },
-  delivered: {
-    color: "#D1FAE5",
-    textColor: "#059669",
-    label: "Delivered",
-    icon: "checkmark-done-outline",
-  },
-  cancelled: {
-    color: "#FEE2E2",
-    textColor: "#DC2626",
-    label: "Cancelled",
-    icon: "close-circle-outline",
-  },
-  rejected: {
-    color: "#FEE2E2",
-    textColor: "#DC2626",
-    label: "Rejected",
-    icon: "close-circle-outline",
-  },
+  placed: { bg: "rgba(217,119,6,0.1)", color: "#D97706", label: "PLACED" },
+  pending: { bg: "rgba(234,88,12,0.1)", color: "#EA580C", label: "PENDING" },
+  accepted: { bg: "rgba(37,99,235,0.1)", color: "#2563EB", label: "DRIVER ASSIGNED" },
+  driver_accepted: { bg: "rgba(37,99,235,0.1)", color: "#2563EB", label: "DRIVER ASSIGNED" },
+  driver_assigned: { bg: "rgba(37,99,235,0.1)", color: "#2563EB", label: "DRIVER ASSIGNED" },
+  received: { bg: "rgba(147,51,234,0.1)", color: "#9333EA", label: "PREPARING" },
+  preparing: { bg: "rgba(147,51,234,0.1)", color: "#9333EA", label: "PREPARING" },
+  ready: { bg: "rgba(79,70,229,0.1)", color: "#4F46E5", label: "READY" },
+  picked_up: { bg: "rgba(8,145,178,0.1)", color: "#0891B2", label: "PICKED UP" },
+  on_the_way: { bg: "rgba(5,150,105,0.1)", color: "#06C168", label: "ON THE WAY" },
+  delivered: { bg: "rgba(5,150,105,0.1)", color: "#06C168", label: "DELIVERED" },
+  cancelled: { bg: "rgba(220,38,38,0.1)", color: "#DC2626", label: "CANCELLED" },
+  rejected: { bg: "rgba(220,38,38,0.1)", color: "#DC2626", label: "REJECTED" },
+  // Uppercase variants
+  PLACED: { bg: "rgba(217,119,6,0.1)", color: "#D97706", label: "PLACED" },
+  DRIVER_ACCEPTED: { bg: "rgba(37,99,235,0.1)", color: "#2563EB", label: "DRIVER ASSIGNED" },
+  RECEIVED: { bg: "rgba(147,51,234,0.1)", color: "#9333EA", label: "PREPARING" },
+  PICKED_UP: { bg: "rgba(8,145,178,0.1)", color: "#0891B2", label: "PICKED UP" },
+  ON_THE_WAY: { bg: "rgba(5,150,105,0.1)", color: "#06C168", label: "ON THE WAY" },
+  DELIVERED: { bg: "rgba(5,150,105,0.1)", color: "#06C168", label: "DELIVERED" },
+  CANCELLED: { bg: "rgba(220,38,38,0.1)", color: "#DC2626", label: "CANCELLED" },
+  REJECTED: { bg: "rgba(220,38,38,0.1)", color: "#DC2626", label: "REJECTED" },
 };
 
 // ─── Animated Order Card Wrapper ─────────────────────────────────────────────
 function AnimatedOrderCard({ children, isNew, delay = 0 }) {
   const fadeAnim = useRef(new Animated.Value(isNew ? 0 : 1)).current;
   const slideAnim = useRef(new Animated.Value(isNew ? 30 : 0)).current;
-  const scaleAnim = useRef(new Animated.Value(isNew ? 0.95 : 1)).current;
 
   useEffect(() => {
     if (isNew) {
@@ -169,19 +80,6 @@ function AnimatedOrderCard({ children, isNew, delay = 0 }) {
           delay,
           useNativeDriver: true,
         }),
-        Animated.sequence([
-          Animated.timing(scaleAnim, {
-            toValue: 1.03,
-            duration: 250,
-            delay,
-            useNativeDriver: true,
-          }),
-          Animated.timing(scaleAnim, {
-            toValue: 1,
-            duration: 150,
-            useNativeDriver: true,
-          }),
-        ]),
       ]).start();
     }
   }, [isNew]);
@@ -190,13 +88,171 @@ function AnimatedOrderCard({ children, isNew, delay = 0 }) {
     <Animated.View
       style={{
         opacity: fadeAnim,
-        transform: [{ translateY: slideAnim }, { scale: scaleAnim }],
+        transform: [{ translateY: slideAnim }],
       }}
     >
       {children}
     </Animated.View>
   );
 }
+
+// ─── 6-Segment Progress Steps ────────────────────────────────────────────────
+const ORDER_STEPS = [
+  { key: "placed" },
+  { key: "pending" },
+  { key: "accepted" },
+  { key: "picked_up" },
+  { key: "on_the_way" },
+  { key: "delivered" },
+];
+
+const getStepIndex = (status) => {
+  switch (status) {
+    case "placed": return 0;
+    case "pending":
+    case "received":
+    case "preparing":
+    case "ready": return 1;
+    case "accepted":
+    case "driver_accepted":
+    case "driver_assigned": return 2;
+    case "picked_up": return 3;
+    case "on_the_way": return 4;
+    case "delivered": return 5;
+    default: return 0;
+  }
+};
+
+const getProgressLabel = (status) => {
+  switch (status) {
+    case "placed": return "Order placed";
+    case "pending":
+    case "received":
+    case "preparing": return "Preparing your order";
+    case "ready": return "Ready for pickup";
+    case "accepted":
+    case "driver_accepted":
+    case "driver_assigned": return "Driver assigned";
+    case "picked_up": return "Order picked up";
+    case "on_the_way": return "On the way to you";
+    case "delivered": return "Delivered";
+    default: return "Order placed";
+  }
+};
+
+// ─── Animated Segment (sliding shimmer on active, Uber Eats style) ───────────
+const AnimatedSeg = React.memo(({ active, done }) => {
+  const slideAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (active) {
+      slideAnim.setValue(0);
+      const loop = Animated.loop(
+        Animated.timing(slideAnim, {
+          toValue: 1,
+          duration: 2000,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: false,
+        }),
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      slideAnim.stopAnimation();
+      slideAnim.setValue(0);
+    }
+  }, [active]);
+
+  if (done) {
+    return <View style={[styles.segment, styles.segmentFilled]} />;
+  }
+
+  if (active) {
+    const left = slideAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ["-60%", "100%"],
+    });
+    return (
+      <View style={[styles.segment, { backgroundColor: "#d4f7e2", overflow: "hidden" }]}>
+        <Animated.View
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            width: "60%",
+            left,
+            backgroundColor: "#06C168",
+            borderRadius: 4,
+          }}
+        />
+      </View>
+    );
+  }
+
+  return <View style={[styles.segment, styles.segmentEmpty]} />;
+});
+
+// ─── 6-Segment Progress Bar Component ────────────────────────────────────────
+function SegmentedProgress({ currentStatus }) {
+  const stepIndex = getStepIndex(currentStatus);
+
+  return (
+    <View style={styles.segmentContainer}>
+      <Text style={styles.progressLabel}>{getProgressLabel(currentStatus)}</Text>
+      <View style={styles.segmentRow}>
+        {ORDER_STEPS.map((step, i) => (
+          <AnimatedSeg
+            key={step.key}
+            done={i < stepIndex}
+            active={i === stepIndex}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ─── ETA Helper ──────────────────────────────────────────────────────────────
+const getEstimatedTime = (status, order) => {
+  // Only show ETA after driver accepts
+  const showEtaStatuses = ["accepted", "driver_accepted", "driver_assigned", "received", "preparing", "ready", "picked_up", "on_the_way"];
+  if (!showEtaStatuses.includes(status)) return "";
+
+  const baseMins = order?.estimated_duration_min;
+  if (baseMins && baseMins > 0) {
+    let factor = 1;
+    switch (status) {
+      case "accepted":
+      case "driver_accepted":
+      case "driver_assigned": factor = 0.65; break;
+      case "received":
+      case "preparing":
+      case "ready": factor = 0.5; break;
+      case "picked_up": factor = 0.45; break;
+      case "on_the_way": factor = 0.35; break;
+      default: return "";
+    }
+    const low = Math.max(1, Math.round(baseMins * factor));
+    const high = Math.max(low + 5, Math.round(baseMins * factor * 1.3));
+    const isOnTheWay = status === "on_the_way";
+    return formatETAClockTime(low, isOnTheWay ? low : high, { isOnTheWay });
+  }
+  // Fallback static estimates
+  const fallbacks = {
+    accepted: [10, 15],
+    driver_accepted: [10, 15],
+    driver_assigned: [10, 15],
+    received: [8, 12],
+    preparing: [8, 12],
+    ready: [5, 10],
+    picked_up: [5, 10],
+    on_the_way: [5, 5],
+  };
+  const range = fallbacks[status];
+  if (!range) return "";
+  const isOnTheWay = status === "on_the_way";
+  return formatETAClockTime(range[0], range[1], { isOnTheWay });
+};
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function OrdersScreen({ navigation }) {
@@ -211,31 +267,11 @@ export default function OrdersScreen({ navigation }) {
   } = useOrders();
 
   const [activeTab, setActiveTab] = useState("active");
+  const [pastFilter, setPastFilter] = useState("all");
   const [isLoggedIn, setIsLoggedIn] = useState(true);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
   const flatListRef = useRef(null);
 
-  // Pulse animation for active orders
-  useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 0.3,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    pulse.start();
-    return () => pulse.stop();
-  }, [pulseAnim]);
-
-  // Fetch on every focus: spinner on first visit, silent on subsequent
+  // Fetch on every focus
   const isFirstLoad = useRef(true);
   useFocusEffect(
     useCallback(() => {
@@ -245,7 +281,6 @@ export default function OrdersScreen({ navigation }) {
       } else {
         fetchOrders("silent");
       }
-      // Mark orders as seen when user views this screen
       markOrdersSeen();
     }, [fetchOrders, markOrdersSeen]),
   );
@@ -269,18 +304,19 @@ export default function OrdersScreen({ navigation }) {
   const formatDate = (ts) => {
     if (!ts) return "";
     const d = new Date(ts);
-    const now = new Date();
-    const diffMs = now - d;
-    const diffMins = Math.floor(diffMs / 60000);
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
 
-    if (diffMins < 1) return "Just now";
-    if (diffMins < 60) return `${diffMins} min ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) {
-      return `Today, ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-    }
-    if (diffHours < 48) return "Yesterday";
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  const navigateToOrder = (order) => {
+    navigation.navigate("OrderTracking", { 
+      orderId: order.id,
+      status: getOrderStatus(order),
+      order: order
+    });
   };
 
   const activeOrders = useMemo(
@@ -292,30 +328,40 @@ export default function OrdersScreen({ navigation }) {
     [orders],
   );
 
-  // ─── Active Order Card ──────────────────────────────────────────────────
+  // Filter past orders
+  const filteredPastOrders = useMemo(() => {
+    return pastOrders.filter((order) => {
+      const status = getOrderStatus(order);
+      if (pastFilter === "all") return true;
+      if (pastFilter === "delivered") return status === "delivered";
+      if (pastFilter === "cancelled") return status === "cancelled" || status === "rejected";
+      return true;
+    });
+  }, [pastOrders, pastFilter]);
+
+  // ─── Active Order Card (matches website design) ─────────────────────────
   const renderActiveCard = (order, index) => {
     const status = getOrderStatus(order);
-    const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.PLACED;
+    const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.placed;
     const itemCount = order.order_items?.length || order.items_count || 0;
     const isNew = newOrderIds.has(order.id);
+    const eta = getEstimatedTime(status, order);
 
     return (
       <AnimatedOrderCard key={order.id} isNew={isNew} delay={index * 80}>
         <Pressable
-          onPress={() =>
-            navigation.navigate("OrderTracking", { orderId: order.id })
-          }
+          onPress={() => navigateToOrder(order)}
           style={({ pressed }) => [
             styles.activeCard,
-            isNew && styles.activeCardNew,
-            pressed && { opacity: 0.95, transform: [{ scale: 0.98 }] },
+            pressed && { opacity: 0.95 },
           ]}
         >
-          <View style={styles.activeCardInner}>
-            {/* Restaurant Logo */}
-            {order.restaurant_logo_url ? (
+          {/* Top section: Logo + Info */}
+          <View style={styles.activeCardTop}>
+            {/* Restaurant Logo - Square rounded */}
+            {(order.restaurant_logo_url || order.restaurant_logo) ? (
               <Image
-                source={{ uri: order.restaurant_logo_url }}
+                source={{ uri: order.restaurant_logo_url || order.restaurant_logo }}
                 style={styles.activeLogo}
               />
             ) : (
@@ -326,96 +372,66 @@ export default function OrdersScreen({ navigation }) {
               </View>
             )}
 
+            {/* Order Info */}
             <View style={{ flex: 1, minWidth: 0 }}>
-              {/* Name + Price + NEW Badge */}
+              {/* Restaurant name */}
               <View style={styles.cardRow}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    flex: 1,
-                    gap: 6,
-                  }}
-                >
-                  <Text style={styles.restaurantName} numberOfLines={1}>
-                    {order.restaurant_name || "Restaurant"}
-                  </Text>
-                  {isNew && (
-                    <View style={styles.newBadge}>
-                      <Text style={styles.newBadgeText}>NEW</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.priceActive}>
-                  {formatPrice(order.total_amount)}
+                <Text style={styles.restaurantName} numberOfLines={1}>
+                  {order.restaurant_name || "Restaurant"}
                 </Text>
               </View>
 
-              {/* Date & Items */}
-              <Text style={styles.cardMeta}>
-                {formatDate(order.created_at)} • {itemCount} Item
-                {itemCount !== 1 ? "s" : ""}
+              {/* Order number & items */}
+              <Text style={styles.orderMeta}>
+                Order #{order.order_number || "N/A"} • {itemCount} item{itemCount !== 1 ? "s" : ""}
               </Text>
 
-              {/* Status Badge with pulse */}
-              <View style={styles.statusRow}>
-                <Animated.View
-                  style={[styles.pulseDot, { opacity: pulseAnim }]}
-                />
-                <View
-                  style={[
-                    styles.statusBadge,
-                    { backgroundColor: `${cfg.textColor}15` },
-                  ]}
-                >
-                  <Text style={[styles.statusText, { color: cfg.textColor }]}>
-                    {cfg.label}
-                  </Text>
+              {/* Estimated arrival */}
+              {eta ? (
+                <View style={styles.etaRow}>
+                  <Text style={styles.etaLabel}>Est. arrival: </Text>
+                  <Text style={styles.etaTime}>{eta}</Text>
                 </View>
-              </View>
+              ) : null}
 
-              {/* Track Order Button */}
+              {/* Track Order Link */}
               <Pressable
-                onPress={() =>
-                  navigation.navigate("OrderTracking", { orderId: order.id })
-                }
+                onPress={() => navigateToOrder(order)}
                 style={({ pressed }) => [
-                  styles.trackBtn,
-                  pressed && { opacity: 0.85 },
+                  styles.trackLink,
+                  pressed && { opacity: 0.7 },
                 ]}
               >
-                <Ionicons name="navigate-outline" size={16} color="#fff" />
-                <Text style={styles.trackBtnText}>Track Order</Text>
+                <Text style={styles.trackLinkText}>Track Order →</Text>
               </Pressable>
             </View>
+          </View>
+
+          {/* Bottom section: 6-Segment Progress */}
+          <View style={styles.progressSection}>
+            <SegmentedProgress currentStatus={status} />
           </View>
         </Pressable>
       </AnimatedOrderCard>
     );
   };
 
-  // ─── Past Order Card ─────────────────────────────────────────────────────
+  // ─── Past Order Card (matches website design) ──────────────────────────
   const renderPastCard = (order, index) => {
     const status = getOrderStatus(order);
-    const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.delivered;
+    const isDelivered = status === "delivered";
     const itemCount = order.order_items?.length || order.items_count || 0;
     const isNew = newOrderIds.has(order.id);
 
     return (
       <AnimatedOrderCard key={order.id} isNew={isNew} delay={(index || 0) * 60}>
-        <Pressable
-          onPress={() =>
-            navigation.navigate("OrderTracking", { orderId: order.id })
-          }
-          style={({ pressed }) => [
-            styles.pastCard,
-            pressed && { opacity: 0.95 },
-          ]}
-        >
-          <View style={styles.pastCardInner}>
-            {order.restaurant_logo_url ? (
+        <View style={styles.pastCard}>
+          {/* Card content */}
+          <View style={styles.pastCardTop}>
+            {/* Restaurant Logo - Square */}
+            {(order.restaurant_logo_url || order.restaurant_logo) ? (
               <Image
-                source={{ uri: order.restaurant_logo_url }}
+                source={{ uri: order.restaurant_logo_url || order.restaurant_logo }}
                 style={styles.pastLogo}
               />
             ) : (
@@ -427,47 +443,76 @@ export default function OrdersScreen({ navigation }) {
             )}
 
             <View style={{ flex: 1, minWidth: 0 }}>
+              {/* Name + Delivered/Cancelled badge */}
               <View style={styles.cardRow}>
-                <Text style={styles.restaurantName} numberOfLines={1}>
+                <Text style={styles.pastRestaurantName} numberOfLines={1}>
                   {order.restaurant_name || "Restaurant"}
                 </Text>
-                <Text style={styles.pricePast}>
-                  {formatPrice(order.total_amount)}
-                </Text>
-              </View>
-
-              <Text style={styles.cardMeta}>
-                {formatDate(order.created_at)} • {itemCount} Item
-                {itemCount !== 1 ? "s" : ""}
-              </Text>
-
-              <View style={[styles.cardRow, { marginTop: 10 }]}>
                 <View
-                  style={[styles.pastBadge, { backgroundColor: cfg.color }]}
+                  style={[
+                    styles.pastStatusBadge,
+                    {
+                      backgroundColor: isDelivered
+                        ? "rgba(5,150,105,0.1)"
+                        : "rgba(220,38,38,0.1)",
+                    },
+                  ]}
                 >
                   <Text
-                    style={[styles.pastBadgeText, { color: cfg.textColor }]}
+                    style={[
+                      styles.pastStatusText,
+                      { color: isDelivered ? "#06C168" : "#DC2626" },
+                    ]}
                   >
-                    {cfg.label}
+                    {isDelivered ? "Delivered" : "Cancelled"}
                   </Text>
                 </View>
-                <Pressable
-                  onPress={() => {
-                    if (order.restaurant_id) {
-                      navigation.navigate("RestaurantFoods", {
-                        restaurantId: order.restaurant_id,
-                      });
-                    }
-                  }}
-                  style={styles.reorderBtn}
-                >
-                  <Ionicons name="refresh-outline" size={14} color={PRIMARY} />
-                  <Text style={styles.reorderText}>Reorder</Text>
-                </Pressable>
               </View>
+
+              {/* Date + Price */}
+              <Text style={styles.pastMeta}>
+                {formatDate(order.delivered_at || order.created_at)}{order.total_amount ? " • " : ""}
+                {order.total_amount ? (
+                  <Text style={styles.pastPrice}>
+                    {formatPrice(order.total_amount)}
+                  </Text>
+                ) : null}
+              </Text>
+
+
             </View>
           </View>
-        </Pressable>
+
+          {/* Action buttons */}
+          <View style={styles.pastActions}>
+            <Pressable
+              onPress={() => navigateToOrder(order)}
+              style={({ pressed }) => [
+                styles.pastActionBtn,
+                styles.viewDetailsBtn,
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <Text style={styles.viewDetailsText}>View Details</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                if (order.restaurant_id) {
+                  navigation.navigate("RestaurantFoods", {
+                    restaurantId: order.restaurant_id,
+                  });
+                }
+              }}
+              style={({ pressed }) => [
+                styles.pastActionBtn,
+                styles.reorderBtn,
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <Text style={styles.reorderBtnText}>Reorder</Text>
+            </Pressable>
+          </View>
+        </View>
       </AnimatedOrderCard>
     );
   };
@@ -476,19 +521,17 @@ export default function OrdersScreen({ navigation }) {
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconWrap}>
-        <Ionicons
-          name={activeTab === "active" ? "receipt-outline" : "time-outline"}
-          size={48}
-          color={PRIMARY}
-        />
+        <Text style={{ fontSize: 48 }}>
+          {activeTab === "active" ? "🛵" : "📦"}
+        </Text>
       </View>
       <Text style={styles.emptyTitle}>
-        {activeTab === "active" ? "No active orders" : "No past orders"}
+        {activeTab === "active" ? "No Active Orders" : "No Past Orders"}
       </Text>
       <Text style={styles.emptySubtitle}>
         {activeTab === "active"
-          ? "Hungry? Your delicious journey starts with your first order."
-          : "Your completed orders will appear here."}
+          ? "You don't have any ongoing orders"
+          : "Your order history will appear here"}
       </Text>
       {activeTab === "active" && (
         <Pressable
@@ -508,11 +551,11 @@ export default function OrdersScreen({ navigation }) {
   const renderNotLoggedIn = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconWrap}>
-        <Ionicons name="log-in-outline" size={48} color={PRIMARY} />
+        <Text style={{ fontSize: 48 }}>🍽️</Text>
       </View>
-      <Text style={styles.emptyTitle}>Login Required</Text>
+      <Text style={styles.emptyTitle}>Please Log In</Text>
       <Text style={styles.emptySubtitle}>
-        Please login to view your orders.
+        Sign in to view your orders and track deliveries
       </Text>
       <Pressable
         onPress={() => navigation.navigate("Login")}
@@ -521,7 +564,7 @@ export default function OrdersScreen({ navigation }) {
           pressed && { opacity: 0.85 },
         ]}
       >
-        <Text style={styles.browseBtnText}>Go to Login</Text>
+        <Text style={styles.browseBtnText}>Log In</Text>
       </Pressable>
     </View>
   );
@@ -531,7 +574,17 @@ export default function OrdersScreen({ navigation }) {
     return (
       <SafeAreaView style={styles.page} edges={["top"]}>
         <View style={styles.header}>
+          <Pressable
+            onPress={() => navigation.goBack()}
+            style={({ pressed }) => [
+              styles.headerBtn,
+              pressed && { backgroundColor: "#F1F5F9" },
+            ]}
+          >
+            <Ionicons name="chevron-back" size={22} color={TEXT_DARK} />
+          </Pressable>
           <Text style={styles.headerTitle}>My Orders</Text>
+          <View style={styles.headerBtn} />
         </View>
         {renderNotLoggedIn()}
       </SafeAreaView>
@@ -540,52 +593,64 @@ export default function OrdersScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.page} edges={["top"]}>
-      {/* ── Header ── */}
+      {/* ── Header (matches website) ── */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Orders</Text>
         <Pressable
-          onPress={() => fetchOrders("refresh")}
+          onPress={() => navigation.goBack()}
           style={({ pressed }) => [
             styles.headerBtn,
-            pressed && { backgroundColor: "#E2E8F0" },
+            pressed && { backgroundColor: "#F1F5F9" },
           ]}
         >
-          <Ionicons name="refresh-outline" size={20} color={TEXT_MUTED} />
+          <Ionicons name="chevron-back" size={22} color={TEXT_DARK} />
         </Pressable>
+        <Text style={styles.headerTitle}>My Orders</Text>
+        <View style={styles.headerBtn} />
       </View>
 
-      {/* ── Tabs ── */}
-      <View style={styles.tabsWrap}>
-        <View style={styles.tabsContainer}>
+      {/* ── Tabs (pill toggle like Home page) ── */}
+      <View style={styles.toggleWrap}>
+        <View style={styles.toggleRow}>
           <Pressable
             onPress={() => setActiveTab("active")}
-            style={[styles.tab, activeTab === "active" && styles.tabActive]}
+            style={({ pressed }) => [
+              styles.toggleBtn,
+              activeTab === "active" && styles.toggleActive,
+              pressed && { opacity: 0.8 },
+            ]}
           >
             <Text
-              style={[
-                styles.tabText,
-                activeTab === "active" && styles.tabTextActive,
-              ]}
+              style={
+                activeTab === "active"
+                  ? styles.toggleTextActive
+                  : styles.toggleTextIdle
+              }
             >
-              Active{activeOrders.length > 0 ? ` (${activeOrders.length})` : ""}
+              Active
             </Text>
           </Pressable>
           <Pressable
             onPress={() => setActiveTab("past")}
-            style={[styles.tab, activeTab === "past" && styles.tabActive]}
+            style={({ pressed }) => [
+              styles.toggleBtn,
+              activeTab === "past" && styles.toggleActive,
+              pressed && { opacity: 0.8 },
+            ]}
           >
             <Text
-              style={[
-                styles.tabText,
-                activeTab === "past" && styles.tabTextActive,
-              ]}
+              style={
+                activeTab === "past"
+                  ? styles.toggleTextActive
+                  : styles.toggleTextIdle
+              }
             >
-              Past Orders
-              {pastOrders.length > 0 ? ` (${pastOrders.length})` : ""}
+              Past
             </Text>
           </Pressable>
         </View>
       </View>
+
+
 
       {/* ── Content ── */}
       {loading ? (
@@ -595,73 +660,48 @@ export default function OrdersScreen({ navigation }) {
               key={i}
               style={{
                 backgroundColor: "#fff",
-                borderRadius: 16,
-                padding: 14,
-                flexDirection: "row",
-                gap: 12,
+                borderRadius: 12,
+                padding: 16,
+                borderWidth: 1,
+                borderColor: "#F1F5F9",
               }}
             >
-              <SkeletonBlock width={52} height={52} borderRadius={26} />
-              <View style={{ flex: 1, gap: 8 }}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <SkeletonBlock width="55%" height={16} borderRadius={6} />
-                  <SkeletonBlock width={60} height={16} borderRadius={6} />
+              <View style={{ flexDirection: "row", gap: 14 }}>
+                <SkeletonBlock width={64} height={64} borderRadius={12} />
+                <View style={{ flex: 1, gap: 8 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <SkeletonBlock width="55%" height={16} borderRadius={6} />
+                    <SkeletonBlock width={60} height={20} borderRadius={4} />
+                  </View>
+                  <SkeletonBlock width="70%" height={12} borderRadius={6} />
+                  <SkeletonBlock width="50%" height={12} borderRadius={6} />
+                  <SkeletonBlock width={100} height={14} borderRadius={6} />
                 </View>
-                <SkeletonBlock width="40%" height={12} borderRadius={6} />
-                <SkeletonBlock width={90} height={24} borderRadius={12} />
-                <SkeletonBlock width="100%" height={36} borderRadius={10} />
+              </View>
+              <View style={{ marginTop: 14, gap: 6 }}>
+                <SkeletonBlock width="30%" height={10} borderRadius={4} />
+                <SkeletonBlock width="100%" height={6} borderRadius={3} />
               </View>
             </View>
           ))}
         </View>
       ) : activeTab === "active" ? (
-        /* ── Active Tab: Both ongoing + recent history ── */
+        /* ── Active Orders ── */
         <FlatList
           ref={flatListRef}
-          data={[1]} // single item, we render both sections manually
-          keyExtractor={() => "all"}
-          renderItem={() => (
-            <View>
-              {/* ── Ongoing Delivery ── */}
-              {activeOrders.length > 0 && (
-                <>
-                  <Text style={styles.sectionLabel}>ONGOING DELIVERY</Text>
-                  {activeOrders.map((order, idx) =>
-                    renderActiveCard(order, idx),
-                  )}
-                </>
-              )}
-
-              {/* ── Recent History ── */}
-              {pastOrders.length > 0 && (
-                <>
-                  <Text
-                    style={[
-                      styles.sectionLabel,
-                      activeOrders.length > 0 && { marginTop: 20 },
-                    ]}
-                  >
-                    RECENT HISTORY
-                  </Text>
-                  {pastOrders.map((order, idx) => renderPastCard(order, idx))}
-                </>
-              )}
-
-              {/* Empty state - no orders at all */}
-              {activeOrders.length === 0 &&
-                pastOrders.length === 0 &&
-                renderEmpty()}
-            </View>
-          )}
+          data={activeOrders}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={({ item, index }) => renderActiveCard(item, index)}
           contentContainerStyle={[
             styles.listContent,
-            activeOrders.length === 0 && pastOrders.length === 0 && { flex: 1 },
+            activeOrders.length === 0 && { flex: 1 },
           ]}
+          ListEmptyComponent={renderEmpty}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -673,21 +713,25 @@ export default function OrdersScreen({ navigation }) {
           showsVerticalScrollIndicator={false}
         />
       ) : (
-        /* ── Past Orders Tab: Only past orders ── */
+        /* ── Past Orders ── */
         <FlatList
-          data={pastOrders}
+          data={filteredPastOrders}
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item, index }) => renderPastCard(item, index)}
           contentContainerStyle={[
             styles.listContent,
-            pastOrders.length === 0 && { flex: 1 },
+            filteredPastOrders.length === 0 && { flex: 1 },
           ]}
-          ListHeaderComponent={
-            pastOrders.length > 0 ? (
-              <Text style={styles.sectionLabel}>RECENT HISTORY</Text>
+          ListEmptyComponent={renderEmpty}
+          ListFooterComponent={
+            filteredPastOrders.length > 0 ? (
+              <View style={styles.pastFooter}>
+                <Text style={styles.pastFooterText}>
+                  Showing orders from the last 6 months
+                </Text>
+              </View>
             ) : null
           }
-          ListEmptyComponent={renderEmpty}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -703,258 +747,369 @@ export default function OrdersScreen({ navigation }) {
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Styles (matches website design) ─────────────────────────────────────────
 const styles = StyleSheet.create({
   page: {
     flex: 1,
     backgroundColor: BG,
   },
 
-  // Header
+  // ── Header ──
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: BORDER,
+    borderBottomColor: "#F3F4F6",
+    backgroundColor: "rgba(255,255,255,0.95)",
   },
   headerTitle: {
-    fontSize: 22,
-    fontWeight: "800",
+    fontSize: 18,
+    fontWeight: "700",
     color: TEXT_DARK,
     letterSpacing: -0.3,
+    flex: 1,
+    textAlign: "center",
   },
   headerBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#F8FAFC",
     alignItems: "center",
     justifyContent: "center",
   },
 
-  // Tabs
-  tabsWrap: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+  // ── Toggle Tabs (pill style like Home page) ──
+  toggleWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 6,
+    backgroundColor: BG,
   },
-  tabsContainer: {
+  toggleRow: {
     flexDirection: "row",
-    height: 48,
-    backgroundColor: "#F1F5F9",
-    borderRadius: 24,
-    padding: 4,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 999,
+    padding: 6,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
   },
-  tab: {
+  toggleBtn: {
     flex: 1,
-    borderRadius: 22,
+    height: 44,
+    borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
   },
-  tabActive: {
-    backgroundColor: "#fff",
-    shadowColor: "#000",
+  toggleActive: {
+    backgroundColor: PRIMARY,
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
+    elevation: 3,
+  },
+  toggleTextActive: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 14,
+  },
+  toggleTextIdle: {
+    color: "#64748B",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+
+  // ── Filter Chips ──
+  filterChipsContainer: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: BG,
+  },
+  filterChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  filterChipActive: {
+    backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.2,
     shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
-  tabText: {
+  filterChipText: {
     fontSize: 13,
     fontWeight: "700",
-    color: TEXT_MUTED,
+    color: "#64748B",
   },
-  tabTextActive: {
-    color: PRIMARY,
-  },
-
-  // Section label
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#94A3B8",
-    letterSpacing: 1,
-    marginBottom: 12,
-    paddingHorizontal: 4,
+  filterChipTextActive: {
+    color: "#fff",
   },
 
-  // List
+  // ── List ──
   listContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 100,
   },
 
-  // Active Card
+  // ── Active Order Card ──
   activeCard: {
     backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 12,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: "#F3F4F6",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
-    shadowRadius: 12,
+    shadowRadius: 8,
     elevation: 2,
+    overflow: "hidden",
   },
-  activeCardInner: {
+  activeCardTop: {
     flexDirection: "row",
     gap: 14,
-  },
-  activeCardNew: {
-    borderColor: PRIMARY,
-    borderWidth: 1.5,
-    shadowColor: PRIMARY,
-    shadowOpacity: 0.12,
+    padding: 16,
   },
   activeLogo: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "#F1F5F9",
-    borderWidth: 1,
-    borderColor: BORDER,
+    width: 64,
+    height: 64,
+    borderRadius: 12,
+    backgroundColor: "#F3F4F6",
+    overflow: "hidden",
   },
 
-  // Past Card
-  pastCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: BORDER,
-  },
-
-  // NEW badge
-  newBadge: {
-    backgroundColor: PRIMARY,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 999,
-  },
-  newBadgeText: {
-    color: "#fff",
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-
-  pastCardInner: {
-    flexDirection: "row",
-    gap: 14,
-  },
-  pastLogo: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#F1F5F9",
-  },
-
-  // Shared
+  // ── Card Shared ──
   logoFallback: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: PRIMARY,
+    backgroundColor: "#F3F4F6",
   },
   logoFallbackText: {
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: "800",
-    color: "#fff",
+    color: TEXT_GRAY,
   },
   cardRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
   },
   restaurantName: {
-    fontSize: 15,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+    flex: 1,
+    marginRight: 8,
+  },
+
+  // ── Status Badge ──
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  statusBadgeText: {
+    fontSize: 10,
     fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+
+  // ── Order Meta ──
+  orderMeta: {
+    fontSize: 13,
+    color: TEXT_GRAY,
+    marginTop: 4,
+  },
+
+  // ── ETA Row ──
+  etaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+  },
+  etaLabel: {
+    fontSize: 13,
+    color: TEXT_GRAY,
+  },
+  etaTime: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  // ── Track Order Link ──
+  trackLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(6,193,104,0.1)",
+  },
+  trackLinkText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: PRIMARY,
+    letterSpacing: 0.2,
+  },
+
+  // ── Progress Section ──
+  progressSection: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#F3F4F6",
+  },
+  progressLabel: {
+    fontSize: 12,
+    color: TEXT_GRAY,
+    marginBottom: 8,
+  },
+  segmentContainer: {
+  },
+  segmentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  segment: {
+    flex: 1,
+    height: 6,
+    borderRadius: 4,
+    marginHorizontal: 2,
+  },
+  segmentFilled: {
+    backgroundColor: "#2ecc71",
+  },
+  segmentEmpty: {
+    backgroundColor: "#e0e0e0",
+  },
+
+  // ── Past Order Card ──
+  pastCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#F3F4F6",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
+    overflow: "hidden",
+  },
+  pastCardTop: {
+    flexDirection: "row",
+    gap: 14,
+    padding: 16,
+  },
+  pastLogo: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    backgroundColor: "#F3F4F6",
+    overflow: "hidden",
+  },
+  pastRestaurantName: {
+    fontSize: 17,
+    fontWeight: "700",
     color: TEXT_DARK,
     flex: 1,
     marginRight: 8,
   },
-  priceActive: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: PRIMARY,
-  },
-  pricePast: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#94A3B8",
-  },
-  cardMeta: {
-    fontSize: 13,
-    color: TEXT_MUTED,
-    marginTop: 2,
-  },
-
-  // Status
-  statusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 10,
-  },
-  pulseDot: {
-    width: 8,
-    height: 8,
+  pastStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 4,
-    backgroundColor: PRIMARY,
   },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  statusText: {
-    fontSize: 11,
+  pastStatusText: {
+    fontSize: 10,
     fontWeight: "800",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  pastMeta: {
+    fontSize: 13,
+    color: TEXT_GRAY,
+    marginTop: 4,
+  },
+  pastPrice: {
+    fontWeight: "600",
+    color: "#111827",
+  },
+  pastItemsList: {
+    marginTop: 8,
+    gap: 2,
+  },
+  pastItemRow: {
+    fontSize: 13,
+    color: "#6B7280",
+    fontWeight: "500",
   },
 
-  // Track button
-  trackBtn: {
+  // ── Past Action Buttons ──
+  pastActions: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderTopColor: "#F9FAFB",
+    padding: 12,
+    gap: 12,
+  },
+  pastActionBtn: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: PRIMARY,
-    marginTop: 12,
+    borderRadius: 10,
+    gap: 6,
   },
-  trackBtnText: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "800",
+  viewDetailsBtn: {
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
-
-  // Past badge & reorder
-  pastBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  pastBadgeText: {
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  reorderBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  reorderText: {
+  viewDetailsText: {
     fontSize: 13,
     fontWeight: "700",
-    color: PRIMARY,
+    color: TEXT_DARK,
+  },
+  reorderBtn: {
+    backgroundColor: PRIMARY,
+  },
+  reorderBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
 
-  // Empty
+  // ── Past Footer ──
+  pastFooter: {
+    paddingVertical: 32,
+    alignItems: "center",
+  },
+  pastFooterText: {
+    fontSize: 13,
+    color: "#9CA3AF",
+    fontWeight: "500",
+  },
+
+  // ── Empty State ──
   emptyContainer: {
     flex: 1,
     alignItems: "center",
@@ -963,54 +1118,42 @@ const styles = StyleSheet.create({
     paddingBottom: 60,
   },
   emptyIconWrap: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: PRIMARY_SOFT,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "#FFF7ED",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 20,
   },
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: TEXT_DARK,
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#111827",
     marginBottom: 6,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: TEXT_MUTED,
+    color: TEXT_GRAY,
     textAlign: "center",
     lineHeight: 20,
-    maxWidth: 240,
+    maxWidth: 260,
   },
   browseBtn: {
-    marginTop: 24,
+    marginTop: 28,
     paddingHorizontal: 32,
     paddingVertical: 14,
     borderRadius: 999,
     backgroundColor: PRIMARY,
     shadowColor: PRIMARY,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
   browseBtnText: {
     color: "#fff",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-
-  // Loading
-  loadingWrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-  },
-  loadingText: {
-    fontSize: 14,
-    color: TEXT_MUTED,
+    fontSize: 15,
+    fontWeight: "700",
   },
 });

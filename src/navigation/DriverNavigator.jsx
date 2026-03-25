@@ -47,7 +47,7 @@ function TabIcon({ label, focused }) {
       <Ionicons
         name={getIconName()}
         size={24}
-        color={focused ? "#1db95b" : "#9ca3af"}
+        color={focused ? "#06C168" : "#9ca3af"}
         style={styles.tabIcon}
       />
       <Text style={[styles.tabLabel, focused && styles.tabLabelFocused]}>
@@ -65,7 +65,7 @@ function DriverTabs() {
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarActiveTintColor: "#1db95b",
+        tabBarActiveTintColor: "#06C168",
         tabBarInactiveTintColor: "#9ca3af",
         tabBarStyle: {
           ...styles.tabBar,
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   tabLabelFocused: {
-    color: "#1db95b",
+    color: "#06C168",
     fontWeight: "700",
   },
 });

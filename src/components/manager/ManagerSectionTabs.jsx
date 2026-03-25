@@ -65,7 +65,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F6",
   },
   tabActive: {
-    backgroundColor: "#059669",
+    backgroundColor: "#06C168",
   },
   tabText: {
     fontSize: 13,

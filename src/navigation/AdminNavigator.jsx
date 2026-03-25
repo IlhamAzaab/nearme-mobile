@@ -28,7 +28,7 @@ const Stack = createNativeStackNavigator();
 function AdminLoadingScreen() {
   return (
     <View style={styles.loadingContainer}>
-      <ActivityIndicator size="large" color="#1db95b" />
+      <ActivityIndicator size="large" color="#06C168" />
       <Text style={styles.loadingText}>Checking account status...</Text>
     </View>
   );

@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { useIsFocused } from "@react-navigation/native";
@@ -126,7 +126,7 @@ export default function DriverDepositsScreen({ navigation }) {
   const getStatusColors = (status) => {
     switch (status) {
       case "approved":
-        return { bg: "#dcfce7", text: "#16a34a" };
+        return { bg: "#dcfce7", text: "#06C168" };
       case "pending":
         return { bg: "#fef9c3", text: "#ca8a04" };
       case "rejected":
@@ -141,7 +141,7 @@ export default function DriverDepositsScreen({ navigation }) {
       <SafeAreaView style={s.container}>
         <ActivityIndicator
           size="large"
-          color="#1db95b"
+          color="#06C168"
           style={{ marginTop: 40 }}
         />
       </SafeAreaView>
@@ -167,7 +167,7 @@ export default function DriverDepositsScreen({ navigation }) {
               setRefreshing(true);
               fetchData();
             }}
-            colors={["#1db95b"]}
+            colors={["#06C168"]}
           />
         }
       >
@@ -175,7 +175,7 @@ export default function DriverDepositsScreen({ navigation }) {
         <View style={s.balanceCard}>
           <Text style={s.balanceLabel}>Pending Deposit (Owed to Manager)</Text>
           <Text style={s.balanceAmount}>
-            ₹{Number(balance?.pending_deposit || 0).toFixed(2)}
+            ?{Number(balance?.pending_deposit || 0).toFixed(2)}
           </Text>
           <Text style={s.balanceSubtext}>LKR</Text>
 
@@ -184,7 +184,7 @@ export default function DriverDepositsScreen({ navigation }) {
             <View style={s.breakdownRow}>
               <Text style={s.breakdownLabel}>In Process:</Text>
               <Text style={s.breakdownAmount}>
-                ₹
+                ?
                 {history
                   .filter((d) => d.status === "pending")
                   .reduce((sum, d) => sum + Number(d.amount || 0), 0)
@@ -194,7 +194,7 @@ export default function DriverDepositsScreen({ navigation }) {
             <View style={s.breakdownRow}>
               <Text style={s.breakdownLabel}>Available to Submit:</Text>
               <Text style={s.breakdownAmount}>
-                ₹
+                ?
                 {(
                   Number(balance?.pending_deposit || 0) -
                   history
@@ -245,7 +245,7 @@ export default function DriverDepositsScreen({ navigation }) {
                 </View>
                 <View style={s.historyContent}>
                   <Text style={s.historyAmount}>
-                    ₹{Number(item.amount).toFixed(2)}
+                    ?{Number(item.amount).toFixed(2)}
                   </Text>
                   <Text style={s.historyDate}>
                     {new Date(item.created_at).toLocaleDateString()} at{" "}
@@ -300,7 +300,7 @@ export default function DriverDepositsScreen({ navigation }) {
                       setProofFile(null);
                     }}
                   >
-                    <Text style={s.modalClose}>✕</Text>
+                    <Text style={s.modalClose}>?</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -314,7 +314,7 @@ export default function DriverDepositsScreen({ navigation }) {
                   <View style={s.infoRow}>
                     <Text style={s.infoLabel}>Total Owed:</Text>
                     <Text style={s.infoValue}>
-                      ₹{Number(balance?.pending_deposit || 0).toFixed(2)}
+                      ?{Number(balance?.pending_deposit || 0).toFixed(2)}
                     </Text>
                   </View>
                   <View style={s.infoRow}>
@@ -322,7 +322,7 @@ export default function DriverDepositsScreen({ navigation }) {
                       In Process:
                     </Text>
                     <Text style={[s.infoValue, { color: "#ca8a04" }]}>
-                      ₹
+                      ?
                       {history
                         .filter((d) => d.status === "pending")
                         .reduce((sum, d) => sum + Number(d.amount || 0), 0)
@@ -330,11 +330,11 @@ export default function DriverDepositsScreen({ navigation }) {
                     </Text>
                   </View>
                   <View style={s.infoRow}>
-                    <Text style={[s.infoLabel, { color: "#16a34a" }]}>
+                    <Text style={[s.infoLabel, { color: "#06C168" }]}>
                       Available to Submit:
                     </Text>
-                    <Text style={[s.infoValue, { color: "#16a34a" }]}>
-                      ₹
+                    <Text style={[s.infoValue, { color: "#06C168" }]}>
+                      ?
                       {(
                         Number(balance?.pending_deposit || 0) -
                         history
@@ -614,14 +614,14 @@ const s = StyleSheet.create({
   },
   input: {
     borderWidth: 1.5,
-    borderColor: "#d1fae5",
+    borderColor: "#B8F0D0",
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 14,
     fontSize: 20,
     fontWeight: "700",
     color: "#111816",
-    backgroundColor: "#f0fdf4",
+    backgroundColor: "#EDFBF2",
     marginBottom: 20,
   },
   filePickerBtn: {
