@@ -12,6 +12,7 @@ import DriverEarningsScreen from "../screens/driver/DriverEarningsScreen";
 import DriverMapScreen from "../screens/driver/DriverMapScreen";
 import DriverNotificationsScreen from "../screens/driver/DriverNotificationsScreen";
 import DriverPendingScreen from "../screens/driver/DriverPendingScreen";
+import DriverAccountProfileScreen from "../screens/driver/DriverAccountProfileScreen";
 import DriverProfileScreen from "../screens/driver/DriverProfileScreen";
 import DriverWithdrawalsScreen from "../screens/driver/DriverWithdrawalsScreen";
 import OnboardingStep1Screen from "../screens/driver/onboarding/OnboardingStep1Screen";
@@ -156,6 +157,10 @@ export default function DriverNavigator() {
         component={DriverNotificationsScreen}
       />
       <Stack.Screen name="History" component={DeliveryHistoryScreen} />
+      <Stack.Screen
+        name="DriverAccountProfile"
+        component={DriverAccountProfileScreen}
+      />
       <Stack.Screen name="DriverProfile" component={DriverProfileScreen} />
       <Stack.Screen
         name="DriverWithdrawals"

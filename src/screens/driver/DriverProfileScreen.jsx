@@ -12,7 +12,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
-import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
 import { API_URL } from "../../config/env";
 
 export default function DriverProfileScreen({ navigation }) {
@@ -99,25 +98,6 @@ export default function DriverProfileScreen({ navigation }) {
     ]);
   };
 
-  const toggleDriverStatus = async () => {
-    try {
-      const token = await AsyncStorage.getItem("token");
-      const newStatus =
-        profile?.driver_status === "active" ? "offline" : "active";
-      const res = await fetch(`${API_URL}/driver/status`, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (res.ok) {
-        setProfile((prev) => ({ ...prev, driver_status: newStatus }));
-      }
-    } catch {}
-  };
-
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -130,185 +110,96 @@ export default function DriverProfileScreen({ navigation }) {
     );
   }
 
-  // Profile Setup View
-  if (!isProfileCompleted) {
+  if (isProfileCompleted) {
     return (
       <SafeAreaView style={styles.containerGreen}>
-        <ScrollView
-          contentContainerStyle={styles.setupScroll}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.setupHeader}>
-            <Text style={styles.setupTitle}>Complete Your Profile</Text>
-            <Text style={styles.setupSubtitle}>
-              Create your login credentials to get started
-            </Text>
-          </View>
-          <View style={styles.setupCard}>
-            <Text style={styles.setupGreeting}>
-              Welcome, {profile?.full_name || "Driver"}!
-            </Text>
-            <Text style={styles.setupInfo}>{profile?.email}</Text>
-
-            <Text style={styles.label}>Username</Text>
-            <TextInput
-              style={styles.input}
-              value={username}
-              onChangeText={setUsername}
-              placeholder="Choose a username"
-              placeholderTextColor="#9ca3af"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Create a password"
-              placeholderTextColor="#9ca3af"
-              secureTextEntry
-            />
-
-            <Text style={styles.label}>Confirm Password</Text>
-            <TextInput
-              style={styles.input}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="Confirm your password"
-              placeholderTextColor="#9ca3af"
-              secureTextEntry
-            />
-
-            <TouchableOpacity
-              style={[styles.setupBtn, saving && styles.setupBtnDisabled]}
-              onPress={handleSetupProfile}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.setupBtnText}>
-                  Save & Continue to Onboarding
-                </Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.setupLogoutBtn}
-              onPress={handleLogout}
-            >
-              <Text style={styles.setupLogoutText}>Logout</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+        <View style={styles.completedWrap}>
+          <Text style={styles.completedTitle}>Profile Setup Completed</Text>
+          <Text style={styles.completedSubtitle}>
+            Your first-login setup is already done. Continue to your dashboard.
+          </Text>
+          <TouchableOpacity
+            style={styles.setupBtn}
+            onPress={() => navigation.replace("DriverTabs")}
+          >
+            <Text style={styles.setupBtnText}>Go to Dashboard</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.setupLogoutBtn} onPress={handleLogout}>
+            <Text style={styles.setupLogoutText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
 
-  // Full Profile View
+  // First-login profile setup view
   return (
-    <SafeAreaView style={styles.container}>
-      <DriverScreenHeader
-        title="Profile"
-        rightIcon="settings"
-        onBackPress={() => navigation.goBack()}
-        onRightPress={() => {}}
-      />
-      <ScrollView contentContainerStyle={styles.profileScroll}>
-        {/* Personal Info Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Personal Information</Text>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Full Name</Text>
-            <Text style={styles.infoValue}>{profile?.full_name || "-"}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Username</Text>
-            <Text style={styles.infoValue}>{profile?.username || "-"}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Email</Text>
-            <Text style={styles.infoValue}>{profile?.email || "-"}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Phone</Text>
-            <Text style={styles.infoValue}>{profile?.phone_number || "-"}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>NIC Number</Text>
-            <Text style={styles.infoValue}>{profile?.nic_number || "-"}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Address</Text>
-            <Text style={styles.infoValue}>{profile?.address || "-"}</Text>
-          </View>
+    <SafeAreaView style={styles.containerGreen}>
+      <ScrollView
+        contentContainerStyle={styles.setupScroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.setupHeader}>
+          <Text style={styles.setupTitle}>Complete Your Profile</Text>
+          <Text style={styles.setupSubtitle}>
+            Create your login credentials to get started
+          </Text>
         </View>
+        <View style={styles.setupCard}>
+          <Text style={styles.setupGreeting}>
+            Welcome, {profile?.full_name || "Driver"}!
+          </Text>
+          <Text style={styles.setupInfo}>{profile?.email}</Text>
 
-        {/* Work Info Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Work Information</Text>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Working Time</Text>
-            <Text style={styles.infoValue}>{profile?.working_time || "-"}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Vehicle Number</Text>
-            <Text style={styles.infoValue}>
-              {profile?.vehicle_number || "-"}
-            </Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Vehicle Type</Text>
-            <Text style={styles.infoValue}>{profile?.vehicle_type || "-"}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Status</Text>
-            <View
-              style={[
-                styles.statusBadge,
-                {
-                  backgroundColor:
-                    profile?.driver_status === "active" ? "#dcfce7" : "#fee2e2",
-                },
-              ]}
-            >
-              <Text
-                style={{
-                  color:
-                    profile?.driver_status === "active" ? "#06C168" : "#dc2626",
-                  fontSize: 12,
-                  fontWeight: "700",
-                }}
-              >
-                {profile?.driver_status || "offline"}
+          <Text style={styles.label}>Username</Text>
+          <TextInput
+            style={styles.input}
+            value={username}
+            onChangeText={setUsername}
+            placeholder="Choose a username"
+            placeholderTextColor="#9ca3af"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          <Text style={styles.label}>Password</Text>
+          <TextInput
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Create a password"
+            placeholderTextColor="#9ca3af"
+            secureTextEntry
+          />
+
+          <Text style={styles.label}>Confirm Password</Text>
+          <TextInput
+            style={styles.input}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            placeholder="Confirm your password"
+            placeholderTextColor="#9ca3af"
+            secureTextEntry
+          />
+
+          <TouchableOpacity
+            style={[styles.setupBtn, saving && styles.setupBtnDisabled]}
+            onPress={handleSetupProfile}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.setupBtnText}>
+                Save & Continue to Onboarding
               </Text>
-            </View>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Joined</Text>
-            <Text style={styles.infoValue}>
-              {profile?.created_at
-                ? new Date(profile.created_at).toLocaleDateString()
-                : "-"}
-            </Text>
-          </View>
-        </View>
+            )}
+          </TouchableOpacity>
 
-        {/* Logout */}
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.setupLogoutBtn} onPress={handleLogout}>
+            <Text style={styles.setupLogoutText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -369,6 +260,28 @@ const styles = StyleSheet.create({
   },
   setupBtnDisabled: { opacity: 0.6 },
   setupBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  completedWrap: {
+    flex: 1,
+    margin: 20,
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completedTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#111827",
+    textAlign: "center",
+  },
+  completedSubtitle: {
+    marginTop: 10,
+    fontSize: 14,
+    color: "#4b5563",
+    textAlign: "center",
+    lineHeight: 20,
+  },
   profileScroll: { paddingBottom: 40 },
   profileHeader: {
     backgroundColor: "#06C168",

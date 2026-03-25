@@ -746,7 +746,7 @@ export default function DashboardScreen({ navigation }) {
         <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.profileButton}
-            onPress={() => navigation.navigate("DriverProfile")}
+            onPress={() => navigation.navigate("DriverAccountProfile")}
           >
             <View style={styles.avatarContainer}>
               {driverProfile?.profile_picture ? (
