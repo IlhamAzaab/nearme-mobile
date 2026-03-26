@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 
 const ACCESS_TOKEN_KEY = "token";
 const REFRESH_TOKEN_KEY = "refreshToken";
@@ -9,20 +10,45 @@ const USER_EMAIL_KEY = "userEmail";
 const PROFILE_COMPLETED_KEY = "profileCompleted";
 
 export async function getAccessToken() {
+  try {
+    const secureToken = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+    if (secureToken) return secureToken;
+  } catch {
+    // Ignore secure store read failures and fallback to AsyncStorage.
+  }
+
   return AsyncStorage.getItem(ACCESS_TOKEN_KEY);
 }
 
-export async function getRefreshToken() {
-  return AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+async function setAccessToken(token) {
+  if (!token) return;
+
+  try {
+    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, String(token));
+  } catch {
+    // Fallback to AsyncStorage if secure store is unavailable.
+    await AsyncStorage.setItem(ACCESS_TOKEN_KEY, String(token));
+    return;
+  }
+
+  // Remove any older token copy from AsyncStorage to reduce exposure.
+  await AsyncStorage.removeItem(ACCESS_TOKEN_KEY);
+}
+
+async function clearAccessToken() {
+  await Promise.allSettled([
+    SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
+    AsyncStorage.removeItem(ACCESS_TOKEN_KEY),
+  ]);
 }
 
 export async function persistAuthSession(session = {}, options = {}) {
   const writes = [];
 
-  if (session.token) writes.push([ACCESS_TOKEN_KEY, String(session.token)]);
-  if (session.refreshToken) {
-    writes.push([REFRESH_TOKEN_KEY, String(session.refreshToken)]);
+  if (session.token) {
+    await setAccessToken(session.token);
   }
+
   if (session.role) writes.push([ROLE_KEY, String(session.role)]);
   if (session.userId != null)
     writes.push([USER_ID_KEY, String(session.userId)]);
@@ -42,11 +68,14 @@ export async function persistAuthSession(session = {}, options = {}) {
   if (writes.length) {
     await AsyncStorage.multiSet(writes);
   }
+
+  // Remove legacy refresh token if it exists from older app builds.
+  await AsyncStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
 export async function clearAuthSession() {
+  await clearAccessToken();
   await AsyncStorage.multiRemove([
-    ACCESS_TOKEN_KEY,
     REFRESH_TOKEN_KEY,
     ROLE_KEY,
     USER_ID_KEY,

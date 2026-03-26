@@ -14,12 +14,13 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 
 export default function CompleteProfileScreen({ navigation, route }) {
   const { userId, accessToken } = route.params || {};
 
   const [formData, setFormData] = useState({
-    username: "",
+    name: "",
     phone: "",
     address: "",
     city: "",
@@ -33,11 +34,31 @@ export default function CompleteProfileScreen({ navigation, route }) {
   const triggerShake = () => {
     shakeX.setValue(0);
     Animated.sequence([
-      Animated.timing(shakeX, { toValue: -10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: -8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 0, duration: 60, useNativeDriver: true }),
+      Animated.timing(shakeX, {
+        toValue: -10,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 10,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: -8,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 8,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 0,
+        duration: 60,
+        useNativeDriver: true,
+      }),
     ]).start();
   };
 
@@ -58,7 +79,12 @@ export default function CompleteProfileScreen({ navigation, route }) {
   const handleSubmit = async () => {
     setError("");
 
-    if (!formData.username.trim() || !formData.phone.trim() || !formData.address.trim() || !formData.city.trim()) {
+    if (
+      !formData.name.trim() ||
+      !formData.phone.trim() ||
+      !formData.address.trim() ||
+      !formData.city.trim()
+    ) {
       setError("All fields are required");
       triggerShake();
       return;
@@ -73,9 +99,17 @@ export default function CompleteProfileScreen({ navigation, route }) {
     setLoading(true);
 
     try {
+      const effectiveAccessToken = accessToken || (await getAccessToken());
+      if (!effectiveAccessToken) {
+        setError("Session expired. Please login again.");
+        setLoading(false);
+        triggerShake();
+        return;
+      }
+
       // 1) Get email from backend
       const headers = {};
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+      headers.Authorization = `Bearer ${effectiveAccessToken}`;
 
       const userRes = await fetch(
         `${API_BASE_URL}/auth/user-email?userId=${encodeURIComponent(userId)}`,
@@ -96,12 +130,13 @@ export default function CompleteProfileScreen({ navigation, route }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId,
-          username: formData.username.trim(),
+          username: formData.name.trim(),
+          full_name: formData.name.trim(),
           email: userData.email,
           phone: formData.phone.trim(),
           address: formData.address.trim(),
           city: formData.city.trim(),
-          access_token: accessToken || null,
+          access_token: effectiveAccessToken,
         }),
       });
 
@@ -120,7 +155,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
       navigation.navigate("VerifyOtp", {
         userId,
         phone: formData.phone.trim(),
-        accessToken: accessToken || null,
+        accessToken: effectiveAccessToken,
       });
     } catch (err) {
       console.error("Profile completion error:", err);
@@ -154,7 +189,9 @@ export default function CompleteProfileScreen({ navigation, route }) {
                 <Text style={styles.headerIcon}>👤</Text>
               </View>
               <Text style={styles.appTitle}>Complete Your Profile</Text>
-              <Text style={styles.appSubtitle}>Just a few details to get you started</Text>
+              <Text style={styles.appSubtitle}>
+                Just a few details to get you started
+              </Text>
             </View>
 
             {/* Card */}
@@ -169,22 +206,24 @@ export default function CompleteProfileScreen({ navigation, route }) {
                 </View>
               )}
 
-              {/* Username */}
-              <Text style={styles.label}>Username *</Text>
+              {/* Name */}
+              <Text style={styles.label}>Name *</Text>
               <View style={styles.inputWrap}>
                 <Text style={styles.inputIcon}>👤</Text>
                 <TextInput
-                  value={formData.username}
-                  onChangeText={(v) => handleChange("username", v)}
-                  placeholder="Choose a username"
+                  value={formData.name}
+                  onChangeText={(v) => handleChange("name", v)}
+                  placeholder="Enter your full name"
                   placeholderTextColor="#9CA3AF"
-                  autoCapitalize="none"
+                  autoCapitalize="words"
                   style={styles.input}
                 />
               </View>
 
               {/* Phone */}
-              <Text style={[styles.label, { marginTop: 12 }]}>Phone Number *</Text>
+              <Text style={[styles.label, { marginTop: 12 }]}>
+                Phone Number *
+              </Text>
               <View style={styles.inputWrap}>
                 <Text style={styles.inputIcon}>📱</Text>
                 <TextInput
@@ -197,10 +236,14 @@ export default function CompleteProfileScreen({ navigation, route }) {
                   style={styles.input}
                 />
               </View>
-              {!!phoneError && <Text style={styles.fieldError}>{phoneError}</Text>}
+              {!!phoneError && (
+                <Text style={styles.fieldError}>{phoneError}</Text>
+              )}
 
               {/* Address */}
-              <Text style={[styles.label, { marginTop: 12 }]}>Delivery Address *</Text>
+              <Text style={[styles.label, { marginTop: 12 }]}>
+                Delivery Address *
+              </Text>
               <View style={styles.inputWrap}>
                 <Text style={styles.inputIcon}>📍</Text>
                 <TextInput

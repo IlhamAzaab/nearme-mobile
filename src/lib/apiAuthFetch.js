@@ -3,8 +3,6 @@ import { API_URL } from "../config/env";
 import {
   clearAuthSession,
   getAccessToken,
-  getRefreshToken,
-  persistAuthSession,
 } from "./authStorage";
 
 const NETWORK_MESSAGES = [
@@ -19,15 +17,23 @@ const NETWORK_MESSAGES = [
 const AUTH_BYPASS_PATHS = [
   "/auth/login",
   "/auth/signup",
+  "/auth/verify-email",
   "/auth/verify-token",
   "/auth/verify-otp",
-  "/auth/refresh-token",
+  "/auth/resend-verification-email",
   "/auth/check-email-verified",
 ];
 
 let initialized = false;
 let authFailureHandler = null;
-let refreshPromise = null;
+
+const EXPLICIT_AUTH_FAILURE_CODES = new Set([
+  "auth_token_invalid",
+  "auth_token_expired",
+  "invalid_token",
+  "token_invalid",
+  "token_expired",
+]);
 
 function normalizeUrl(url) {
   if (!url) return "";
@@ -68,52 +74,40 @@ function toRequest(input, init = {}) {
   };
 }
 
-function isNetworkError(error) {
-  const msg = String(error?.message || "").toLowerCase();
-  return NETWORK_MESSAGES.some((m) => msg.includes(m.toLowerCase()));
-}
-
 function setPlatformHeader(headers) {
   if (!headers.has("x-client-platform")) {
     headers.set("x-client-platform", "react-native");
   }
 }
 
-async function refreshAccessToken(nativeFetch) {
-  if (!refreshPromise) {
-    refreshPromise = (async () => {
-      const refreshToken = await getRefreshToken();
-      const headers = new Headers({ "Content-Type": "application/json" });
-      setPlatformHeader(headers);
+function isExplicitAuthFailureMessage(message = "") {
+  const normalized = String(message || "").toLowerCase();
+  return (
+    normalized.includes("invalid or expired token") ||
+    normalized.includes("jwt expired") ||
+    normalized.includes("invalid token") ||
+    normalized.includes("token expired")
+  );
+}
 
-      const response = await nativeFetch(
-        `${normalizeUrl(API_BASE_URL)}/auth/refresh-token`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify(refreshToken ? { refreshToken } : {}),
-        },
-      );
-
-      if (!response.ok) {
-        return { ok: false, status: response.status };
-      }
-
-      const data = await response.json();
-      await persistAuthSession(data);
-      return { ok: true, status: response.status };
-    })().finally(() => {
-      refreshPromise = null;
-    });
+async function shouldForceLogoutFor401(response) {
+  try {
+    const body = await response.clone().json().catch(() => null);
+    const code = String(body?.code || "").trim().toLowerCase();
+    const message = String(body?.message || "");
+    return (
+      (code && EXPLICIT_AUTH_FAILURE_CODES.has(code)) ||
+      isExplicitAuthFailureMessage(message)
+    );
+  } catch {
+    return false;
   }
-
-  return refreshPromise;
 }
 
 async function onAuthFailure() {
   await clearAuthSession();
   if (typeof authFailureHandler === "function") {
-    await authFailureHandler({ reason: "refresh_failed" });
+    await authFailureHandler({ reason: "invalid_or_expired_token" });
   }
 }
 
@@ -161,33 +155,13 @@ export function initializeApiAuthFetch() {
       return response;
     }
 
-    try {
-      const refreshResult = await refreshAccessToken(nativeFetch);
-      if (!refreshResult.ok) {
-        if (refreshResult.status === 401 || refreshResult.status === 403) {
-          await onAuthFailure();
-        }
-        return response;
-      }
-    } catch (error) {
-      if (isNetworkError(error)) {
-        return response;
-      }
-      await onAuthFailure();
+    const shouldLogout = await shouldForceLogoutFor401(response);
+    if (!shouldLogout) {
       return response;
     }
 
-    const retryHeaders = new Headers(requestInit.headers || {});
-    setPlatformHeader(retryHeaders);
-    const latestToken = await getAccessToken();
-    if (latestToken) {
-      retryHeaders.set("Authorization", `Bearer ${latestToken}`);
-    }
-
-    return nativeFetch(url, {
-      ...requestInit,
-      headers: retryHeaders,
-    });
+    await onAuthFailure();
+    return response;
   };
 
   initialized = true;

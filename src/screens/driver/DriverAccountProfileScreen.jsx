@@ -90,14 +90,22 @@ export default function DriverAccountProfileScreen({ navigation }) {
             <Ionicons name="person" size={26} color="#fff" />
           </View>
           <View style={styles.heroContent}>
-            <Text style={styles.heroName}>{profile?.full_name || "Driver"}</Text>
-            <Text style={styles.heroUsername}>@ {profile?.username || "-"}</Text>
+            <Text style={styles.heroName}>
+              {profile?.full_name || "Driver"}
+            </Text>
+            <Text style={styles.heroUsername}>
+              @ {profile?.username || "-"}
+            </Text>
           </View>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Personal Information</Text>
-          <InfoRow label="Full Name" value={profile?.full_name} icon="person-outline" />
+          <InfoRow
+            label="Full Name"
+            value={profile?.full_name}
+            icon="person-outline"
+          />
           <InfoRow label="Email" value={profile?.email} icon="mail-outline" />
           <InfoRow
             label="Phone Number"
@@ -110,7 +118,10 @@ export default function DriverAccountProfileScreen({ navigation }) {
           <Text style={styles.cardTitle}>Work Information</Text>
           <InfoRow
             label="Working Time"
-            value={WORKING_TIME_LABELS[profile?.working_time] || profile?.working_time}
+            value={
+              WORKING_TIME_LABELS[profile?.working_time] ||
+              profile?.working_time
+            }
             icon="time-outline"
           />
           <InfoRow
@@ -238,7 +249,12 @@ const styles = StyleSheet.create({
   },
   infoTextWrap: { flex: 1 },
   infoLabel: { fontSize: 13, color: "#64748b" },
-  infoValue: { fontSize: 22, fontWeight: "800", color: "#0f172a", marginTop: 1 },
+  infoValue: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0f172a",
+    marginTop: 1,
+  },
   statusBadge: {
     alignSelf: "flex-start",
     borderRadius: 8,

@@ -124,7 +124,10 @@ export default function DriverProfileScreen({ navigation }) {
           >
             <Text style={styles.setupBtnText}>Go to Dashboard</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.setupLogoutBtn} onPress={handleLogout}>
+          <TouchableOpacity
+            style={styles.setupLogoutBtn}
+            onPress={handleLogout}
+          >
             <Text style={styles.setupLogoutText}>Logout</Text>
           </TouchableOpacity>
         </View>
@@ -196,7 +199,10 @@ export default function DriverProfileScreen({ navigation }) {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.setupLogoutBtn} onPress={handleLogout}>
+          <TouchableOpacity
+            style={styles.setupLogoutBtn}
+            onPress={handleLogout}
+          >
             <Text style={styles.setupLogoutText}>Logout</Text>
           </TouchableOpacity>
         </View>

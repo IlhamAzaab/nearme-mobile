@@ -66,18 +66,12 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // shake animation
   const shakeX = useRef(new Animated.Value(0)).current;
-
-  const canSubmit = useMemo(
-    () => email.trim() && password.trim() && agreedToTerms,
-    [email, password, agreedToTerms],
-  );
 
   const triggerShake = () => {
     shakeX.setValue(0);
@@ -114,12 +108,6 @@ export default function LoginScreen({ navigation }) {
     if (!email.trim() || !password.trim()) {
       triggerShake();
       Alert.alert("Missing fields", "Please enter email and password.");
-      return;
-    }
-
-    if (!agreedToTerms) {
-      triggerShake();
-      Alert.alert("Terms & Conditions", "Please agree to the Terms & Conditions to continue.");
       return;
     }
 
@@ -251,7 +239,13 @@ export default function LoginScreen({ navigation }) {
               {/* Meezo SVG Logo */}
               <View style={styles.logoWrap}>
                 <Svg width={280} height={280} viewBox="0 0 1080 1080">
-                  <Rect x="0" y="0" width="1080" height="1080" fill="transparent" />
+                  <Rect
+                    x="0"
+                    y="0"
+                    width="1080"
+                    height="1080"
+                    fill="transparent"
+                  />
                   <G>
                     {/* Z letter — black */}
                     <Path
@@ -286,7 +280,9 @@ export default function LoginScreen({ navigation }) {
                     </G>
                   </G>
                 </Svg>
-                <Text style={styles.appSubtitle}>Your favorite food, fast.</Text>
+                <Text style={styles.appSubtitle}>
+                  Your favorite food, fast.
+                </Text>
               </View>
             </LinearGradient>
 
@@ -354,35 +350,12 @@ export default function LoginScreen({ navigation }) {
                   </Pressable>
                 </View>
 
-                {/* Terms & Conditions Checkbox */}
-                <Pressable
-                  style={styles.checkboxRow}
-                  onPress={() => setAgreedToTerms((v) => !v)}
-                >
-                  <View style={[styles.checkbox, agreedToTerms && styles.checkboxChecked]}>
-                    {agreedToTerms && <Text style={styles.checkmark}>✓</Text>}
-                  </View>
-                  <Text style={styles.checkboxText}>
-                    I agree to the{" "}
-                    <Text
-                      style={styles.termsLink}
-                      onPress={() => navigation.navigate("WebView", {
-                        url: "https://lucent-bombolone-2fa396.netlify.app",
-                        title: "Terms & Conditions"
-                      })}
-                    >
-                      Terms & Conditions
-                    </Text>
-                  </Text>
-                </Pressable>
-
                 {/* Login Button */}
                 <Pressable
                   onPress={handleLogin}
                   disabled={isLoading}
                   style={({ pressed }) => [
                     styles.loginBtn,
-                    !agreedToTerms && styles.loginBtnDisabled,
                     (pressed || isLoading) && {
                       opacity: 0.88,
                       transform: [{ scale: 0.985 }],
@@ -541,44 +514,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  /* Checkbox */
-  checkboxRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 18,
-    paddingHorizontal: 4,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: "#D1D5DB",
-    backgroundColor: "#F7F8FA",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-  },
-  checkboxChecked: {
-    backgroundColor: "#06C168",
-    borderColor: "#06C168",
-  },
-  checkmark: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  checkboxText: {
-    fontSize: 14,
-    color: "#6B7280",
-    flex: 1,
-  },
-  termsLink: {
-    color: "#06C168",
-    fontWeight: "700",
-    textDecorationLine: "underline",
-  },
-
   /* Login button */
   loginBtn: {
     marginTop: 24,
@@ -589,10 +524,6 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
     elevation: 6,
-  },
-  loginBtnDisabled: {
-    opacity: 0.6,
-    shadowOpacity: 0.1,
   },
   loginBtnGradient: {
     height: 56,
