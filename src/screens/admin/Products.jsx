@@ -1,8 +1,7 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -154,7 +153,6 @@ export default function Products() {
 
   const foods = productsQuery.data || [];
   const loading = productsQuery.isLoading && !productsQuery.data;
-  const error = productsQuery.error?.message || null;
 
   const handleDelete = async (foodId) => {
     Alert.alert(
@@ -478,7 +476,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
     is_available: true,
   });
 
-  const [error, setError] = useState(null);
+  const [, setError] = useState(null);
 
   const availableTimes = ["breakfast", "lunch", "dinner"];
 
@@ -553,7 +551,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: [ImagePicker.MediaType.Images],
+        mediaTypes: [ImagePicker.MediaTypeOptions.Images],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -850,7 +848,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                 keyboardType="numeric"
               />
               <Text style={modalStyles.helperText}>
-                Optional. Leave empty if there's no special offer price.
+                Optional. Leave empty if there&apos;s no special offer price.
               </Text>
             </View>
 

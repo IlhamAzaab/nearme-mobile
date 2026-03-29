@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -30,7 +29,7 @@ const MEEZO_LOGO_XML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108
 
 export default function VerifyOtpScreen({ navigation, route }) {
   const { refreshAuthState, applyAuthSession } = useAuth();
-  const { userId, phone, accessToken } = route.params || {};
+  const { userId, phone } = route.params || {};
 
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState("");
@@ -38,6 +37,15 @@ export default function VerifyOtpScreen({ navigation, route }) {
   const [resendTimer, setResendTimer] = useState(60);
   const [resending, setResending] = useState(false);
   const [verified, setVerified] = useState(false);
+
+  const normalizeAuthPayload = (payload = {}) => {
+    const root = payload && typeof payload === "object" ? payload : {};
+    const nestedData =
+      root?.data && typeof root.data === "object" ? root.data : null;
+    const nestedSession =
+      root?.session && typeof root.session === "object" ? root.session : null;
+    return nestedSession || nestedData || root;
+  };
 
   const inputRefs = useRef([]);
 
@@ -139,6 +147,7 @@ export default function VerifyOtpScreen({ navigation, route }) {
       });
 
       const data = await res.json().catch(() => ({}));
+      const session = normalizeAuthPayload(data);
 
       if (!res.ok) {
         setError(data.message || "Verification failed");
@@ -157,11 +166,26 @@ export default function VerifyOtpScreen({ navigation, route }) {
       }
 
       // Initialize push notifications
-      const authToken = data?.token || data?.access_token || data?.accessToken;
+      const persistedToken = sessionApplied?.accessToken || null;
+      const authToken =
+        persistedToken ||
+        session?.token ||
+        session?.access_token ||
+        session?.accessToken ||
+        session?.authToken ||
+        null;
       if (authToken) {
         pushNotificationService.initialize(authToken).catch((err) => {
           console.warn("Push notification init error:", err);
         });
+      } else {
+        console.error(
+          "[AuthDebug] OTP verified but token missing in response",
+          {
+            payloadKeys:
+              data && typeof data === "object" ? Object.keys(data) : [],
+          },
+        );
       }
 
       setLoading(false);

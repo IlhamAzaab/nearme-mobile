@@ -1,56 +1,57 @@
-import React, { useState, useEffect } from 'react';
+import { useNavigation } from "@react-navigation/native";
+import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Modal,
   FlatList,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
-import { API_URL } from '../../../config/env';
-import { getAccessToken } from '../../../lib/authStorage';
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { API_URL } from "../../../config/env";
+import { getAccessToken } from "../../../lib/authStorage";
 
 const SRI_LANKAN_BANKS = [
-  'Bank of Ceylon',
-  'Commercial Bank of Ceylon',
-  'Sampath Bank',
-  'DFCC Bank',
-  'Seylan Bank',
-  'Nations Trust Bank',
-  'Pan Asia Bank',
-  'Hatton National Bank',
-  'Indian Bank',
-  'Sri Lanka Savings Bank',
-  'Axis Bank',
-  'ICICI Bank',
-  'HSBC Bank',
-  'Citibank',
-  'Standard Chartered Bank',
-  'Amana Bank',
-  'Warehouse Finance Company',
-  'ACME Capital',
+  "Bank of Ceylon",
+  "Commercial Bank of Ceylon",
+  "Sampath Bank",
+  "DFCC Bank",
+  "Seylan Bank",
+  "Nations Trust Bank",
+  "Pan Asia Bank",
+  "Hatton National Bank",
+  "Indian Bank",
+  "Sri Lanka Savings Bank",
+  "Axis Bank",
+  "ICICI Bank",
+  "HSBC Bank",
+  "Citibank",
+  "Standard Chartered Bank",
+  "Amana Bank",
+  "Warehouse Finance Company",
+  "ACME Capital",
   "People's Bank",
-  'Cooperative Rural Bank',
+  "Cooperative Rural Bank",
 ];
 
 // Step Progress Bar Component
 function StepProgress({ currentStep, totalSteps }) {
-  const steps = ['Personal', 'Restaurant', 'Bank', 'Contract', 'Review'];
+  const steps = ["Personal", "Restaurant", "Bank", "Contract", "Review"];
   const percentage = Math.round((currentStep / totalSteps) * 100);
 
   return (
     <View style={progressStyles.container}>
       <View style={progressStyles.header}>
-        <Text style={progressStyles.stepText}>Step {currentStep} of {totalSteps}</Text>
+        <Text style={progressStyles.stepText}>
+          Step {currentStep} of {totalSteps}
+        </Text>
         <Text style={progressStyles.percentText}>{percentage}% Complete</Text>
       </View>
 
@@ -97,74 +98,74 @@ const progressStyles = StyleSheet.create({
     marginBottom: 24,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 8,
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
   },
   percentText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#06C168',
+    fontWeight: "500",
+    color: "#06C168",
   },
   barContainer: {
     height: 10,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 5,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   barFill: {
-    height: '100%',
-    backgroundColor: '#06C168',
+    height: "100%",
+    backgroundColor: "#06C168",
     borderRadius: 5,
   },
   stepsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginTop: 16,
   },
   stepItem: {
-    alignItems: 'center',
+    alignItems: "center",
     flex: 1,
   },
   stepCircle: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   stepCompleted: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
   },
   stepCurrent: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderWidth: 4,
-    borderColor: '#9EEBBE',
+    borderColor: "#9EEBBE",
   },
   stepPending: {
-    backgroundColor: '#d1d5db',
+    backgroundColor: "#d1d5db",
   },
   checkmark: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   stepNumber: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontWeight: "600",
+    color: "#6b7280",
   },
   stepNumberCurrent: {
-    color: '#ffffff',
+    color: "#ffffff",
   },
   stepLabel: {
     fontSize: 10,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 4,
   },
 });
@@ -173,15 +174,15 @@ export default function Step3() {
   const navigation = useNavigation();
 
   const [form, setForm] = useState({
-    accountHolderName: '',
-    bankName: '',
-    branch: '',
-    accountNumber: '',
-    accountNumberConfirm: '',
+    accountHolderName: "",
+    bankName: "",
+    branch: "",
+    accountNumber: "",
+    accountNumberConfirm: "",
   });
 
   const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [filteredBanks, setFilteredBanks] = useState(SRI_LANKAN_BANKS);
 
@@ -189,7 +190,7 @@ export default function Step3() {
   useEffect(() => {
     if (searchTerm) {
       const filtered = SRI_LANKAN_BANKS.filter((bank) =>
-        bank.toLowerCase().includes(searchTerm.toLowerCase())
+        bank.toLowerCase().includes(searchTerm.toLowerCase()),
       );
       setFilteredBanks(filtered);
     } else {
@@ -204,13 +205,13 @@ export default function Step3() {
   const handleSubmit = async () => {
     // Validate all required fields
     if (!form.accountHolderName || !form.bankName || !form.accountNumber) {
-      Alert.alert('Validation Error', 'All fields are required');
+      Alert.alert("Validation Error", "All fields are required");
       return;
     }
 
     // Validate account numbers match
     if (form.accountNumber !== form.accountNumberConfirm) {
-      Alert.alert('Validation Error', 'Account numbers do not match');
+      Alert.alert("Validation Error", "Account numbers do not match");
       return;
     }
 
@@ -219,9 +220,9 @@ export default function Step3() {
       const token = await getAccessToken();
 
       const res = await fetch(`${API_URL}/restaurant-onboarding/step-3`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
@@ -234,21 +235,21 @@ export default function Step3() {
 
       const data = await res.json();
       if (!res.ok) {
-        Alert.alert('Error', data?.message || 'Failed to save bank details');
+        Alert.alert("Error", data?.message || "Failed to save bank details");
         return;
       }
-      navigation.navigate('AdminOnboardingStep4');
+      navigation.navigate("AdminOnboardingStep4");
     } catch (err) {
-      console.error('Step3 submit error', err);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      console.error("Step3 submit error", err);
+      Alert.alert("Error", "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleSelectBank = (bank) => {
-    updateField('bankName', bank);
-    setSearchTerm('');
+    updateField("bankName", bank);
+    setSearchTerm("");
     setShowDropdown(false);
   };
 
@@ -266,13 +267,13 @@ export default function Step3() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Background Decorations */}
       <View style={styles.bgDecoration1} />
       <View style={styles.bgDecoration2} />
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         <ScrollView
@@ -304,7 +305,9 @@ export default function Step3() {
                 <TextInput
                   style={styles.input}
                   value={form.accountHolderName}
-                  onChangeText={(value) => updateField('accountHolderName', value)}
+                  onChangeText={(value) =>
+                    updateField("accountHolderName", value)
+                  }
                   placeholder="Enter account holder name"
                   placeholderTextColor="#9ca3af"
                 />
@@ -326,7 +329,7 @@ export default function Step3() {
                       !form.bankName && styles.selectPlaceholder,
                     ]}
                   >
-                    {form.bankName || 'Select your bank'}
+                    {form.bankName || "Select your bank"}
                   </Text>
                   <Text style={styles.dropdownIcon}>▼</Text>
                 </View>
@@ -340,7 +343,7 @@ export default function Step3() {
                 <TextInput
                   style={styles.input}
                   value={form.branch}
-                  onChangeText={(value) => updateField('branch', value)}
+                  onChangeText={(value) => updateField("branch", value)}
                   placeholder="Enter branch name"
                   placeholderTextColor="#9ca3af"
                 />
@@ -354,7 +357,7 @@ export default function Step3() {
                 <TextInput
                   style={styles.input}
                   value={form.accountNumber}
-                  onChangeText={(value) => updateField('accountNumber', value)}
+                  onChangeText={(value) => updateField("accountNumber", value)}
                   placeholder="Enter account number"
                   placeholderTextColor="#9ca3af"
                   keyboardType="number-pad"
@@ -370,7 +373,9 @@ export default function Step3() {
                 <TextInput
                   style={styles.input}
                   value={form.accountNumberConfirm}
-                  onChangeText={(value) => updateField('accountNumberConfirm', value)}
+                  onChangeText={(value) =>
+                    updateField("accountNumberConfirm", value)
+                  }
                   placeholder="Re-enter account number"
                   placeholderTextColor="#9ca3af"
                   keyboardType="number-pad"
@@ -385,7 +390,9 @@ export default function Step3() {
               form.accountNumber !== form.accountNumberConfirm && (
                 <View style={styles.warningBox}>
                   <Text style={styles.warningIcon}>⚠️</Text>
-                  <Text style={styles.warningText}>Account numbers do not match</Text>
+                  <Text style={styles.warningText}>
+                    Account numbers do not match
+                  </Text>
                 </View>
               )}
 
@@ -399,7 +406,10 @@ export default function Step3() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+                style={[
+                  styles.submitButton,
+                  loading && styles.submitButtonDisabled,
+                ]}
                 onPress={handleSubmit}
                 disabled={loading}
                 activeOpacity={0.8}
@@ -456,7 +466,7 @@ export default function Step3() {
                 autoFocus
               />
               {searchTerm.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchTerm('')}>
+                <TouchableOpacity onPress={() => setSearchTerm("")}>
                   <Text style={styles.clearIcon}>✕</Text>
                 </TouchableOpacity>
               )}
@@ -475,7 +485,9 @@ export default function Step3() {
               <View style={styles.emptyState}>
                 <Text style={styles.emptyIcon}>🔍</Text>
                 <Text style={styles.emptyTitle}>No banks found</Text>
-                <Text style={styles.emptySubtitle}>Try a different search term</Text>
+                <Text style={styles.emptySubtitle}>
+                  Try a different search term
+                </Text>
               </View>
             )}
           </View>
@@ -488,25 +500,25 @@ export default function Step3() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
   },
   bgDecoration1: {
-    position: 'absolute',
+    position: "absolute",
     top: 100,
     left: -50,
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
   bgDecoration2: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 100,
     right: -80,
     width: 250,
     height: 250,
     borderRadius: 125,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   scrollView: {
     flex: 1,
@@ -515,7 +527,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 24,
     paddingTop: 16,
   },
@@ -523,11 +535,11 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#ffffff",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
@@ -538,20 +550,20 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#ffffff',
+    fontWeight: "bold",
+    color: "#ffffff",
     marginBottom: 8,
   },
   headerSubtitle: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
+    color: "rgba(255, 255, 255, 0.9)",
+    textAlign: "center",
   },
   formCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 20,
     padding: 20,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -562,47 +574,47 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
     marginBottom: 8,
   },
   inputWrapper: {
     borderWidth: 2,
-    borderColor: '#dcfce7',
+    borderColor: "#dcfce7",
     borderRadius: 12,
-    backgroundColor: '#EDFBF2',
-    overflow: 'hidden',
+    backgroundColor: "#EDFBF2",
+    overflow: "hidden",
   },
   input: {
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#111827',
+    color: "#111827",
   },
   selectContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
   selectText: {
     fontSize: 16,
-    color: '#111827',
+    color: "#111827",
     flex: 1,
   },
   selectPlaceholder: {
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
   dropdownIcon: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     marginLeft: 8,
   },
   warningBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fef3c7',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fef3c7",
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
@@ -613,105 +625,105 @@ const styles = StyleSheet.create({
   },
   warningText: {
     fontSize: 14,
-    color: '#92400e',
+    color: "#92400e",
     flex: 1,
   },
   buttonRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
     marginTop: 8,
   },
   backButton: {
     flex: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 12,
     paddingVertical: 16,
-    alignItems: 'center',
+    alignItems: "center",
   },
   backButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
+    fontWeight: "600",
+    color: "#374151",
   },
   submitButton: {
     flex: 2,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderRadius: 12,
     paddingVertical: 16,
-    shadowColor: '#06C168',
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: '#6EDE9A',
+    backgroundColor: "#6EDE9A",
     shadowOpacity: 0.1,
   },
   buttonContent: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
   },
   buttonLoading: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
     gap: 8,
   },
   submitButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   buttonArrow: {
     fontSize: 18,
-    color: '#ffffff',
+    color: "#ffffff",
     marginLeft: 8,
   },
 
   // Modal Styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
   },
   modalContent: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '80%',
+    maxHeight: "80%",
     paddingBottom: 32,
   },
   modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: "#e5e7eb",
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#111827',
+    fontWeight: "bold",
+    color: "#111827",
   },
   modalClose: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
   },
   modalCloseText: {
     fontSize: 16,
-    color: '#6b7280',
+    color: "#6b7280",
   },
   searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f3f4f6',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f3f4f6",
     marginHorizontal: 20,
     marginVertical: 16,
     borderRadius: 12,
@@ -725,31 +737,31 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#111827',
+    color: "#111827",
   },
   clearIcon: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: "#9ca3af",
     padding: 4,
   },
   bankList: {
     paddingHorizontal: 12,
   },
   bankItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 16,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: "#f3f4f6",
   },
   bankIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#dcfce7',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#dcfce7",
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 14,
   },
   bankIconText: {
@@ -757,11 +769,11 @@ const styles = StyleSheet.create({
   },
   bankItemText: {
     fontSize: 16,
-    color: '#111827',
-    fontWeight: '500',
+    color: "#111827",
+    fontWeight: "500",
   },
   emptyState: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingVertical: 48,
   },
   emptyIcon: {
@@ -770,12 +782,12 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontWeight: "600",
+    color: "#6b7280",
     marginBottom: 4,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
 });

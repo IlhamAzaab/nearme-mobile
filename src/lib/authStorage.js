@@ -53,30 +53,108 @@ const USER_EMAIL_KEY = "userEmail";
 const PROFILE_COMPLETED_KEY = "profileCompleted";
 const SESSION_META_KEY = "authSessionMeta";
 
+function buildSessionCandidates(session = {}) {
+  const root = session && typeof session === "object" ? session : {};
+  const queue = [root];
+  const seen = new Set(queue);
+
+  // Traverse nested auth payload wrappers with a hard cap to avoid cycles.
+  while (queue.length > 0 && seen.size < 12) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
+
+    const nested = [
+      current.data,
+      current.session,
+      current.payload,
+      current.result,
+      current.auth,
+      current.userSession,
+    ];
+
+    for (const candidate of nested) {
+      if (!candidate || typeof candidate !== "object") continue;
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      queue.push(candidate);
+    }
+  }
+
+  return Array.from(seen);
+}
+
 function resolveSessionToken(session = {}) {
-  if (session?.token) return String(session.token);
-  if (session?.access_token) return String(session.access_token);
-  if (session?.accessToken) return String(session.accessToken);
+  const candidates = buildSessionCandidates(session);
+
+  for (const candidate of candidates) {
+    if (candidate?.token) return String(candidate.token);
+    if (candidate?.access_token) return String(candidate.access_token);
+    if (candidate?.accessToken) return String(candidate.accessToken);
+    if (candidate?.authToken) return String(candidate.authToken);
+    if (candidate?.jwt) return String(candidate.jwt);
+  }
+
   return "";
 }
 
 function resolveSessionRole(session = {}) {
-  const role =
-    session?.role ??
-    session?.userRole ??
-    session?.user?.role ??
-    session?.profile?.role;
+  const candidates = buildSessionCandidates(session);
+
+  let role = null;
+  for (const candidate of candidates) {
+    role =
+      candidate?.role ??
+      candidate?.userRole ??
+      candidate?.user?.role ??
+      candidate?.profile?.role;
+    if (role) break;
+  }
 
   if (!role) return null;
   return String(role).trim().toLowerCase();
 }
 
 function resolveSessionUserId(session = {}) {
-  return session?.userId ?? session?.user_id ?? session?.user?.id ?? null;
+  const candidates = buildSessionCandidates(session);
+  for (const candidate of candidates) {
+    const userId =
+      candidate?.userId ?? candidate?.user_id ?? candidate?.user?.id ?? null;
+    if (userId != null) return userId;
+  }
+  return null;
 }
 
 function resolveSessionUserName(session = {}) {
-  return session?.userName ?? session?.username ?? session?.user?.name ?? "";
+  const candidates = buildSessionCandidates(session);
+  for (const candidate of candidates) {
+    const userName =
+      candidate?.userName ??
+      candidate?.username ??
+      candidate?.user?.name ??
+      candidate?.user?.full_name ??
+      "";
+    if (userName) return userName;
+  }
+  return "";
+}
+
+function resolveSessionProfileCompleted(session = {}) {
+  const candidates = buildSessionCandidates(session);
+  for (const candidate of candidates) {
+    if (candidate?.profileCompleted != null) {
+      return Boolean(candidate.profileCompleted);
+    }
+    if (candidate?.profile_completed != null) {
+      return Boolean(candidate.profile_completed);
+    }
+    if (candidate?.user?.profileCompleted != null) {
+      return Boolean(candidate.user.profileCompleted);
+    }
+    if (candidate?.user?.profile_completed != null) {
+      return Boolean(candidate.user.profile_completed);
+    }
+  }
+  return null;
 }
 
 function getSecureStoreOptions(secureStore) {
@@ -92,6 +170,36 @@ function getSecureStoreOptions(secureStore) {
   }
 
   return options;
+}
+
+async function readAccessTokenFromSecureStore(secureStore) {
+  if (!secureStore) return null;
+
+  try {
+    const tokenWithOptions = await secureStore.getItemAsync(
+      ACCESS_TOKEN_KEY,
+      getSecureStoreOptions(secureStore),
+    );
+    if (tokenWithOptions) return tokenWithOptions;
+  } catch {
+    // Fallback to default lookup below.
+  }
+
+  try {
+    return await secureStore.getItemAsync(ACCESS_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+async function deleteAccessTokenFromSecureStore(secureStore) {
+  if (!secureStore) return;
+
+  const options = getSecureStoreOptions(secureStore);
+  await Promise.allSettled([
+    secureStore.deleteItemAsync(ACCESS_TOKEN_KEY, options),
+    secureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
+  ]);
 }
 
 function parseJwtExpiry(token) {
@@ -138,9 +246,7 @@ export async function getAccessToken() {
   const secureStore = getSecureStore();
 
   try {
-    const secureToken = secureStore
-      ? await secureStore.getItemAsync(ACCESS_TOKEN_KEY)
-      : null;
+    const secureToken = await readAccessTokenFromSecureStore(secureStore);
     if (secureToken) return secureToken;
   } catch {
     // Ignore secure store read failures and fallback to AsyncStorage.
@@ -155,21 +261,28 @@ export async function getAccessToken() {
 async function setAccessToken(token) {
   if (!token) return;
 
+  const normalizedToken = String(token);
   const secureStore = getSecureStore();
+  let wroteToSecureStore = false;
 
-  try {
-    if (secureStore) {
+  if (secureStore) {
+    try {
       await secureStore.setItemAsync(
         ACCESS_TOKEN_KEY,
-        String(token),
+        normalizedToken,
         getSecureStoreOptions(secureStore),
       );
-    } else {
-      throw new Error("Secure store unavailable");
+      wroteToSecureStore = true;
+    } catch {
+      // Keep auth flow working in dev clients/builds where secure storage
+      // can be unavailable or temporarily fail.
+      wroteToSecureStore = false;
     }
-  } catch {
+  }
+
+  if (!wroteToSecureStore) {
     // Fallback to AsyncStorage if secure store is unavailable.
-    await rawAsyncStorage.setItem(ACCESS_TOKEN_KEY, String(token));
+    await rawAsyncStorage.setItem(ACCESS_TOKEN_KEY, normalizedToken);
     return;
   }
 
@@ -179,13 +292,11 @@ async function setAccessToken(token) {
 
 async function clearAccessToken() {
   const secureStore = getSecureStore();
-  const tasks = [rawAsyncStorage.removeItem(ACCESS_TOKEN_KEY)];
 
-  if (secureStore) {
-    tasks.push(secureStore.deleteItemAsync(ACCESS_TOKEN_KEY));
-  }
-
-  await Promise.allSettled(tasks);
+  await Promise.allSettled([
+    rawAsyncStorage.removeItem(ACCESS_TOKEN_KEY),
+    deleteAccessTokenFromSecureStore(secureStore),
+  ]);
 }
 
 async function setSessionMeta(session = {}) {
@@ -214,6 +325,13 @@ export async function persistAuthSession(session = {}, options = {}) {
 
   if (token) {
     await setAccessToken(token);
+
+    // Surface persistence failures immediately instead of letting requests fail
+    // later with "missing auth token".
+    const persistedToken = await getAccessToken();
+    if (!persistedToken) {
+      throw new Error("Failed to persist access token");
+    }
   }
 
   if (role) writes.push([ROLE_KEY, role]);
@@ -225,7 +343,7 @@ export async function persistAuthSession(session = {}, options = {}) {
   const profileCompleted =
     options.profileCompleted != null
       ? options.profileCompleted
-      : session.profileCompleted;
+      : resolveSessionProfileCompleted(session);
 
   if (profileCompleted != null) {
     writes.push([PROFILE_COMPLETED_KEY, profileCompleted ? "true" : "false"]);
