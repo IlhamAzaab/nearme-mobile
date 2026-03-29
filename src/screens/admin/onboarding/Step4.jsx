@@ -1,90 +1,91 @@
-import React, { useState, useEffect } from 'react';
+import { useNavigation } from "@react-navigation/native";
+import Constants from "expo-constants";
+import * as Device from "expo-device";
+import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
   ActivityIndicator,
   Alert,
   Platform,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
-import * as Device from 'expo-device';
-import Constants from 'expo-constants';
-import { API_URL } from '../../../config/env';
-import { getAccessToken } from '../../../lib/authStorage';
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { API_URL } from "../../../config/env";
+import { getAccessToken } from "../../../lib/authStorage";
 
-const CONTRACT_VERSION = '1.0.0';
+const CONTRACT_VERSION = "1.0.0";
 
 // Contract content as structured data for React Native
 const CONTRACT_SECTIONS = [
   {
-    title: 'NearMe Restaurant Partner Terms & Conditions (v1.0.0)',
+    title: "NearMe Restaurant Partner Terms & Conditions (v1.0.0)",
     isHeader: true,
   },
   {
-    title: '1. Partnership Agreement',
+    title: "1. Partnership Agreement",
     content:
-      'By accepting these terms, you agree to become an authorized NearMe restaurant partner. Your restaurant will be listed on the NearMe platform and made available to customers for food delivery and pickup services.',
+      "By accepting these terms, you agree to become an authorized NearMe restaurant partner. Your restaurant will be listed on the NearMe platform and made available to customers for food delivery and pickup services.",
   },
   {
-    title: '2. Accuracy of Information',
+    title: "2. Accuracy of Information",
     content:
-      'You confirm that all submitted information including restaurant details, owner information, bank account details, and KYC documents are accurate and authentic. Any false or misleading information may result in account termination.',
+      "You confirm that all submitted information including restaurant details, owner information, bank account details, and KYC documents are accurate and authentic. Any false or misleading information may result in account termination.",
   },
   {
-    title: '3. Food Safety & Compliance',
+    title: "3. Food Safety & Compliance",
     content:
-      'You agree to comply with all local food safety regulations, health codes, and hygiene standards. Your restaurant must maintain valid licenses and permits required by law.',
+      "You agree to comply with all local food safety regulations, health codes, and hygiene standards. Your restaurant must maintain valid licenses and permits required by law.",
   },
   {
-    title: '4. Service Standards',
+    title: "4. Service Standards",
     content:
-      'You commit to maintaining timely order preparation and delivery standards, accurate menu information, and professional customer service. Failure to maintain service standards may result in warnings or account suspension.',
+      "You commit to maintaining timely order preparation and delivery standards, accurate menu information, and professional customer service. Failure to maintain service standards may result in warnings or account suspension.",
   },
   {
-    title: '5. Bank Account & Payments',
+    title: "5. Bank Account & Payments",
     content:
-      'You authorize NearMe to route all payments to the bank account specified in your application. You are responsible for maintaining accurate and updated bank information. Any issues with payouts due to incorrect bank details are your responsibility.',
+      "You authorize NearMe to route all payments to the bank account specified in your application. You are responsible for maintaining accurate and updated bank information. Any issues with payouts due to incorrect bank details are your responsibility.",
   },
   {
-    title: '6. Account Verification',
+    title: "6. Account Verification",
     content:
-      'Your account will remain in pending status until a NearMe manager reviews and verifies all submitted documents and information. This process typically takes 2-5 business days.',
+      "Your account will remain in pending status until a NearMe manager reviews and verifies all submitted documents and information. This process typically takes 2-5 business days.",
   },
   {
-    title: '7. Data & Privacy',
+    title: "7. Data & Privacy",
     content:
-      'NearMe may collect and store data related to your account, transactions, and customer interactions. This data will be protected according to our privacy policy and will not be shared with third parties without your consent.',
+      "NearMe may collect and store data related to your account, transactions, and customer interactions. This data will be protected according to our privacy policy and will not be shared with third parties without your consent.",
   },
   {
-    title: '8. Termination & Suspension',
+    title: "8. Termination & Suspension",
     content:
-      'NearMe reserves the right to suspend or terminate your account if you violate these terms, engage in fraudulent activity, or fail to maintain service standards. Suspended accounts will not receive orders or payments.',
+      "NearMe reserves the right to suspend or terminate your account if you violate these terms, engage in fraudulent activity, or fail to maintain service standards. Suspended accounts will not receive orders or payments.",
   },
   {
-    title: '9. Governing Law',
+    title: "9. Governing Law",
     content:
-      'These terms are governed by the laws of Sri Lanka and you agree to resolve disputes through appropriate legal channels.',
+      "These terms are governed by the laws of Sri Lanka and you agree to resolve disputes through appropriate legal channels.",
   },
   {
-    title: 'Last Updated: January 2026',
+    title: "Last Updated: January 2026",
     isFooter: true,
   },
 ];
 
 // Step Progress Bar Component
 function StepProgress({ currentStep, totalSteps }) {
-  const steps = ['Personal', 'Restaurant', 'Bank', 'Contract', 'Review'];
+  const steps = ["Personal", "Restaurant", "Bank", "Contract", "Review"];
   const percentage = Math.round((currentStep / totalSteps) * 100);
 
   return (
     <View style={progressStyles.container}>
       <View style={progressStyles.header}>
-        <Text style={progressStyles.stepText}>Step {currentStep} of {totalSteps}</Text>
+        <Text style={progressStyles.stepText}>
+          Step {currentStep} of {totalSteps}
+        </Text>
         <Text style={progressStyles.percentText}>{percentage}% Complete</Text>
       </View>
 
@@ -131,74 +132,74 @@ const progressStyles = StyleSheet.create({
     marginBottom: 24,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 8,
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
   },
   percentText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#06C168',
+    fontWeight: "500",
+    color: "#06C168",
   },
   barContainer: {
     height: 10,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 5,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   barFill: {
-    height: '100%',
-    backgroundColor: '#06C168',
+    height: "100%",
+    backgroundColor: "#06C168",
     borderRadius: 5,
   },
   stepsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginTop: 16,
   },
   stepItem: {
-    alignItems: 'center',
+    alignItems: "center",
     flex: 1,
   },
   stepCircle: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   stepCompleted: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
   },
   stepCurrent: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderWidth: 4,
-    borderColor: '#9EEBBE',
+    borderColor: "#9EEBBE",
   },
   stepPending: {
-    backgroundColor: '#d1d5db',
+    backgroundColor: "#d1d5db",
   },
   checkmark: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   stepNumber: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontWeight: "600",
+    color: "#6b7280",
   },
   stepNumberCurrent: {
-    color: '#ffffff',
+    color: "#ffffff",
   },
   stepLabel: {
     fontSize: 10,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 4,
   },
 });
@@ -209,29 +210,29 @@ export default function Step4() {
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ipAddress, setIpAddress] = useState(null);
-  const [deviceInfo, setDeviceInfo] = useState('');
+  const [deviceInfo, setDeviceInfo] = useState("");
 
   // Fetch IP address on component mount
   useEffect(() => {
     const getIpAddress = async () => {
       try {
-        const res = await fetch('https://api.ipify.org?format=json');
+        const res = await fetch("https://api.ipify.org?format=json");
         const data = await res.json();
         setIpAddress(data.ip);
       } catch (e) {
-        console.error('Failed to fetch IP address:', e);
+        console.error("Failed to fetch IP address:", e);
       }
     };
     getIpAddress();
 
     // Get device info for user agent equivalent
-    const deviceString = `${Device.brand || 'Unknown'} ${Device.modelName || 'Device'} - ${Platform.OS} ${Platform.Version} - Expo ${Constants.expoVersion || 'SDK'}`;
+    const deviceString = `${Device.brand || "Unknown"} ${Device.modelName || "Device"} - ${Platform.OS} ${Platform.Version} - Expo ${Constants.expoVersion || "SDK"}`;
     setDeviceInfo(deviceString);
   }, []);
 
   const handleSubmit = async () => {
     if (!accepted) {
-      Alert.alert('Required', 'Please accept the contract to continue');
+      Alert.alert("Required", "Please accept the contract to continue");
       return;
     }
 
@@ -240,9 +241,9 @@ export default function Step4() {
       const token = await getAccessToken();
 
       const res = await fetch(`${API_URL}/restaurant-onboarding/step-4`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
@@ -256,18 +257,18 @@ export default function Step4() {
 
       const data = await res.json();
       if (!res.ok) {
-        Alert.alert('Error', data?.message || 'Failed to submit contract');
+        Alert.alert("Error", data?.message || "Failed to submit contract");
         return;
       }
 
       // Navigate to pending screen
       navigation.reset({
         index: 0,
-        routes: [{ name: 'AdminOnboardingPending' }],
+        routes: [{ name: "AdminOnboardingPending" }],
       });
     } catch (err) {
-      console.error('Step4 submit error', err);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      console.error("Step4 submit error", err);
+      Alert.alert("Error", "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -299,7 +300,7 @@ export default function Step4() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Background Decorations */}
       <View style={styles.bgDecoration1} />
       <View style={styles.bgDecoration2} />
@@ -345,12 +346,7 @@ export default function Step4() {
             onPress={() => setAccepted(!accepted)}
             activeOpacity={0.8}
           >
-            <View
-              style={[
-                styles.checkbox,
-                accepted && styles.checkboxChecked,
-              ]}
-            >
+            <View style={[styles.checkbox, accepted && styles.checkboxChecked]}>
               {accepted && <Text style={styles.checkboxIcon}>✓</Text>}
             </View>
             <Text style={styles.checkboxLabel}>
@@ -363,7 +359,7 @@ export default function Step4() {
             <View style={styles.ipContainer}>
               <Text style={styles.ipIcon}>🔒</Text>
               <Text style={styles.ipText}>
-                Submission will be recorded with IP:{' '}
+                Submission will be recorded with IP:{" "}
                 <Text style={styles.ipAddress}>{ipAddress}</Text>
               </Text>
             </View>
@@ -412,25 +408,25 @@ export default function Step4() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
   },
   bgDecoration1: {
-    position: 'absolute',
+    position: "absolute",
     top: 100,
     left: -50,
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
   bgDecoration2: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 100,
     right: -80,
     width: 250,
     height: 250,
     borderRadius: 125,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   scrollView: {
     flex: 1,
@@ -439,7 +435,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 24,
     paddingTop: 16,
   },
@@ -447,11 +443,11 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#ffffff",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
@@ -462,21 +458,21 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#ffffff',
+    fontWeight: "bold",
+    color: "#ffffff",
     marginBottom: 8,
   },
   headerSubtitle: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
+    color: "rgba(255, 255, 255, 0.9)",
+    textAlign: "center",
     paddingHorizontal: 20,
   },
   formCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 20,
     padding: 20,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -485,11 +481,11 @@ const styles = StyleSheet.create({
   contractContainer: {
     height: 300,
     borderWidth: 2,
-    borderColor: '#dcfce7',
+    borderColor: "#dcfce7",
     borderRadius: 12,
-    backgroundColor: '#EDFBF2',
+    backgroundColor: "#EDFBF2",
     marginBottom: 20,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   contractScroll: {
     flex: 1,
@@ -497,81 +493,81 @@ const styles = StyleSheet.create({
   },
   contractHeader: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#06C168',
+    fontWeight: "bold",
+    color: "#06C168",
     marginBottom: 16,
-    textAlign: 'center',
+    textAlign: "center",
   },
   contractSection: {
     marginBottom: 16,
   },
   contractTitle: {
     fontSize: 15,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: "600",
+    color: "#111827",
     marginBottom: 6,
   },
   contractContent: {
     fontSize: 14,
-    color: '#4b5563',
+    color: "#4b5563",
     lineHeight: 20,
   },
   contractFooter: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontWeight: "600",
+    color: "#6b7280",
     marginTop: 16,
-    textAlign: 'center',
+    textAlign: "center",
   },
   checkboxContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EDFBF2',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EDFBF2",
     borderWidth: 2,
-    borderColor: '#dcfce7',
+    borderColor: "#dcfce7",
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
   },
   checkboxContainerActive: {
-    borderColor: '#06C168',
-    backgroundColor: '#dcfce7',
+    borderColor: "#06C168",
+    backgroundColor: "#dcfce7",
   },
   checkbox: {
     width: 24,
     height: 24,
     borderWidth: 2,
-    borderColor: '#9ca3af',
+    borderColor: "#9ca3af",
     borderRadius: 6,
     marginRight: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
   },
   checkboxChecked: {
-    backgroundColor: '#06C168',
-    borderColor: '#06C168',
+    backgroundColor: "#06C168",
+    borderColor: "#06C168",
   },
   checkboxIcon: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   checkboxLabel: {
     flex: 1,
     fontSize: 15,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
   },
   ipContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f3f4f6',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f3f4f6",
     borderRadius: 12,
     padding: 12,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: "#e5e7eb",
   },
   ipIcon: {
     fontSize: 16,
@@ -579,64 +575,64 @@ const styles = StyleSheet.create({
   },
   ipText: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     flex: 1,
   },
   ipAddress: {
-    fontFamily: 'monospace',
-    fontWeight: '600',
-    color: '#374151',
+    fontFamily: "monospace",
+    fontWeight: "600",
+    color: "#374151",
   },
   buttonRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
   },
   backButton: {
     flex: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 12,
     paddingVertical: 16,
-    alignItems: 'center',
+    alignItems: "center",
   },
   backButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
+    fontWeight: "600",
+    color: "#374151",
   },
   submitButton: {
     flex: 2,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderRadius: 12,
     paddingVertical: 16,
-    shadowColor: '#06C168',
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: '#6EDE9A',
+    backgroundColor: "#6EDE9A",
     shadowOpacity: 0.1,
   },
   buttonContent: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
   },
   buttonLoading: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
     gap: 8,
   },
   submitButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   buttonArrow: {
     fontSize: 18,
-    color: '#ffffff',
+    color: "#ffffff",
     marginLeft: 8,
   },
 });

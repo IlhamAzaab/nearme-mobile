@@ -1,9 +1,6 @@
-import { API_BASE_URL } from "../constants/api";
 import { API_URL } from "../config/env";
-import {
-  clearAuthSession,
-  getAccessToken,
-} from "./authStorage";
+import { API_BASE_URL } from "../constants/api";
+import { clearAuthSession, getAccessToken } from "./authStorage";
 
 const NETWORK_MESSAGES = [
   "Network request failed",
@@ -90,10 +87,31 @@ function isExplicitAuthFailureMessage(message = "") {
   );
 }
 
+function isMissingTokenMessage(message = "") {
+  const normalized = String(message || "").toLowerCase();
+  return (
+    normalized.includes("no authentication token") ||
+    normalized.includes("authorization header") ||
+    normalized.includes("token missing")
+  );
+}
+
+function maskToken(token = "") {
+  if (!token) return "none";
+  const raw = String(token);
+  if (raw.length <= 10) return `${raw.slice(0, 2)}...${raw.slice(-2)}`;
+  return `${raw.slice(0, 6)}...${raw.slice(-4)}`;
+}
+
 async function shouldForceLogoutFor401(response) {
   try {
-    const body = await response.clone().json().catch(() => null);
-    const code = String(body?.code || "").trim().toLowerCase();
+    const body = await response
+      .clone()
+      .json()
+      .catch(() => null);
+    const code = String(body?.code || "")
+      .trim()
+      .toLowerCase();
     const message = String(body?.message || "");
     return (
       (code && EXPLICIT_AUTH_FAILURE_CODES.has(code)) ||
@@ -130,11 +148,18 @@ export function initializeApiAuthFetch() {
     const bypassAuth = isAuthBypass(url);
     const headers = new Headers(requestInit.headers || {});
     setPlatformHeader(headers);
+    let token = null;
+    const method = String(requestInit?.method || "GET").toUpperCase();
 
     if (!bypassAuth) {
-      const token = await getAccessToken();
+      token = await getAccessToken();
       if (token) {
         headers.set("Authorization", `Bearer ${token}`);
+      } else {
+        console.warn("[AuthDebug] No stored token before protected request", {
+          method,
+          url,
+        });
       }
     }
 
@@ -153,6 +178,37 @@ export function initializeApiAuthFetch() {
 
     if (bypassAuth || response.status !== 401) {
       return response;
+    }
+
+    const body = await response
+      .clone()
+      .json()
+      .catch(async () => {
+        const text = await response
+          .clone()
+          .text()
+          .catch(() => "");
+        return text ? { message: text } : null;
+      });
+
+    const errorCode = String(body?.code || "")
+      .trim()
+      .toLowerCase();
+    const errorMessage = String(body?.message || "");
+    const hasAuthHeader = headers.has("Authorization");
+
+    if (isMissingTokenMessage(errorMessage)) {
+      console.error(
+        "[AuthDebug] Backend rejected request: missing auth token",
+        {
+          method,
+          url,
+          hasAuthHeader,
+          tokenPreview: maskToken(token),
+          code: errorCode || null,
+          message: errorMessage || null,
+        },
+      );
     }
 
     const shouldLogout = await shouldForceLogoutFor401(response);

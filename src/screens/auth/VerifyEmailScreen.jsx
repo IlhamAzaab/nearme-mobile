@@ -1,3 +1,5 @@
+import { LinearGradient } from "expo-linear-gradient";
+import * as ExpoLinking from "expo-linking";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -7,8 +9,6 @@ import {
   Text,
   View,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import * as ExpoLinking from "expo-linking";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
 
@@ -31,22 +31,44 @@ export default function VerifyEmailScreen({ navigation, route }) {
 
   const canPoll = useMemo(() => Boolean(pendingUserId), [pendingUserId]);
 
+  const normalizeAuthPayload = useCallback((payload = {}) => {
+    const root = payload && typeof payload === "object" ? payload : {};
+    const nestedData =
+      root?.data && typeof root.data === "object" ? root.data : null;
+    const nestedSession =
+      root?.session && typeof root.session === "object" ? root.session : null;
+
+    return nestedSession || nestedData || root;
+  }, []);
+
   const finalizeAuthenticatedFlow = useCallback(
     async (data = {}) => {
+      const session = normalizeAuthPayload(data);
       const sessionOptions = {
-        userEmail: data?.email || pendingEmail,
-        profileCompleted: !!data?.profileCompleted,
+        userEmail: session?.email || session?.user?.email || pendingEmail,
+        profileCompleted: Boolean(
+          session?.profileCompleted ?? session?.profile_completed,
+        ),
       };
 
       setShowLoginSuccess(true);
 
       setTimeout(async () => {
-        if (data?.role === "customer" && !data?.profileCompleted) {
+        const role =
+          session?.role || session?.userRole || session?.user?.role || null;
+        const completed =
+          session?.profileCompleted ?? session?.profile_completed ?? null;
+
+        if (role === "customer" && completed === false) {
           const accessToken =
-            data?.token || data?.access_token || data?.accessToken || null;
+            session?.token ||
+            session?.access_token ||
+            session?.accessToken ||
+            session?.authToken ||
+            null;
 
           navigation.replace("CompleteProfile", {
-            userId: data?.userId || pendingUserId,
+            userId: session?.userId || session?.user?.id || pendingUserId,
             accessToken,
           });
           return;
@@ -60,7 +82,13 @@ export default function VerifyEmailScreen({ navigation, route }) {
         }
       }, 1300);
     },
-    [applyAuthSession, navigation, pendingEmail, pendingUserId],
+    [
+      applyAuthSession,
+      navigation,
+      normalizeAuthPayload,
+      pendingEmail,
+      pendingUserId,
+    ],
   );
 
   const completeEmailLogin = useCallback(async () => {
