@@ -219,15 +219,28 @@ export async function getAccessToken() {
     const secureToken = secureStore
       ? await secureStore.getItemAsync(ACCESS_TOKEN_KEY)
       : null;
-    if (secureToken) return secureToken;
-  } catch {
+    if (secureToken) {
+      console.log("[AuthStorage] Token retrieved from secure store");
+      return secureToken;
+    }
+  } catch (error) {
+    console.warn("[AuthStorage] Failed to read from secure store:", error?.message);
     // Ignore secure store read failures and fallback to AsyncStorage.
   }
 
   const migratedToken = await migrateLegacyAccessTokenFromAsyncStorage();
-  if (migratedToken) return migratedToken;
+  if (migratedToken) {
+    console.log("[AuthStorage] Token migrated from legacy AsyncStorage");
+    return migratedToken;
+  }
 
-  return rawAsyncStorage.getItem(ACCESS_TOKEN_KEY);
+  const asyncToken = await rawAsyncStorage.getItem(ACCESS_TOKEN_KEY);
+  if (asyncToken) {
+    console.log("[AuthStorage] Token retrieved from AsyncStorage");
+  } else {
+    console.warn("[AuthStorage] No token found in any storage");
+  }
+  return asyncToken;
 }
 
 async function setAccessToken(token) {
@@ -242,17 +255,18 @@ async function setAccessToken(token) {
         String(token),
         getSecureStoreOptions(secureStore),
       );
+      console.log("[AuthStorage] Token saved to secure store successfully");
+      // Remove any older token copy from AsyncStorage to reduce exposure.
+      await rawAsyncStorage.removeItem(ACCESS_TOKEN_KEY);
     } else {
       throw new Error("Secure store unavailable");
     }
-  } catch {
+  } catch (error) {
     // Fallback to AsyncStorage if secure store is unavailable.
+    console.warn("[AuthStorage] Secure store unavailable, falling back to AsyncStorage:", error?.message);
     await rawAsyncStorage.setItem(ACCESS_TOKEN_KEY, String(token));
-    return;
+    console.log("[AuthStorage] Token saved to AsyncStorage successfully");
   }
-
-  // Remove any older token copy from AsyncStorage to reduce exposure.
-  await rawAsyncStorage.removeItem(ACCESS_TOKEN_KEY);
 }
 
 async function clearAccessToken() {
@@ -290,8 +304,28 @@ export async function persistAuthSession(session = {}, options = {}) {
   const userId = resolveSessionUserId(session);
   const userName = resolveSessionUserName(session);
 
+  console.log("[AuthStorage] Persisting auth session:", {
+    hasToken: Boolean(token),
+    tokenPreview: token ? `${String(token).substring(0, 10)}...` : "none",
+    role,
+    userId,
+  });
+
   if (token) {
     await setAccessToken(token);
+
+    // Verify the token was saved by reading it back
+    const savedToken = await getAccessToken();
+    if (!savedToken || savedToken !== token) {
+      console.error("[AuthStorage] Token verification failed! Token was not saved correctly", {
+        saved: Boolean(savedToken),
+        match: savedToken === token,
+      });
+      throw new Error("Failed to persist auth token");
+    }
+    console.log("[AuthStorage] Token verified successfully");
+  } else {
+    console.warn("[AuthStorage] No token found in session to persist");
   }
 
   if (role) writes.push([ROLE_KEY, role]);
