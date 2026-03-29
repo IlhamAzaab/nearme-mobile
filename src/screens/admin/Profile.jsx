@@ -16,9 +16,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const fetchAdminProfile = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const response = await fetch(`${API_URL}/admin/me`, {
@@ -38,7 +39,7 @@ const fetchAdminProfile = async () => {
 };
 
 const fetchAdminRestaurant = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const response = await fetch(`${API_URL}/admin/restaurant`, {

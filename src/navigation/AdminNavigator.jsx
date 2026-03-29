@@ -47,7 +47,15 @@ function getInitialRoute(adminData) {
     return 'AdminOnboardingStep1'; // Default fallback
   }
 
-  const { force_password_change, onboarding_completed, onboarding_step, admin_status } = adminData;
+  const {
+    force_password_change,
+    onboarding_completed,
+    onboarding_step,
+    admin_status,
+  } = adminData;
+  const normalizedStatus = admin_status
+    ? String(admin_status).trim().toLowerCase()
+    : null;
 
   // 1. Force password change first
   if (force_password_change) {
@@ -61,7 +69,7 @@ function getInitialRoute(adminData) {
   }
 
   // 3. Onboarding completed but not active - go to pending
-  if (admin_status !== 'active') {
+  if (normalizedStatus && normalizedStatus !== 'active') {
     return 'AdminOnboardingPending';
   }
 
@@ -76,6 +84,7 @@ export default function AdminNavigator() {
     forcePasswordChange,
     onboardingCompleted,
     onboardingStep,
+    profileCompleted,
     adminStatusLoading,
   } = useAuth();
 
@@ -91,12 +100,13 @@ export default function AdminNavigator() {
         const route = getInitialRoute(data);
         setInitialRoute(route);
       } else {
-        // If API fails, determine route from stored state
+        // If API fails, mirror website flow: completed admin must land on main dashboard.
+        const completed = Boolean(profileCompleted || onboardingCompleted);
         const route = getInitialRoute({
           force_password_change: forcePasswordChange,
-          onboarding_completed: onboardingCompleted,
-          onboarding_step: onboardingStep,
-          admin_status: adminStatus,
+          onboarding_completed: completed,
+          onboarding_step: completed ? 4 : onboardingStep,
+          admin_status: completed ? 'active' : adminStatus,
         });
         setInitialRoute(route);
       }
@@ -105,7 +115,14 @@ export default function AdminNavigator() {
     };
 
     checkAdminStatus();
-  }, []);
+  }, [
+    adminStatus,
+    fetchAdminStatus,
+    forcePasswordChange,
+    onboardingCompleted,
+    onboardingStep,
+    profileCompleted,
+  ]);
 
   // Show loading while checking admin status
   if (isChecking || !initialRoute) {

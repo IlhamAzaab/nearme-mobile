@@ -18,7 +18,6 @@ import { SvgXml } from "react-native-svg";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
 import pushNotificationService from "../../services/pushNotificationService";
-import { persistAuthSession } from "../../lib/authStorage";
 
 // Inline the Meezo logo SVG XML (React Native can't import .svg directly without transformer)
 const MEEZO_LOGO_XML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080">
@@ -30,7 +29,7 @@ const MEEZO_LOGO_XML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108
 </svg>`;
 
 export default function VerifyOtpScreen({ navigation, route }) {
-  const { refreshAuthState } = useAuth();
+  const { refreshAuthState, applyAuthSession } = useAuth();
   const { userId, phone, accessToken } = route.params || {};
 
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
@@ -147,12 +146,20 @@ export default function VerifyOtpScreen({ navigation, route }) {
         return;
       }
 
-      // Save auth data
-      await persistAuthSession(data, { profileCompleted: true });
+      const sessionApplied = await applyAuthSession(data, {
+        profileCompleted: true,
+      });
+
+      if (!sessionApplied?.ok) {
+        setError("Signed in, but redirect failed. Please login again.");
+        setLoading(false);
+        return;
+      }
 
       // Initialize push notifications
-      if (data.token) {
-        pushNotificationService.initialize(data.token).catch((err) => {
+      const authToken = data?.token || data?.access_token || data?.accessToken;
+      if (authToken) {
+        pushNotificationService.initialize(authToken).catch((err) => {
           console.warn("Push notification init error:", err);
         });
       }

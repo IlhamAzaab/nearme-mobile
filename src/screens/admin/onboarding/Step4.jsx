@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { API_URL } from '../../../config/env';
+import { getAccessToken } from '../../../lib/authStorage';
 
 const CONTRACT_VERSION = '1.0.0';
 
@@ -236,7 +237,7 @@ export default function Step4() {
 
     setLoading(true);
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getAccessToken();
 
       const res = await fetch(`${API_URL}/restaurant-onboarding/step-4`, {
         method: 'POST',

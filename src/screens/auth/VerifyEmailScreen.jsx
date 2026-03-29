@@ -11,10 +11,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ExpoLinking from "expo-linking";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
-import { persistAuthSession } from "../../lib/authStorage";
 
 export default function VerifyEmailScreen({ navigation, route }) {
-  const { refreshAuthState } = useAuth();
+  const { applyAuthSession } = useAuth();
   const pendingEmail = route?.params?.email || "";
   const pendingUserId = route?.params?.userId || null;
   const pendingLoginToken = route?.params?.pendingLoginToken || "";
@@ -34,26 +33,34 @@ export default function VerifyEmailScreen({ navigation, route }) {
 
   const finalizeAuthenticatedFlow = useCallback(
     async (data = {}) => {
-      await persistAuthSession(data, {
+      const sessionOptions = {
         userEmail: data?.email || pendingEmail,
         profileCompleted: !!data?.profileCompleted,
-      });
+      };
 
       setShowLoginSuccess(true);
 
       setTimeout(async () => {
         if (data?.role === "customer" && !data?.profileCompleted) {
+          const accessToken =
+            data?.token || data?.access_token || data?.accessToken || null;
+
           navigation.replace("CompleteProfile", {
             userId: data?.userId || pendingUserId,
-            accessToken: data?.token || null,
+            accessToken,
           });
           return;
         }
 
-        await refreshAuthState();
+        const result = await applyAuthSession(data, sessionOptions);
+        if (!result?.ok) {
+          setMode("error");
+          setMessage("Signed in, but redirect failed. Please login again.");
+          setShowLoginSuccess(false);
+        }
       }, 1300);
     },
-    [navigation, pendingEmail, pendingUserId, refreshAuthState],
+    [applyAuthSession, navigation, pendingEmail, pendingUserId],
   );
 
   const completeEmailLogin = useCallback(async () => {

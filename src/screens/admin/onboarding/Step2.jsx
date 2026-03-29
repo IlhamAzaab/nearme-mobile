@@ -20,6 +20,7 @@ import * as Location from 'expo-location';
 import FreeMapView from '../../../components/maps/FreeMapView';
 import { useNavigation } from '@react-navigation/native';
 import { API_URL } from '../../../config/env';
+import { getAccessToken } from '../../../lib/authStorage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -439,7 +440,7 @@ export default function Step2() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: [ImagePicker.MediaType.Images],
         allowsEditing: true,
         aspect: fieldKey === 'logo' ? [1, 1] : [16, 9],
         quality: 0.8,
@@ -458,7 +459,7 @@ export default function Step2() {
   const uploadToCloudinary = async (asset, imageType) => {
     return new Promise(async (resolve, reject) => {
       try {
-        const token = await AsyncStorage.getItem('token');
+        const token = await getAccessToken();
 
         // Get file info from asset
         const uri = asset.uri;
@@ -553,7 +554,7 @@ export default function Step2() {
     setLoading(true);
 
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getAccessToken();
 
       // Upload images
       const uploadPromises = [];

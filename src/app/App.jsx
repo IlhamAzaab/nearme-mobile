@@ -18,6 +18,7 @@ import { ThemeProvider } from "./providers/ThemeProvider";
 import { mobileQueryClient } from "../lib/queryClient";
 import { initializeApiAuthFetch } from "../lib/apiAuthFetch";
 import {
+  getAccessToken,
   getAuthStorageDiagnostics,
   initializeAuthStorage,
 } from "../lib/authStorage";
@@ -79,7 +80,7 @@ export default function App() {
       );
     }
 
-    const token = await AsyncStorage.getItem("token");
+    const token = await getAccessToken();
     if (!token) return;
 
     try {
@@ -159,7 +160,7 @@ export default function App() {
       (data?.type === "new_order" || data?.type === "order_reminder") &&
       data?.orderId
     ) {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       if (token) {
         try {
           const response = await fetch(
@@ -238,7 +239,7 @@ export default function App() {
     });
 
     const initPushOnStart = async () => {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const role = await AsyncStorage.getItem("role");
       if (token && navigationRef.current) {
         console.log("🔔 App: Auto-initializing push notifications...");
@@ -376,7 +377,7 @@ export default function App() {
       async (nextAppState) => {
         if (nextAppState === "active") {
           // App came to foreground - check for pending orders
-          const token = await AsyncStorage.getItem("token");
+          const token = await getAccessToken();
           const role = await AsyncStorage.getItem("role");
           if (token && role === "admin") {
             console.log(

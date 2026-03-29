@@ -11,12 +11,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 import { supabase } from "../../services/supabaseClient";
 
 const ADMIN_UNREAD_KEY = "@admin_notifications_unread_count";
 
 const fetchAdminNotifications = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/notifications?limit=100`, {
@@ -33,7 +34,7 @@ const fetchAdminNotifications = async () => {
 };
 
 const markAdminNotificationsRead = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/notifications/mark-all-read`, {

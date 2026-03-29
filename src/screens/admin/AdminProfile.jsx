@@ -18,11 +18,12 @@ import {
   View,
 } from "react-native";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 const fetchAdminMe = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/me`, {
@@ -38,7 +39,7 @@ const fetchAdminMe = async () => {
 };
 
 const changeAdminPassword = async ({ username, newPassword }) => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/change-password`, {

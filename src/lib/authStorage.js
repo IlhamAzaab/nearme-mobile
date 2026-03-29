@@ -53,6 +53,32 @@ const USER_EMAIL_KEY = "userEmail";
 const PROFILE_COMPLETED_KEY = "profileCompleted";
 const SESSION_META_KEY = "authSessionMeta";
 
+function resolveSessionToken(session = {}) {
+  if (session?.token) return String(session.token);
+  if (session?.access_token) return String(session.access_token);
+  if (session?.accessToken) return String(session.accessToken);
+  return "";
+}
+
+function resolveSessionRole(session = {}) {
+  const role =
+    session?.role ??
+    session?.userRole ??
+    session?.user?.role ??
+    session?.profile?.role;
+
+  if (!role) return null;
+  return String(role).trim().toLowerCase();
+}
+
+function resolveSessionUserId(session = {}) {
+  return session?.userId ?? session?.user_id ?? session?.user?.id ?? null;
+}
+
+function resolveSessionUserName(session = {}) {
+  return session?.userName ?? session?.username ?? session?.user?.name ?? "";
+}
+
 function getSecureStoreOptions(secureStore) {
   if (!secureStore) return {};
 
@@ -163,15 +189,17 @@ async function clearAccessToken() {
 }
 
 async function setSessionMeta(session = {}) {
-  const token = session?.token ? String(session.token) : "";
+  const token = resolveSessionToken(session);
   const now = Date.now();
   const expiresAt = parseJwtExpiry(token);
+  const role = resolveSessionRole(session);
+  const userId = resolveSessionUserId(session);
 
   const meta = {
     issuedAt: now,
     expiresAt: Number.isFinite(expiresAt) ? expiresAt : null,
-    role: session?.role ? String(session.role) : null,
-    userId: session?.userId != null ? String(session.userId) : null,
+    role,
+    userId: userId != null ? String(userId) : null,
   };
 
   await rawAsyncStorage.setItem(SESSION_META_KEY, JSON.stringify(meta));
@@ -179,15 +207,18 @@ async function setSessionMeta(session = {}) {
 
 export async function persistAuthSession(session = {}, options = {}) {
   const writes = [];
+  const token = resolveSessionToken(session);
+  const role = resolveSessionRole(session);
+  const userId = resolveSessionUserId(session);
+  const userName = resolveSessionUserName(session);
 
-  if (session.token) {
-    await setAccessToken(session.token);
+  if (token) {
+    await setAccessToken(token);
   }
 
-  if (session.role) writes.push([ROLE_KEY, String(session.role)]);
-  if (session.userId != null)
-    writes.push([USER_ID_KEY, String(session.userId)]);
-  if (session.userName) writes.push([USER_NAME_KEY, String(session.userName)]);
+  if (role) writes.push([ROLE_KEY, role]);
+  if (userId != null) writes.push([USER_ID_KEY, String(userId)]);
+  if (userName) writes.push([USER_NAME_KEY, String(userName)]);
   if (options.userEmail)
     writes.push([USER_EMAIL_KEY, String(options.userEmail)]);
 

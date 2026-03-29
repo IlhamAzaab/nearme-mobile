@@ -21,11 +21,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import FreeMapView from "../../components/maps/FreeMapView";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const fetchAdminRestaurant = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token found");
 
   const res = await fetch(`${API_URL}/admin/restaurant`, {
@@ -41,7 +42,7 @@ const fetchAdminRestaurant = async () => {
 };
 
 const updateAdminRestaurant = async (payload) => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token found");
 
   const res = await fetch(`${API_URL}/admin/restaurant`, {
@@ -161,7 +162,7 @@ export default function RestaurantDetail() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: [ImagePicker.MediaType.Images],
         allowsEditing: true,
         aspect: imageType === "logo" ? [1, 1] : [16, 9],
         quality: 0.8,
@@ -173,7 +174,8 @@ export default function RestaurantDetail() {
         setError(null);
 
         try {
-          const token = await AsyncStorage.getItem("token");
+          const token = await getAccessToken();
+          if (!token) throw new Error("No authentication token found");
           const base64String = `data:image/jpeg;base64,${result.assets[0].base64}`;
 
           const response = await fetch(`${API_URL}/admin/upload-image`, {

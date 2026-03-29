@@ -27,6 +27,7 @@ import * as Clipboard from 'expo-clipboard';
 import Constants from 'expo-constants';
 import pushNotificationService from '../../services/pushNotificationService';
 import { API_URL } from '../../config/env';
+import { getAccessToken } from '../../lib/authStorage';
 
 const isExpoGo = Constants.appOwnership === 'expo';
 
@@ -49,7 +50,7 @@ export default function TestNotificationScreen({ navigation }) {
   }, []);
 
   const loadInfo = async () => {
-    const token = await AsyncStorage.getItem('token');
+    const token = await getAccessToken();
     setAuthToken(token);
 
     setDeviceInfo({

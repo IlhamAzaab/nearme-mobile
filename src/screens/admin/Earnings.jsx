@@ -16,11 +16,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const fetchEarnings = async (period) => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/earnings?period=${period}`, {
@@ -36,7 +37,7 @@ const fetchEarnings = async (period) => {
 };
 
 const fetchPayouts = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/payouts?limit=5`, {
@@ -52,7 +53,7 @@ const fetchPayouts = async () => {
 };
 
 const fetchRestaurant = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/restaurant`, {

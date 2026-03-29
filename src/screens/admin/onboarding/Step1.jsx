@@ -19,6 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
 import { API_URL } from '../../../config/env';
+import { getAccessToken } from '../../../lib/authStorage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -185,7 +186,7 @@ export default function Step1() {
 
   const fetchUserData = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getAccessToken();
       const res = await fetch(`${API_URL}/auth/user`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -202,7 +203,7 @@ export default function Step1() {
 
   const fetchSavedData = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getAccessToken();
       const res = await fetch(`${API_URL}/restaurant-onboarding/step-1`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -247,7 +248,7 @@ export default function Step1() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: [ImagePicker.MediaType.Images],
         allowsEditing: true,
         aspect: imageType === 'profilePhoto' ? [1, 1] : [16, 10],
         quality: 0.8,
@@ -266,7 +267,7 @@ export default function Step1() {
     setUploading((prev) => ({ ...prev, [imageType]: true }));
 
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getAccessToken();
 
       // Create form data for file upload
       const formData = new FormData();
@@ -386,7 +387,7 @@ export default function Step1() {
     setLoading(true);
 
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getAccessToken();
       const res = await fetch(`${API_URL}/restaurant-onboarding/step-1`, {
         method: 'POST',
         headers: {

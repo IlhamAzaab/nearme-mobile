@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const DEFAULT_SUMMARY = {
   total_earnings: 0,
@@ -77,7 +78,7 @@ export default function AdminWithdrawals() {
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     queryFn: async () => {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       if (!token) throw new Error("Not authenticated");
 
       const res = await fetch(`${API_URL}/admin/withdrawals/admin/summary`, {
@@ -98,7 +99,7 @@ export default function AdminWithdrawals() {
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     queryFn: async () => {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       if (!token) throw new Error("Not authenticated");
 
       const res = await fetch(`${API_URL}/admin/withdrawals/admin/history`, {

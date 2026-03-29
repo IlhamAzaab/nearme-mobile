@@ -19,7 +19,6 @@ import Svg, { G, Path, Rect } from "react-native-svg";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
 import pushNotificationService from "../../services/pushNotificationService";
-import { persistAuthSession } from "../../lib/authStorage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -61,7 +60,7 @@ const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
 );
 
 export default function LoginScreen({ navigation }) {
-  const { refreshAuthState } = useAuth();
+  const { applyAuthSession } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -167,26 +166,43 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
-      // Save session
-      await persistAuthSession(data, {
+      const sessionOptions = {
         userEmail: email,
         profileCompleted: !!data?.profileCompleted,
-      });
-
-      // Initialize push notifications after successful login
-      if (data?.token) {
-        console.log("🔔 Initializing push notifications after login...");
-        pushNotificationService.initialize(data.token).catch((err) => {
-          console.warn("Push notification init error:", err);
-        });
-      }
+      };
 
       setIsLoading(false);
       setIsTransitioning(true);
 
       setTimeout(async () => {
-        // Refresh auth state - RootNavigator will automatically show correct screen
-        await refreshAuthState();
+        try {
+          const result = await applyAuthSession(data, sessionOptions);
+          if (!result?.ok) {
+            setIsTransitioning(false);
+            triggerShake();
+            Alert.alert(
+              "Login redirect failed",
+              "Session saved but role routing failed. Please login again.",
+            );
+            return;
+          }
+
+          const authToken =
+            data?.token || data?.access_token || data?.accessToken;
+
+          // Initialize push notifications only after auth session is applied.
+          if (authToken) {
+            console.log("🔔 Initializing push notifications after login...");
+            pushNotificationService.initialize(authToken).catch((err) => {
+              console.warn("Push notification init error:", err);
+            });
+          }
+        } catch (redirectErr) {
+          console.error("Login redirect error:", redirectErr);
+          setIsTransitioning(false);
+          triggerShake();
+          Alert.alert("Login redirect failed", "Please try again.");
+        }
       }, 1200);
     } catch (error) {
       console.error("Login error:", error);

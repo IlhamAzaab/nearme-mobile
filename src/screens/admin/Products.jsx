@@ -21,9 +21,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const fetchFoods = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/foods`, {
@@ -39,7 +40,7 @@ const fetchFoods = async () => {
 };
 
 const deleteFood = async (foodId) => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/foods/${foodId}`, {
@@ -56,7 +57,7 @@ const deleteFood = async (foodId) => {
 };
 
 const patchFoodAvailability = async ({ foodId, is_available }) => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/foods/${foodId}`, {
@@ -75,7 +76,7 @@ const patchFoodAvailability = async ({ foodId, is_available }) => {
 };
 
 const uploadAdminImage = async (imageData) => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const res = await fetch(`${API_URL}/admin/upload-image`, {
@@ -93,7 +94,7 @@ const uploadAdminImage = async (imageData) => {
 };
 
 const upsertFood = async ({ foodId, payload }) => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const url = foodId
@@ -552,7 +553,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: [ImagePicker.MediaType.Images],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,

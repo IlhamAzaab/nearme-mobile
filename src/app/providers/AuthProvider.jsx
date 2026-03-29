@@ -3,7 +3,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../../config/env';
 import orderTrackingService from '../../services/orderTrackingService';
 import pushNotificationService from '../../services/pushNotificationService';
-import { clearAuthSession, getAccessToken } from '../../lib/authStorage';
+import {
+  clearAuthSession,
+  getAccessToken,
+  persistAuthSession,
+} from '../../lib/authStorage';
 
 const AuthContext = createContext(null);
 
@@ -29,6 +33,24 @@ export function AuthProvider({ children }) {
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [adminStatusLoading, setAdminStatusLoading] = useState(false);
 
+  const normalizeRole = (value) => {
+    if (!value) return null;
+    return String(value).trim().toLowerCase();
+  };
+
+  const resolveSessionRole = (session = {}) => {
+    return normalizeRole(
+      session?.role ??
+        session?.userRole ??
+        session?.user?.role ??
+        session?.profile?.role,
+    );
+  };
+
+  const resolveSessionToken = (session = {}) => {
+    return session?.token || session?.access_token || session?.accessToken || null;
+  };
+
   useEffect(() => {
     checkAuthState();
   }, []);
@@ -36,7 +58,8 @@ export function AuthProvider({ children }) {
   const checkAuthState = async () => {
     try {
       const token = await getAccessToken();
-      const role = await AsyncStorage.getItem('role');
+      const storedRole = await AsyncStorage.getItem('role');
+      const role = storedRole ? String(storedRole).trim().toLowerCase() : null;
       const userName = await AsyncStorage.getItem('userName');
       const userEmail = await AsyncStorage.getItem('userEmail');
       const userId = await AsyncStorage.getItem('userId');
@@ -66,10 +89,54 @@ export function AuthProvider({ children }) {
     await checkAuthState();
   }, []);
 
+  // Persist session + immediately update memory state for navigation switch.
+  const applyAuthSession = useCallback(async (session = {}, options = {}) => {
+    await persistAuthSession(session, options);
+
+    const token = resolveSessionToken(session) || (await getAccessToken());
+    const role = resolveSessionRole(session);
+
+    if (!token || !role) {
+      console.warn('applyAuthSession: missing token or role after login', {
+        hasToken: Boolean(token),
+        role,
+      });
+      await checkAuthState();
+      return { ok: false, role };
+    }
+
+    const userId =
+      session?.userId ?? session?.user_id ?? session?.user?.id ?? null;
+    const userEmail =
+      options?.userEmail ?? session?.email ?? session?.user?.email ?? null;
+    const userName =
+      session?.userName ?? session?.username ?? session?.user?.name ?? null;
+    const done =
+      options?.profileCompleted != null
+        ? Boolean(options.profileCompleted)
+        : Boolean(session?.profileCompleted);
+
+    setUser({ id: userId, email: userEmail, name: userName, role });
+    setUserRole(role);
+    setIsAuthenticated(true);
+    setProfileCompleted(done);
+
+    if (role === 'admin') {
+      setOnboardingCompleted(done);
+      setAdminStatus(done ? 'active' : 'pending');
+      setOnboardingStep(done ? 4 : 1);
+    }
+
+    setIsLoading(false);
+
+    return { ok: true, role };
+  }, []);
+
   // Fetch admin status from API (for admin role only)
   const fetchAdminStatus = useCallback(async () => {
     const token = await getAccessToken();
-    const role = await AsyncStorage.getItem('role');
+    const rawRole = await AsyncStorage.getItem('role');
+    const role = normalizeRole(rawRole);
     
     if (!token || role !== 'admin') {
       return null;
@@ -200,6 +267,7 @@ export function AuthProvider({ children }) {
       login, 
       signup, 
       logout,
+      applyAuthSession,
       refreshAuthState,
       markProfileCompleted,
       fetchAdminStatus,

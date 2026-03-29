@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -18,12 +18,13 @@ import {
 import { LineChart } from "react-native-chart-kit";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const { width: screenWidth } = Dimensions.get("window");
 
 // Query Functions
 const fetchDashboardStats = async (period = "week") => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const response = await fetch(
@@ -45,7 +46,7 @@ const fetchDashboardStats = async (period = "week") => {
 };
 
 const fetchRecentOrders = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const response = await fetch(`${API_URL}/admin/orders?limit=5`, {
@@ -65,7 +66,7 @@ const fetchRecentOrders = async () => {
 };
 
 const fetchRestaurant = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const response = await fetch(`${API_URL}/admin/restaurant`, {
@@ -85,7 +86,7 @@ const fetchRestaurant = async () => {
 };
 
 const toggleRestaurantOpen = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
 
   const response = await fetch(`${API_URL}/admin/restaurant/toggle-open`, {
@@ -213,8 +214,8 @@ const SkeletonLoader = ({ opacity }) => (
 export default function AdminDashboard() {
   const navigation = useNavigation();
   const queryClient = useQueryClient();
-  const [chartPeriod, setChartPeriod] = React.useState("week");
-  const [refreshing, setRefreshing] = React.useState(false);
+  const [chartPeriod, setChartPeriod] = useState("week");
+  const [refreshing, setRefreshing] = useState(false);
 
   // Animation refs
   const skeletonOpacity = useRef(new Animated.Value(0.55)).current;
@@ -280,27 +281,6 @@ export default function AdminDashboard() {
     (ordersQuery.isLoading && !ordersQuery.data) ||
     (restaurantQuery.isLoading && !restaurantQuery.data);
 
-  // Handle refresh
-  const onRefresh = async () => {
-    setRefreshing(true);
-    try {
-      // Invalidate all dashboard-related queries
-      await queryClient.invalidateQueries({
-        queryKey: ["admin", "dashboard"],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["admin", "restaurant"],
-      });
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  // Show skeleton while loading
-  if (isLoading) {
-    return <SkeletonLoader opacity={skeletonOpacity} />;
-  }
-
   // Extract data
   const dashboardData = statsQuery.data;
   const recentOrders = ordersQuery.data || [];
@@ -343,6 +323,27 @@ export default function AdminDashboard() {
     }),
     [dashboardData, chartPeriod],
   );
+
+  // Handle refresh
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      // Invalidate all dashboard-related queries
+      await queryClient.invalidateQueries({
+        queryKey: ["admin", "dashboard"],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["admin", "restaurant"],
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Show skeleton while loading
+  if (isLoading) {
+    return <SkeletonLoader opacity={skeletonOpacity} />;
+  }
 
   const formatCurrency = (val) => `Rs. ${(val || 0).toLocaleString()}`;
 

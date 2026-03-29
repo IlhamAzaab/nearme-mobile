@@ -20,12 +20,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 import supabaseClient from "../../services/supabaseClient";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const fetchRestaurantOrders = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("Missing auth token. Please sign in again.");
 
   const response = await fetch(`${API_URL}/orders/restaurant/orders`, {
@@ -44,7 +45,7 @@ const fetchRestaurantOrders = async () => {
 };
 
 const fetchAdminRestaurant = async () => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("Missing auth token. Please sign in again.");
 
   const response = await fetch(`${API_URL}/admin/restaurant`, {
@@ -63,7 +64,7 @@ const fetchAdminRestaurant = async () => {
 };
 
 const updateRestaurantOrderStatus = async ({ orderId, status, reason }) => {
-  const token = await AsyncStorage.getItem("token");
+  const token = await getAccessToken();
   if (!token) throw new Error("Missing auth token. Please sign in again.");
 
   const response = await fetch(

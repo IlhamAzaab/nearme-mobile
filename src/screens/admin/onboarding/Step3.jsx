@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { API_URL } from '../../../config/env';
+import { getAccessToken } from '../../../lib/authStorage';
 
 const SRI_LANKAN_BANKS = [
   'Bank of Ceylon',
@@ -215,7 +216,7 @@ export default function Step3() {
 
     setLoading(true);
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getAccessToken();
 
       const res = await fetch(`${API_URL}/restaurant-onboarding/step-3`, {
         method: 'POST',

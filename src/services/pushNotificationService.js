@@ -668,7 +668,8 @@ class PushNotificationService {
     console.log("[Push] Initializing...");
 
     // Store the user role so we can filter notifications by role
-    this._userRole = await AsyncStorage.getItem("role");
+    const storedRole = await AsyncStorage.getItem("role");
+    this._userRole = storedRole ? String(storedRole).trim().toLowerCase() : null;
     console.log("[Push] User role:", this._userRole);
 
     // Warn if running in Expo Go on Android
