@@ -1,102 +1,141 @@
-import React, { useState, useEffect } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  Modal,
+  Animated,
   Image,
   Linking,
+  Modal,
   Pressable,
-  Animated,
-  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_URL } from "../../config/env";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const DEFAULT_SUMMARY = {
+  total_earnings: 0,
+  total_withdrawals: 0,
+  remaining_balance: 0,
+  previous_balance: 0,
+  today_earnings: 0,
+  today_withdrawals: 0,
+  last_30_days_earnings: 0,
+  last_30_days_withdrawals: 0,
+  payment_count: 0,
+};
+
+const SKELETON_LOOP_MS = 900;
 
 export default function AdminWithdrawals() {
-  const navigation = useNavigation();
-  const [summary, setSummary] = useState({
-    total_earnings: 0,
-    total_withdrawals: 0,
-    remaining_balance: 0,
-    today_withdrawals: 0,
-    payment_count: 0,
-  });
-  const [payments, setPayments] = useState([]);
+  const queryClient = useQueryClient();
   const [selectedPayment, setSelectedPayment] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
 
-  // Animation for modal
-  const slideAnim = useState(new Animated.Value(300))[0];
+  const modalTranslateY = useRef(new Animated.Value(280)).current;
+  const skeletonOpacity = useRef(new Animated.Value(0.55)).current;
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(skeletonOpacity, {
+          toValue: 1,
+          duration: SKELETON_LOOP_MS,
+          useNativeDriver: true,
+        }),
+        Animated.timing(skeletonOpacity, {
+          toValue: 0.55,
+          duration: SKELETON_LOOP_MS,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    loop.start();
+    return () => loop.stop();
+  }, [skeletonOpacity]);
 
   useEffect(() => {
-    if (selectedPayment) {
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        friction: 8,
-        tension: 65,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      slideAnim.setValue(300);
+    if (!selectedPayment) {
+      modalTranslateY.setValue(280);
+      return;
     }
-  }, [selectedPayment]);
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    Animated.spring(modalTranslateY, {
+      toValue: 0,
+      friction: 9,
+      tension: 75,
+      useNativeDriver: true,
+    }).start();
+  }, [modalTranslateY, selectedPayment]);
 
+  const summaryQuery = useQuery({
+    queryKey: ["admin", "withdrawals", "summary"],
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    queryFn: async () => {
       const token = await AsyncStorage.getItem("token");
-      if (!token) {
-        setError("Not authenticated");
-        setLoading(false);
-        return;
+      if (!token) throw new Error("Not authenticated");
+
+      const res = await fetch(`${API_URL}/admin/withdrawals/admin/summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.summary) {
+        throw new Error(data?.message || "Failed to load withdrawal summary");
       }
 
-      const [summaryRes, paymentsRes] = await Promise.all([
-        fetch(`${API_URL}/admin/withdrawals/admin/summary`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API_URL}/admin/withdrawals/admin/history`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      ]);
+      return data.summary;
+    },
+  });
 
-      const summaryData = await summaryRes.json();
-      const paymentsData = await paymentsRes.json();
+  const paymentsQuery = useQuery({
+    queryKey: ["admin", "withdrawals", "history"],
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    queryFn: async () => {
+      const token = await AsyncStorage.getItem("token");
+      if (!token) throw new Error("Not authenticated");
 
-      if (summaryRes.ok && summaryData.summary) {
-        setSummary(summaryData.summary);
+      const res = await fetch(`${API_URL}/admin/withdrawals/admin/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to load withdrawal history");
       }
-      if (paymentsRes.ok) {
-        setPayments(paymentsData.payments || []);
-      }
-    } catch (err) {
-      console.error("Error fetching withdrawal data:", err);
-      setError("Failed to load data");
-    } finally {
-      setLoading(false);
-    }
-  };
+
+      return data.payments || [];
+    },
+  });
+
+  const summary = summaryQuery.data || DEFAULT_SUMMARY;
+  const payments = paymentsQuery.data || [];
+
+  const loading =
+    (summaryQuery.isLoading && !summaryQuery.data) ||
+    (paymentsQuery.isLoading && !paymentsQuery.data?.length);
+  const error =
+    summaryQuery.error?.message || paymentsQuery.error?.message || null;
+  const refreshing = summaryQuery.isFetching || paymentsQuery.isFetching;
+
+  const pendingBalance = useMemo(
+    () =>
+      Math.max(
+        0,
+        Number(summary.remaining_balance || 0) -
+          Number(summary.today_earnings || 0),
+      ),
+    [summary.remaining_balance, summary.today_earnings],
+  );
 
   const onRefresh = async () => {
-    setRefreshing(true);
-    await fetchData();
-    setRefreshing(false);
+    await queryClient.invalidateQueries({ queryKey: ["admin", "withdrawals"] });
   };
 
   const formatDate = (dateStr) => {
@@ -117,78 +156,185 @@ export default function AdminWithdrawals() {
     });
   };
 
-  const getProgressPercentage = () => {
-    if (summary.total_earnings > 0) {
-      return Math.min(100, (summary.total_withdrawals / summary.total_earnings) * 100);
-    }
-    return 0;
-  };
-
   const openProofUrl = (url) => {
     if (url) {
       Linking.openURL(url);
     }
   };
 
-  // Loading Skeleton
+  const animatedSkeletonStyle = { opacity: skeletonOpacity };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          {/* Header Skeleton */}
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+        >
           <View style={styles.skeletonHeader}>
-            <View style={[styles.skeleton, { width: 150, height: 24, marginBottom: 8 }]} />
-            <View style={[styles.skeleton, { width: 100, height: 16 }]} />
+            <Animated.View
+              style={[
+                styles.skeleton,
+                animatedSkeletonStyle,
+                { width: 170, height: 28, marginBottom: 8 },
+              ]}
+            />
+            <Animated.View
+              style={[
+                styles.skeleton,
+                animatedSkeletonStyle,
+                { width: 96, height: 4, borderRadius: 999 },
+              ]}
+            />
           </View>
 
-          {/* Balance Card Skeleton */}
-          <View style={styles.skeletonBalanceCard}>
-            <View style={[styles.skeleton, styles.skeletonDark, { width: 100, height: 12, marginBottom: 12 }]} />
-            <View style={[styles.skeleton, styles.skeletonDark, { width: 180, height: 40, marginBottom: 8 }]} />
-            <View style={[styles.skeleton, styles.skeletonDark, { width: 140, height: 12 }]} />
+          <View style={styles.skeletonHeroCard}>
+            <Animated.View
+              style={[
+                styles.skeletonGreen,
+                animatedSkeletonStyle,
+                { width: 100, height: 10, marginBottom: 12 },
+              ]}
+            />
+            <Animated.View
+              style={[
+                styles.skeletonGreen,
+                animatedSkeletonStyle,
+                { width: 190, height: 40, marginBottom: 10 },
+              ]}
+            />
+            <Animated.View
+              style={[
+                styles.skeletonGreen,
+                animatedSkeletonStyle,
+                { width: 130, height: 10, marginBottom: 6 },
+              ]}
+            />
+            <Animated.View
+              style={[
+                styles.skeletonGreen,
+                animatedSkeletonStyle,
+                { width: 120, height: 22 },
+              ]}
+            />
           </View>
 
-          {/* Stats Skeleton */}
-          <View style={styles.statsGrid}>
+          <View style={styles.skeletonCard}>
+            <Animated.View
+              style={[
+                styles.skeleton,
+                animatedSkeletonStyle,
+                { width: 130, height: 14, marginBottom: 10 },
+              ]}
+            />
+            <Animated.View
+              style={[
+                styles.skeleton,
+                animatedSkeletonStyle,
+                { width: 150, height: 34, marginBottom: 10 },
+              ]}
+            />
+            <View style={styles.skeletonGridTwo}>
+              {[1, 2].map((i) => (
+                <View key={i} style={styles.skeletonMiniCard}>
+                  <Animated.View
+                    style={[
+                      styles.skeleton,
+                      animatedSkeletonStyle,
+                      { width: 70, height: 9, marginBottom: 8 },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.skeleton,
+                      animatedSkeletonStyle,
+                      { width: 90, height: 16 },
+                    ]}
+                  />
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.skeletonCard}>
+            <Animated.View
+              style={[
+                styles.skeleton,
+                animatedSkeletonStyle,
+                { width: 130, height: 14, marginBottom: 10 },
+              ]}
+            />
+            <View style={styles.skeletonGridTwo}>
+              {[1, 2].map((i) => (
+                <View key={i} style={styles.skeletonMiniCard}>
+                  <Animated.View
+                    style={[
+                      styles.skeleton,
+                      animatedSkeletonStyle,
+                      { width: 64, height: 9, marginBottom: 8 },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.skeleton,
+                      animatedSkeletonStyle,
+                      { width: 94, height: 16 },
+                    ]}
+                  />
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.skeletonPaymentList}>
             {[1, 2, 3].map((i) => (
-              <View key={i} style={styles.skeletonStatCard}>
-                <View style={[styles.skeleton, { width: 50, height: 10, marginBottom: 8 }]} />
-                <View style={[styles.skeleton, { width: 70, height: 20 }]} />
+              <View key={i} style={styles.skeletonPaymentCard}>
+                <Animated.View
+                  style={[
+                    styles.skeleton,
+                    animatedSkeletonStyle,
+                    { width: 38, height: 38, borderRadius: 19 },
+                  ]}
+                />
+                <View style={styles.skeletonPaymentInfo}>
+                  <Animated.View
+                    style={[
+                      styles.skeleton,
+                      animatedSkeletonStyle,
+                      { width: 110, height: 14, marginBottom: 6 },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.skeleton,
+                      animatedSkeletonStyle,
+                      { width: 150, height: 11 },
+                    ]}
+                  />
+                </View>
+                <Animated.View
+                  style={[
+                    styles.skeleton,
+                    animatedSkeletonStyle,
+                    { width: 40, height: 12 },
+                  ]}
+                />
               </View>
             ))}
           </View>
-
-          {/* Progress Skeleton */}
-          <View style={styles.skeletonProgressCard}>
-            <View style={[styles.skeleton, { width: 100, height: 12, marginBottom: 12 }]} />
-            <View style={[styles.skeleton, { width: "100%", height: 10, borderRadius: 5 }]} />
-          </View>
-
-          {/* Payment List Skeleton */}
-          {[1, 2, 3].map((i) => (
-            <View key={i} style={styles.skeletonPaymentCard}>
-              <View style={[styles.skeleton, { width: 40, height: 40, borderRadius: 20 }]} />
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <View style={[styles.skeleton, { width: 80, height: 16, marginBottom: 6 }]} />
-                <View style={[styles.skeleton, { width: 120, height: 12 }]} />
-              </View>
-              <View style={[styles.skeleton, { width: 40, height: 16 }]} />
-            </View>
-          ))}
         </ScrollView>
       </SafeAreaView>
     );
   }
 
-  // Error State
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.errorContainer}>
           <View style={styles.errorBox}>
-            <Text style={styles.errorIcon}>⚠️</Text>
+            <Text style={styles.errorIcon}>!</Text>
             <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
+            <TouchableOpacity style={styles.retryButton} onPress={onRefresh}>
               <Text style={styles.retryButtonText}>Try Again</Text>
             </TouchableOpacity>
           </View>
@@ -204,80 +350,97 @@ export default function AdminWithdrawals() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#06C168"]} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#06C168"]}
+          />
         }
       >
-        {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.headerTitle}>Withdrawals</Text>
-            <Text style={styles.headerSubtitle}>View your payment history</Text>
+            <View style={styles.headerUnderline} />
           </View>
           <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
-            <Text style={styles.refreshIcon}>🔄</Text>
+            <Text style={styles.refreshIcon}>R</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Balance Hero Card */}
-        <View style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>BALANCE TO RECEIVE</Text>
-          <Text style={styles.balanceAmount}>Rs.{summary.remaining_balance?.toFixed(2)}</Text>
-          <Text style={styles.balanceHint}>This is what the platform owes you</Text>
-        </View>
+        <View style={styles.heroCard}>
+          <Text style={styles.heroLabel}>TOTAL EARNED</Text>
+          <Text style={styles.heroAmount}>
+            Rs.{Number(summary.total_earnings || 0).toFixed(2)}
+          </Text>
 
-        {/* Stats Grid */}
-        <View style={styles.statsGrid}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>TOTAL EARNED</Text>
-            <Text style={styles.statValue}>Rs.{summary.total_earnings?.toFixed(0)}</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>TOTAL RECEIVED</Text>
-            <Text style={[styles.statValue, styles.statValueGreen]}>
-              Rs.{summary.total_withdrawals?.toFixed(0)}
-            </Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>TODAY</Text>
-            <Text style={[styles.statValue, styles.statValueGreen]}>
-              Rs.{summary.today_withdrawals?.toFixed(0)}
+          <View style={styles.heroSubWrap}>
+            <Text style={styles.heroSubLabel}>TOTAL RECEIVE</Text>
+            <Text style={styles.heroSubAmount}>
+              Rs.{Number(summary.total_withdrawals || 0).toFixed(2)}
             </Text>
           </View>
         </View>
 
-        {/* Progress Bar Card */}
-        <View style={styles.progressCard}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressLabel}>Payment Progress</Text>
-            <Text style={styles.progressPercent}>{getProgressPercentage().toFixed(0)}% received</Text>
-          </View>
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${getProgressPercentage()}%` }]} />
-          </View>
-          <View style={styles.progressFooter}>
-            <Text style={styles.progressReceived}>
-              Received: Rs.{summary.total_withdrawals?.toFixed(0)}
-            </Text>
-            <Text style={styles.progressPending}>
-              Pending: Rs.{summary.remaining_balance?.toFixed(0)}
-            </Text>
+        <View style={styles.infoCard}>
+          <Text style={styles.cardHeading}>BALANCE TO RECEIVE</Text>
+          <Text style={styles.cardAmount}>
+            Rs.{Number(summary.remaining_balance || 0).toFixed(2)}
+          </Text>
+
+          <View style={styles.statGrid}>
+            <View style={styles.statCell}>
+              <Text style={styles.statLabel}>PENDING BALANCE</Text>
+              <Text style={styles.statValue}>
+                Rs.{pendingBalance.toFixed(2)}
+              </Text>
+            </View>
+            <View style={styles.statCell}>
+              <Text style={styles.statLabel}>TODAY EARNED</Text>
+              <Text style={styles.statValue}>
+                Rs.{Number(summary.today_earnings || 0).toFixed(2)}
+              </Text>
+            </View>
           </View>
         </View>
 
-        {/* Payment History */}
+        <View style={styles.infoCard}>
+          <View style={styles.sectionTitleRow}>
+            <View style={styles.sectionAccent} />
+            <Text style={styles.sectionTitle}>Last 30 Days</Text>
+          </View>
+          <View style={styles.statGrid}>
+            <View style={styles.statCell}>
+              <Text style={styles.statLabel}>EARNED</Text>
+              <Text style={styles.statValue}>
+                Rs.{Number(summary.last_30_days_earnings || 0).toFixed(2)}
+              </Text>
+            </View>
+            <View style={styles.statCell}>
+              <Text style={[styles.statValue, styles.statValueGreen]}>
+                Rs.{Number(summary.last_30_days_withdrawals || 0).toFixed(2)}
+              </Text>
+              <Text style={styles.statLabel}>RECEIVE</Text>
+            </View>
+          </View>
+        </View>
+
         <View style={styles.historySection}>
-          <View style={styles.historyHeader}>
-            <Text style={styles.historyIcon}>🕐</Text>
-            <Text style={styles.historyTitle}>Payment History ({payments.length})</Text>
+          <View style={styles.sectionTitleRow}>
+            <View style={styles.sectionAccent} />
+            <Text style={styles.sectionTitle}>
+              Payment History ({payments.length})
+            </Text>
           </View>
 
           {payments.length === 0 ? (
             <View style={styles.emptyState}>
               <View style={styles.emptyIconContainer}>
-                <Text style={styles.emptyIcon}>🧾</Text>
+                <Text style={styles.emptyIcon}>[]</Text>
               </View>
               <Text style={styles.emptyTitle}>No withdrawals yet</Text>
-              <Text style={styles.emptySubtitle}>Payments from management will appear here</Text>
+              <Text style={styles.emptySubtitle}>
+                Payments from management will appear here
+              </Text>
             </View>
           ) : (
             <View style={styles.paymentsList}>
@@ -286,22 +449,28 @@ export default function AdminWithdrawals() {
                   key={payment.id}
                   style={styles.paymentCard}
                   onPress={() => setSelectedPayment(payment)}
-                  activeOpacity={0.7}
+                  activeOpacity={0.85}
                 >
                   <View style={styles.paymentIconContainer}>
-                    <Text style={styles.paymentIcon}>✓</Text>
+                    <Text style={styles.paymentIcon}>OK</Text>
                   </View>
                   <View style={styles.paymentInfo}>
                     <Text style={styles.paymentAmount}>
                       Rs.{parseFloat(payment.amount).toFixed(2)}
                     </Text>
                     <Text style={styles.paymentDate}>
-                      {formatDate(payment.created_at)} at {formatTime(payment.created_at)}
+                      {formatDate(payment.created_at)} at{" "}
+                      {formatTime(payment.created_at)}
                     </Text>
+                    {payment.note ? (
+                      <Text style={styles.paymentNote} numberOfLines={1}>
+                        {payment.note}
+                      </Text>
+                    ) : null}
                   </View>
                   <View style={styles.paymentArrow}>
                     <Text style={styles.paymentViewText}>View</Text>
-                    <Text style={styles.paymentArrowIcon}>›</Text>
+                    <Text style={styles.paymentArrowIcon}>{">"}</Text>
                   </View>
                 </TouchableOpacity>
               ))}
@@ -310,39 +479,44 @@ export default function AdminWithdrawals() {
         </View>
       </ScrollView>
 
-      {/* Payment Detail Modal */}
       <Modal
         visible={!!selectedPayment}
         transparent
         animationType="fade"
         onRequestClose={() => setSelectedPayment(null)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setSelectedPayment(null)}>
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setSelectedPayment(null)}
+        >
           <Animated.View
-            style={[styles.modalContent, { transform: [{ translateY: slideAnim }] }]}
+            style={[
+              styles.modalContent,
+              { transform: [{ translateY: modalTranslateY }] },
+            ]}
           >
             <Pressable onPress={(e) => e.stopPropagation()}>
-              {/* Modal Handle */}
               <View style={styles.modalHandle}>
                 <View style={styles.modalHandleBar} />
               </View>
 
-              {/* Modal Header */}
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Payment Details</Text>
                 <TouchableOpacity
                   style={styles.modalCloseBtn}
                   onPress={() => setSelectedPayment(null)}
                 >
-                  <Text style={styles.modalCloseIcon}>✕</Text>
+                  <Text style={styles.modalCloseIcon}>X</Text>
                 </TouchableOpacity>
               </View>
 
-              {/* Amount Display */}
               <View style={styles.modalAmountSection}>
                 <Text style={styles.modalAmountLabel}>AMOUNT RECEIVED</Text>
                 <Text style={styles.modalAmountValue}>
-                  Rs.{selectedPayment ? parseFloat(selectedPayment.amount).toFixed(2) : "0.00"}
+                  Rs.
+                  {selectedPayment
+                    ? parseFloat(selectedPayment.amount).toFixed(2)
+                    : "0.00"}
                 </Text>
                 <View style={styles.modalStatusBadge}>
                   <View style={styles.modalStatusDot} />
@@ -350,18 +524,21 @@ export default function AdminWithdrawals() {
                 </View>
               </View>
 
-              {/* Details Box */}
               <View style={styles.modalDetailsBox}>
                 <View style={styles.modalDetailRow}>
                   <Text style={styles.modalDetailLabel}>Date</Text>
                   <Text style={styles.modalDetailValue}>
-                    {selectedPayment ? formatDate(selectedPayment.created_at) : "-"}
+                    {selectedPayment
+                      ? formatDate(selectedPayment.created_at)
+                      : "-"}
                   </Text>
                 </View>
                 <View style={styles.modalDetailRow}>
                   <Text style={styles.modalDetailLabel}>Time</Text>
                   <Text style={styles.modalDetailValue}>
-                    {selectedPayment ? formatTime(selectedPayment.created_at) : "-"}
+                    {selectedPayment
+                      ? formatTime(selectedPayment.created_at)
+                      : "-"}
                   </Text>
                 </View>
                 <View style={styles.modalDetailRow}>
@@ -370,18 +547,22 @@ export default function AdminWithdrawals() {
                     {selectedPayment?.id?.substring(0, 12).toUpperCase() || "-"}
                   </Text>
                 </View>
-                {selectedPayment?.note && (
+                {selectedPayment?.note ? (
                   <View style={styles.modalDetailRow}>
                     <Text style={styles.modalDetailLabel}>Note</Text>
-                    <Text style={[styles.modalDetailValue, { flex: 1, textAlign: "right" }]}>
+                    <Text
+                      style={[
+                        styles.modalDetailValue,
+                        { flex: 1, textAlign: "right" },
+                      ]}
+                    >
                       {selectedPayment.note}
                     </Text>
                   </View>
-                )}
+                ) : null}
               </View>
 
-              {/* Proof Section */}
-              {selectedPayment?.proof_url && (
+              {selectedPayment?.proof_url ? (
                 <View style={styles.proofSection}>
                   <Text style={styles.proofLabel}>TRANSFER RECEIPT</Text>
                   {selectedPayment.proof_type === "pdf" ? (
@@ -390,13 +571,17 @@ export default function AdminWithdrawals() {
                       onPress={() => openProofUrl(selectedPayment.proof_url)}
                     >
                       <View style={styles.proofPdfIcon}>
-                        <Text style={styles.proofPdfEmoji}>📄</Text>
+                        <Text style={styles.proofPdfEmoji}>PDF</Text>
                       </View>
                       <View style={styles.proofPdfInfo}>
-                        <Text style={styles.proofPdfTitle}>View PDF Receipt</Text>
-                        <Text style={styles.proofPdfSubtitle}>Tap to open in browser</Text>
+                        <Text style={styles.proofPdfTitle}>
+                          View PDF Receipt
+                        </Text>
+                        <Text style={styles.proofPdfSubtitle}>
+                          Tap to open in browser
+                        </Text>
                       </View>
-                      <Text style={styles.proofPdfArrow}>↗</Text>
+                      <Text style={styles.proofPdfArrow}>Open</Text>
                     </TouchableOpacity>
                   ) : (
                     <TouchableOpacity
@@ -409,13 +594,15 @@ export default function AdminWithdrawals() {
                         resizeMode="contain"
                       />
                       <View style={styles.proofImageFooter}>
-                        <Text style={styles.proofImageHint}>Tap image to view full size</Text>
+                        <Text style={styles.proofImageHint}>
+                          Tap image to view full size
+                        </Text>
                         <Text style={styles.proofImageOpen}>Open</Text>
                       </View>
                     </TouchableOpacity>
                   )}
                 </View>
-              )}
+              ) : null}
             </Pressable>
           </Animated.View>
         </Pressable>
@@ -427,260 +614,265 @@ export default function AdminWithdrawals() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f9fafb",
+    backgroundColor: "#fff",
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: 14,
+    paddingBottom: 28,
   },
 
-  // Header
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 14,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 30,
+    fontWeight: "700",
+    color: "#111827",
+    lineHeight: 34,
   },
-  headerSubtitle: {
-    fontSize: 14,
-    color: "#6b7280",
-    marginTop: 4,
+  headerUnderline: {
+    marginTop: 3,
+    width: 96,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: "#06C168",
   },
   refreshButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#dcfce7",
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#dcfce7",
     alignItems: "center",
     justifyContent: "center",
   },
   refreshIcon: {
-    fontSize: 20,
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#16a34a",
   },
 
-  // Balance Card
-  balanceCard: {
-    backgroundColor: "#dcfce7",
-    borderRadius: 20,
-    padding: 24,
+  heroCard: {
+    backgroundColor: "#E6F9F1",
+    borderRadius: 14,
+    padding: 16,
     borderWidth: 1,
-    borderColor: "#9EEBBE",
-    marginBottom: 16,
+    borderColor: "#B8F0D0",
+    marginBottom: 12,
   },
-  balanceLabel: {
-    fontSize: 10,
+  heroLabel: {
+    fontSize: 11,
     fontWeight: "700",
-    color: "#15803d",
-    letterSpacing: 1,
-    marginBottom: 8,
+    color: "#1f2937",
+    letterSpacing: 0.5,
   },
-  balanceAmount: {
-    fontSize: 36,
+  heroAmount: {
+    marginTop: 2,
+    fontSize: 34,
     fontWeight: "800",
     color: "#111827",
-    letterSpacing: -1,
+    letterSpacing: -0.4,
   },
-  balanceHint: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginTop: 8,
+  heroSubWrap: {
+    marginTop: 10,
   },
-
-  // Stats Grid
-  statsGrid: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 16,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-  },
-  statLabel: {
+  heroSubLabel: {
     fontSize: 9,
     fontWeight: "700",
     color: "#6b7280",
     letterSpacing: 0.5,
   },
-  statValue: {
-    fontSize: 16,
-    fontWeight: "bold",
+  heroSubAmount: {
+    marginTop: 3,
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#06C168",
+  },
+
+  infoCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  cardHeading: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#1f2937",
+    letterSpacing: 0.4,
+  },
+  cardAmount: {
+    marginTop: 2,
+    fontSize: 31,
+    fontWeight: "800",
+    color: "#ea580c",
+    lineHeight: 36,
+  },
+  sectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  sectionAccent: {
+    width: 4,
+    height: 22,
+    borderRadius: 999,
+    backgroundColor: "#06C168",
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
     color: "#111827",
+  },
+  statGrid: {
+    flexDirection: "row",
+    gap: 8,
     marginTop: 6,
+  },
+  statCell: {
+    flex: 1,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#f9fafb",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  statLabel: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#6b7280",
+    letterSpacing: 0.4,
+  },
+  statValue: {
+    marginTop: 3,
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#111827",
   },
   statValueGreen: {
     color: "#06C168",
   },
 
-  // Progress Card
-  progressCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    marginBottom: 20,
-  },
-  progressHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  progressLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6b7280",
-  },
-  progressPercent: {
-    fontSize: 12,
-    color: "#6b7280",
-  },
-  progressBarBg: {
-    height: 10,
-    backgroundColor: "#f3f4f6",
-    borderRadius: 5,
-    overflow: "hidden",
-  },
-  progressBarFill: {
-    height: "100%",
-    backgroundColor: "#06C168",
-    borderRadius: 5,
-  },
-  progressFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 8,
-  },
-  progressReceived: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: "#06C168",
-  },
-  progressPending: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: "#d97706",
-  },
-
-  // History Section
   historySection: {
-    marginTop: 4,
+    marginTop: 2,
   },
-  historyHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 16,
-  },
-  historyIcon: {
-    fontSize: 18,
-  },
-  historyTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#1f2937",
-  },
-
-  // Empty State
   emptyState: {
     backgroundColor: "#fff",
-    borderRadius: 20,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#f3f4f6",
-    padding: 40,
+    borderColor: "#E5E7EB",
+    padding: 28,
     alignItems: "center",
   },
   emptyIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: "#f3f4f6",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   emptyIcon: {
-    fontSize: 28,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#9ca3af",
   },
   emptyTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#4b5563",
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#111827",
   },
   emptySubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#9ca3af",
-    marginTop: 4,
+    marginTop: 3,
+    textAlign: "center",
   },
 
-  // Payment Card
   paymentsList: {
-    gap: 12,
+    gap: 10,
   },
   paymentCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 10,
+    padding: 12,
     borderWidth: 1,
-    borderColor: "#f3f4f6",
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   paymentIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#dcfce7",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#E6F9F1",
     alignItems: "center",
     justifyContent: "center",
   },
   paymentIcon: {
-    fontSize: 18,
+    fontSize: 10,
+    fontWeight: "700",
     color: "#06C168",
   },
   paymentInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 10,
   },
   paymentAmount: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
   },
   paymentDate: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginTop: 2,
+    fontSize: 11,
+    color: "#9ca3af",
+    marginTop: 1,
+    fontWeight: "500",
+  },
+  paymentNote: {
+    marginTop: 3,
+    fontSize: 11,
+    color: "#9ca3af",
+    fontStyle: "italic",
   },
   paymentArrow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 3,
   },
   paymentViewText: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: "#9ca3af",
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#6b7280",
   },
   paymentArrowIcon: {
-    fontSize: 18,
+    fontSize: 16,
     color: "#9ca3af",
+    marginTop: -1,
   },
 
-  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -688,16 +880,16 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     maxHeight: "85%",
   },
   modalHandle: {
     alignItems: "center",
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   modalHandleBar: {
-    width: 40,
+    width: 38,
     height: 4,
     backgroundColor: "#d1d5db",
     borderRadius: 2,
@@ -706,59 +898,64 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    marginBottom: 16,
+    paddingHorizontal: 18,
+    marginBottom: 14,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
   },
   modalCloseBtn: {
     padding: 4,
   },
   modalCloseIcon: {
-    fontSize: 18,
+    fontSize: 16,
+    fontWeight: "700",
     color: "#9ca3af",
   },
   modalAmountSection: {
     alignItems: "center",
-    paddingVertical: 16,
+    paddingVertical: 14,
   },
   modalAmountLabel: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
     color: "#06C168",
-    letterSpacing: 1,
-    marginBottom: 4,
+    letterSpacing: 0.3,
+    marginBottom: 3,
   },
   modalAmountValue: {
-    fontSize: 36,
-    fontWeight: "bold",
+    fontSize: 32,
+    fontWeight: "800",
     color: "#111827",
+    lineHeight: 36,
   },
   modalStatusBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginTop: 8,
+    gap: 5,
+    marginTop: 6,
   },
   modalStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
     backgroundColor: "#06C168",
   },
   modalStatusText: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#6b7280",
+    fontWeight: "500",
   },
   modalDetailsBox: {
     backgroundColor: "#f9fafb",
-    marginHorizontal: 20,
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
+    marginHorizontal: 18,
+    borderRadius: 10,
+    padding: 12,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   modalDetailRow: {
     flexDirection: "row",
@@ -766,74 +963,82 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalDetailLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#6b7280",
+    fontWeight: "600",
   },
   modalDetailValue: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#1f2937",
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#111827",
   },
   monoFont: {
-    fontFamily: 'monospace',
+    fontFamily: "monospace",
   },
+
   proofSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    paddingBottom: 32,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    paddingBottom: 28,
   },
   proofLabel: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
     color: "#6b7280",
-    letterSpacing: 1,
-    marginBottom: 12,
+    letterSpacing: 0.3,
+    marginBottom: 10,
   },
   proofPdfCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#f9fafb",
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   proofPdfIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: "#fef2f2",
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: "#FEE2E2",
     alignItems: "center",
     justifyContent: "center",
   },
   proofPdfEmoji: {
-    fontSize: 24,
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#ef4444",
   },
   proofPdfInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 10,
   },
   proofPdfTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#1f2937",
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
   },
   proofPdfSubtitle: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#9ca3af",
-    marginTop: 2,
+    marginTop: 1,
+    fontWeight: "500",
   },
   proofPdfArrow: {
-    fontSize: 16,
+    fontSize: 12,
+    fontWeight: "700",
     color: "#9ca3af",
   },
   proofImageContainer: {
-    borderRadius: 12,
+    borderRadius: 10,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderColor: "#E5E7EB",
   },
   proofImage: {
     width: "100%",
-    height: 200,
+    height: 180,
     backgroundColor: "#f9fafb",
   },
   proofImageFooter: {
@@ -841,7 +1046,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     backgroundColor: "#f9fafb",
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
   },
   proofImageHint: {
@@ -850,90 +1055,111 @@ const styles = StyleSheet.create({
   },
   proofImageOpen: {
     fontSize: 10,
-    fontWeight: "600",
+    fontWeight: "700",
     color: "#06C168",
   },
 
-  // Skeleton Loading
   skeletonHeader: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   skeleton: {
     backgroundColor: "#e5e7eb",
     borderRadius: 6,
   },
-  skeletonDark: {
-    backgroundColor: "#9EEBBE",
+  skeletonGreen: {
+    backgroundColor: "#B8F0D0",
+    borderRadius: 6,
   },
-  skeletonBalanceCard: {
-    backgroundColor: "#dcfce7",
-    borderRadius: 20,
-    padding: 24,
-    marginBottom: 16,
-  },
-  skeletonStatCard: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-  },
-  skeletonProgressCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
+  skeletonHeroCard: {
+    backgroundColor: "#E6F9F1",
+    borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    marginBottom: 20,
+    borderColor: "#B8F0D0",
+    marginBottom: 12,
+  },
+  skeletonCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 12,
+  },
+  skeletonGridTwo: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  skeletonMiniCard: {
+    flex: 1,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#f9fafb",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  skeletonPaymentList: {
+    gap: 10,
   },
   skeletonPaymentCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 10,
+    padding: 12,
     borderWidth: 1,
-    borderColor: "#f3f4f6",
-    marginBottom: 12,
+    borderColor: "#E5E7EB",
+  },
+  skeletonPaymentInfo: {
+    flex: 1,
+    marginLeft: 10,
   },
 
-  // Error State
   errorContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 20,
+    padding: 18,
   },
   errorBox: {
-    backgroundColor: "#fef2f2",
+    backgroundColor: "#FEE2E2",
     borderWidth: 1,
-    borderColor: "#fecaca",
-    borderRadius: 20,
-    padding: 24,
+    borderColor: "#FCA5A5",
+    borderRadius: 14,
+    padding: 20,
     alignItems: "center",
     width: "100%",
-    maxWidth: 320,
+    maxWidth: 300,
   },
   errorIcon: {
-    fontSize: 48,
-    marginBottom: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#ef4444",
+    textAlign: "center",
+    lineHeight: 36,
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 10,
   },
   errorText: {
-    fontSize: 14,
-    color: "#dc2626",
+    fontSize: 13,
+    color: "#DC2626",
     textAlign: "center",
+    fontWeight: "600",
   },
   retryButton: {
-    marginTop: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#fee2e2",
-    borderRadius: 12,
+    marginTop: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: "#DC2626",
+    borderRadius: 10,
   },
   retryButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#b91c1c",
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#fff",
   },
 });

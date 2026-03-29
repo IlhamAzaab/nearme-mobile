@@ -1,47 +1,79 @@
-import React, { useEffect, useState, useRef } from 'react';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation } from "@react-navigation/native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import { useEffect, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  Image,
   ActivityIndicator,
   Alert,
+  Dimensions,
+  Image,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
-import FreeMapView from '../../components/maps/FreeMapView';
-import { useNavigation } from '@react-navigation/native';
-import { API_URL } from '../../config/env';
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import FreeMapView from "../../components/maps/FreeMapView";
+import { API_URL } from "../../config/env";
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+const fetchAdminRestaurant = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token found");
+
+  const res = await fetch(`${API_URL}/admin/restaurant`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to load restaurant");
+  return data.restaurant;
+};
+
+const updateAdminRestaurant = async (payload) => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token found");
+
+  const res = await fetch(`${API_URL}/admin/restaurant`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to update restaurant");
+  return data.restaurant;
+};
 
 export default function RestaurantDetail() {
   const navigation = useNavigation();
+  const queryClient = useQueryClient();
   const mapRef = useRef(null);
-  const [restaurant, setRestaurant] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(null); // 'logo' | 'cover' | null
   const [locating, setLocating] = useState(false);
   const [formData, setFormData] = useState({
-    restaurant_name: '',
-    address: '',
-    city: '',
-    postal_code: '',
-    opening_time: '',
-    close_time: '',
-    logo_url: '',
-    cover_image_url: '',
+    restaurant_name: "",
+    address: "",
+    city: "",
+    postal_code: "",
+    opening_time: "",
+    close_time: "",
+    logo_url: "",
+    cover_image_url: "",
     latitude: null,
     longitude: null,
   });
@@ -52,65 +84,61 @@ export default function RestaurantDetail() {
     longitudeDelta: 0.01,
   });
 
-  useEffect(() => {
-    fetchRestaurant();
-  }, []);
+  const restaurantQuery = useQuery({
+    queryKey: ["admin", "restaurant"],
+    queryFn: fetchAdminRestaurant,
+    staleTime: 120 * 1000,
+  });
 
-  const fetchRestaurant = async () => {
-    const token = await AsyncStorage.getItem('token');
-    if (!token) {
-      setError('No authentication token found');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const res = await fetch(`${API_URL}/admin/restaurant`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+  const saveRestaurantMutation = useMutation({
+    mutationFn: updateAdminRestaurant,
+    onSuccess: async (updated) => {
+      queryClient.setQueryData(["admin", "restaurant"], updated);
+      setEditing(false);
+      Alert.alert("Success", "Restaurant details updated successfully");
+      await queryClient.invalidateQueries({
+        queryKey: ["admin", "restaurant"],
       });
+    },
+    onError: (err) => {
+      Alert.alert(
+        "Error",
+        err.message || "Network error while updating restaurant",
+      );
+    },
+  });
 
-      const data = await res.json();
+  const restaurant = restaurantQuery.data || null;
+  const loading = restaurantQuery.isLoading && !restaurantQuery.data;
+  const error = restaurantQuery.error?.message || null;
+  const saving = saveRestaurantMutation.isPending;
 
-      if (!res.ok) {
-        setError(data?.message || 'Failed to load restaurant');
-        setLoading(false);
-        return;
-      }
+  useEffect(() => {
+    if (!restaurant) return;
 
-      setRestaurant(data.restaurant);
-      const restaurantData = {
-        restaurant_name: data.restaurant.restaurant_name || '',
-        address: data.restaurant.address || '',
-        city: data.restaurant.city || '',
-        postal_code: data.restaurant.postal_code || '',
-        opening_time: data.restaurant.opening_time || '',
-        close_time: data.restaurant.close_time || '',
-        logo_url: data.restaurant.logo_url || '',
-        cover_image_url: data.restaurant.cover_image_url || '',
-        latitude: data.restaurant.latitude || null,
-        longitude: data.restaurant.longitude || null,
+    setFormData({
+      restaurant_name: restaurant.restaurant_name || "",
+      address: restaurant.address || "",
+      city: restaurant.city || "",
+      postal_code: restaurant.postal_code || "",
+      opening_time: restaurant.opening_time || "",
+      close_time: restaurant.close_time || "",
+      logo_url: restaurant.logo_url || "",
+      cover_image_url: restaurant.cover_image_url || "",
+      latitude: restaurant.latitude || null,
+      longitude: restaurant.longitude || null,
+    });
+
+    if (restaurant.latitude && restaurant.longitude) {
+      const newRegion = {
+        latitude: Number(restaurant.latitude),
+        longitude: Number(restaurant.longitude),
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
       };
-      setFormData(restaurantData);
-
-      // Set map region
-      if (data.restaurant.latitude && data.restaurant.longitude) {
-        const newRegion = {
-          latitude: Number(data.restaurant.latitude),
-          longitude: Number(data.restaurant.longitude),
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        };
-        setMapRegion(newRegion);
-      }
-      setLoading(false);
-    } catch (err) {
-      console.error('Error fetching restaurant:', err);
-      setError('Network error while loading restaurant');
-      setLoading(false);
+      setMapRegion(newRegion);
     }
-  };
+  }, [restaurant]);
 
   const handleInputChange = (name, value) => {
     setFormData({
@@ -121,17 +149,21 @@ export default function RestaurantDetail() {
 
   const handleImageUpload = async (imageType) => {
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permissionResult.granted) {
-        Alert.alert('Permission Required', 'Please allow access to your photo library.');
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library.",
+        );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        aspect: imageType === 'logo' ? [1, 1] : [16, 9],
+        aspect: imageType === "logo" ? [1, 1] : [16, 9],
         quality: 0.8,
         base64: true,
       });
@@ -141,13 +173,13 @@ export default function RestaurantDetail() {
         setError(null);
 
         try {
-          const token = await AsyncStorage.getItem('token');
+          const token = await AsyncStorage.getItem("token");
           const base64String = `data:image/jpeg;base64,${result.assets[0].base64}`;
 
           const response = await fetch(`${API_URL}/admin/upload-image`, {
-            method: 'POST',
+            method: "POST",
             headers: {
-              'Content-Type': 'application/json',
+              "Content-Type": "application/json",
               Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify({ imageData: base64String }),
@@ -156,75 +188,43 @@ export default function RestaurantDetail() {
           const data = await response.json();
 
           if (!response.ok) {
-            throw new Error(data.message || 'Failed to upload image');
+            throw new Error(data.message || "Failed to upload image");
           }
 
-          const fieldName = imageType === 'logo' ? 'logo_url' : 'cover_image_url';
+          const fieldName =
+            imageType === "logo" ? "logo_url" : "cover_image_url";
           setFormData({
             ...formData,
             [fieldName]: data.url,
           });
         } catch (err) {
-          console.error('Error uploading image:', err);
-          Alert.alert('Error', err.message || 'Failed to upload image');
+          console.error("Error uploading image:", err);
+          Alert.alert("Error", err.message || "Failed to upload image");
         } finally {
           setUploading(null);
         }
       }
     } catch (err) {
-      console.error('Error selecting image:', err);
-      Alert.alert('Error', 'Failed to select image');
+      console.error("Error selecting image:", err);
+      Alert.alert("Error", "Failed to select image");
     }
   };
 
   const handleSave = async () => {
-    const token = await AsyncStorage.getItem('token');
-    if (!token) {
-      Alert.alert('Error', 'No authentication token found');
-      return;
-    }
-
-    setSaving(true);
-
-    try {
-      const res = await fetch(`${API_URL}/admin/restaurant`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(formData),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        Alert.alert('Error', data?.message || 'Failed to update restaurant');
-        return;
-      }
-
-      setRestaurant(data.restaurant);
-      setEditing(false);
-      Alert.alert('Success', 'Restaurant details updated successfully');
-    } catch (err) {
-      console.error('Error updating restaurant:', err);
-      Alert.alert('Error', 'Network error while updating restaurant');
-    } finally {
-      setSaving(false);
-    }
+    saveRestaurantMutation.mutate(formData);
   };
 
   const handleCancel = () => {
     setEditing(false);
     setFormData({
-      restaurant_name: restaurant.restaurant_name || '',
-      address: restaurant.address || '',
-      city: restaurant.city || '',
-      postal_code: restaurant.postal_code || '',
-      opening_time: restaurant.opening_time || '',
-      close_time: restaurant.close_time || '',
-      logo_url: restaurant.logo_url || '',
-      cover_image_url: restaurant.cover_image_url || '',
+      restaurant_name: restaurant.restaurant_name || "",
+      address: restaurant.address || "",
+      city: restaurant.city || "",
+      postal_code: restaurant.postal_code || "",
+      opening_time: restaurant.opening_time || "",
+      close_time: restaurant.close_time || "",
+      logo_url: restaurant.logo_url || "",
+      cover_image_url: restaurant.cover_image_url || "",
       latitude: restaurant.latitude || null,
       longitude: restaurant.longitude || null,
     });
@@ -262,8 +262,11 @@ export default function RestaurantDetail() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
 
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Please enable location permissions to use this feature.');
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Denied",
+          "Please enable location permissions to use this feature.",
+        );
         setLocating(false);
         return;
       }
@@ -288,8 +291,11 @@ export default function RestaurantDetail() {
       setMapRegion(newRegion);
       mapRef.current?.animateToRegion(newRegion, 500);
     } catch (err) {
-      console.error('Location error:', err);
-      Alert.alert('Error', 'Unable to get your location. Please select manually on the map.');
+      console.error("Location error:", err);
+      Alert.alert(
+        "Error",
+        "Unable to get your location. Please select manually on the map.",
+      );
     } finally {
       setLocating(false);
     }
@@ -299,20 +305,42 @@ export default function RestaurantDetail() {
     <View style={styles.skeletonContainer}>
       <View style={styles.skeletonHeader}>
         <View style={[styles.skeletonBox, { width: 200, height: 24 }]} />
-        <View style={[styles.skeletonBox, { width: 150, height: 16, marginTop: 8 }]} />
+        <View
+          style={[styles.skeletonBox, { width: 150, height: 16, marginTop: 8 }]}
+        />
       </View>
-      <View style={[styles.skeletonBox, { width: '100%', height: 160, marginTop: 16 }]} />
+      <View
+        style={[
+          styles.skeletonBox,
+          { width: "100%", height: 160, marginTop: 16 },
+        ]}
+      />
       <View style={styles.skeletonRow}>
-        <View style={[styles.skeletonBox, { width: 80, height: 80, borderRadius: 40 }]} />
+        <View
+          style={[
+            styles.skeletonBox,
+            { width: 80, height: 80, borderRadius: 40 },
+          ]}
+        />
         <View style={{ flex: 1, marginLeft: 16 }}>
           <View style={[styles.skeletonBox, { width: 120, height: 16 }]} />
-          <View style={[styles.skeletonBox, { width: 180, height: 12, marginTop: 8 }]} />
+          <View
+            style={[
+              styles.skeletonBox,
+              { width: 180, height: 12, marginTop: 8 },
+            ]}
+          />
         </View>
       </View>
       {[...Array(4)].map((_, i) => (
         <View key={i} style={{ marginTop: 16 }}>
           <View style={[styles.skeletonBox, { width: 100, height: 12 }]} />
-          <View style={[styles.skeletonBox, { width: '100%', height: 44, marginTop: 8 }]} />
+          <View
+            style={[
+              styles.skeletonBox,
+              { width: "100%", height: 44, marginTop: 8 },
+            ]}
+          />
         </View>
       ))}
     </View>
@@ -320,7 +348,7 @@ export default function RestaurantDetail() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={styles.container} edges={["top"]}>
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
@@ -331,7 +359,10 @@ export default function RestaurantDetail() {
           <Text style={styles.headerTitle}>Restaurant Details</Text>
           <View style={{ width: 40 }} />
         </View>
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+        >
           {renderLoadingSkeleton()}
         </ScrollView>
       </SafeAreaView>
@@ -340,7 +371,7 @@ export default function RestaurantDetail() {
 
   if (error && !restaurant) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={styles.container} edges={["top"]}>
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
@@ -355,7 +386,10 @@ export default function RestaurantDetail() {
           <View style={styles.errorBox}>
             <Text style={styles.errorIcon}>⚠️</Text>
             <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={fetchRestaurant}>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={fetchRestaurant}
+            >
               <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
           </View>
@@ -365,7 +399,7 @@ export default function RestaurantDetail() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -391,7 +425,7 @@ export default function RestaurantDetail() {
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         <ScrollView
@@ -421,7 +455,7 @@ export default function RestaurantDetail() {
                   <ActivityIndicator size="small" color="#ffffff" />
                 ) : (
                   <Text style={styles.saveButtonText}>
-                    {uploading !== null ? 'Uploading...' : 'Save Changes'}
+                    {uploading !== null ? "Uploading..." : "Save Changes"}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -450,12 +484,12 @@ export default function RestaurantDetail() {
                     <TouchableOpacity
                       style={[
                         styles.uploadButton,
-                        uploading === 'logo' && styles.uploadButtonDisabled,
+                        uploading === "logo" && styles.uploadButtonDisabled,
                       ]}
-                      onPress={() => handleImageUpload('logo')}
+                      onPress={() => handleImageUpload("logo")}
                       disabled={uploading !== null}
                     >
-                      {uploading === 'logo' ? (
+                      {uploading === "logo" ? (
                         <ActivityIndicator size="small" color="#ffffff" />
                       ) : (
                         <Text style={styles.uploadButtonText}>Change Logo</Text>
@@ -487,15 +521,17 @@ export default function RestaurantDetail() {
                     style={[
                       styles.uploadButton,
                       styles.uploadButtonFull,
-                      uploading === 'cover' && styles.uploadButtonDisabled,
+                      uploading === "cover" && styles.uploadButtonDisabled,
                     ]}
-                    onPress={() => handleImageUpload('cover')}
+                    onPress={() => handleImageUpload("cover")}
                     disabled={uploading !== null}
                   >
-                    {uploading === 'cover' ? (
+                    {uploading === "cover" ? (
                       <ActivityIndicator size="small" color="#ffffff" />
                     ) : (
-                      <Text style={styles.uploadButtonText}>Change Cover Image</Text>
+                      <Text style={styles.uploadButtonText}>
+                        Change Cover Image
+                      </Text>
                     )}
                   </TouchableOpacity>
                 )}
@@ -507,7 +543,9 @@ export default function RestaurantDetail() {
                 <TextInput
                   style={[styles.input, !editing && styles.inputDisabled]}
                   value={formData.restaurant_name}
-                  onChangeText={(value) => handleInputChange('restaurant_name', value)}
+                  onChangeText={(value) =>
+                    handleInputChange("restaurant_name", value)
+                  }
                   editable={editing}
                   placeholder="Enter restaurant name"
                   placeholderTextColor="#9ca3af"
@@ -519,7 +557,7 @@ export default function RestaurantDetail() {
                 <TextInput
                   style={[styles.input, !editing && styles.inputDisabled]}
                   value={formData.city}
-                  onChangeText={(value) => handleInputChange('city', value)}
+                  onChangeText={(value) => handleInputChange("city", value)}
                   editable={editing}
                   placeholder="Enter city"
                   placeholderTextColor="#9ca3af"
@@ -531,7 +569,7 @@ export default function RestaurantDetail() {
                 <TextInput
                   style={[styles.input, !editing && styles.inputDisabled]}
                   value={formData.address}
-                  onChangeText={(value) => handleInputChange('address', value)}
+                  onChangeText={(value) => handleInputChange("address", value)}
                   editable={editing}
                   placeholder="Enter full address"
                   placeholderTextColor="#9ca3af"
@@ -544,7 +582,9 @@ export default function RestaurantDetail() {
                 <TextInput
                   style={[styles.input, !editing && styles.inputDisabled]}
                   value={formData.postal_code}
-                  onChangeText={(value) => handleInputChange('postal_code', value)}
+                  onChangeText={(value) =>
+                    handleInputChange("postal_code", value)
+                  }
                   editable={editing}
                   placeholder="Enter postal code"
                   placeholderTextColor="#9ca3af"
@@ -558,7 +598,9 @@ export default function RestaurantDetail() {
                   <TextInput
                     style={[styles.input, !editing && styles.inputDisabled]}
                     value={formData.opening_time}
-                    onChangeText={(value) => handleInputChange('opening_time', value)}
+                    onChangeText={(value) =>
+                      handleInputChange("opening_time", value)
+                    }
                     editable={editing}
                     placeholder="e.g., 09:00"
                     placeholderTextColor="#9ca3af"
@@ -569,7 +611,9 @@ export default function RestaurantDetail() {
                   <TextInput
                     style={[styles.input, !editing && styles.inputDisabled]}
                     value={formData.close_time}
-                    onChangeText={(value) => handleInputChange('close_time', value)}
+                    onChangeText={(value) =>
+                      handleInputChange("close_time", value)
+                    }
                     editable={editing}
                     placeholder="e.g., 22:00"
                     placeholderTextColor="#9ca3af"
@@ -585,21 +629,23 @@ export default function RestaurantDetail() {
               <View style={styles.mapHeader}>
                 <Text style={styles.mapTitle}>Restaurant Location</Text>
                 {editing && (
-                  <Text style={styles.mapHint}>Tap on map to change location</Text>
+                  <Text style={styles.mapHint}>
+                    Tap on map to change location
+                  </Text>
                 )}
               </View>
 
               <View style={styles.addressInfo}>
                 <Text style={styles.addressLabel}>Address:</Text>
                 <Text style={styles.addressText}>
-                  {formData.address || 'N/A'}
+                  {formData.address || "N/A"}
                   {formData.city && `, ${formData.city}`}
                 </Text>
               </View>
 
               {formData.latitude && formData.longitude && (
                 <Text style={styles.coordsText}>
-                  Coordinates: {Number(formData.latitude).toFixed(6)},{' '}
+                  Coordinates: {Number(formData.latitude).toFixed(6)},{" "}
                   {Number(formData.longitude).toFixed(6)}
                 </Text>
               )}
@@ -607,7 +653,10 @@ export default function RestaurantDetail() {
               {/* Use My Location Button */}
               {editing && (
                 <TouchableOpacity
-                  style={[styles.locationButton, locating && styles.locationButtonDisabled]}
+                  style={[
+                    styles.locationButton,
+                    locating && styles.locationButtonDisabled,
+                  ]}
                   onPress={handleUseMyLocation}
                   disabled={locating}
                 >
@@ -616,7 +665,9 @@ export default function RestaurantDetail() {
                   ) : (
                     <>
                       <Text style={styles.locationButtonIcon}>📍</Text>
-                      <Text style={styles.locationButtonText}>Use My Current Location</Text>
+                      <Text style={styles.locationButtonText}>
+                        Use My Current Location
+                      </Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -636,16 +687,22 @@ export default function RestaurantDetail() {
                   onPress={handleMapPress}
                   scrollEnabled={editing}
                   zoomEnabled={editing}
-                  markers={formData.latitude && formData.longitude ? [{
-                    id: 'restaurant',
-                    coordinate: {
-                      latitude: Number(formData.latitude),
-                      longitude: Number(formData.longitude),
-                    },
-                    type: 'restaurant',
-                    emoji: '🏪',
-                    title: 'Restaurant Location',
-                  }] : []}
+                  markers={
+                    formData.latitude && formData.longitude
+                      ? [
+                          {
+                            id: "restaurant",
+                            coordinate: {
+                              latitude: Number(formData.latitude),
+                              longitude: Number(formData.longitude),
+                            },
+                            type: "restaurant",
+                            emoji: "🏪",
+                            title: "Restaurant Location",
+                          },
+                        ]
+                      : []
+                  }
                 />
               </View>
 
@@ -684,28 +741,28 @@ export default function RestaurantDetail() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#EDFBF2',
+    backgroundColor: "#EDFBF2",
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderBottomWidth: 1,
-    borderBottomColor: '#dcfce7',
+    borderBottomColor: "#dcfce7",
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#EDFBF2',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#EDFBF2",
+    justifyContent: "center",
+    alignItems: "center",
   },
   backButtonText: {
     fontSize: 24,
-    color: '#06C168',
+    color: "#06C168",
   },
   headerTitleContainer: {
     flex: 1,
@@ -713,24 +770,24 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#06C168',
+    fontWeight: "bold",
+    color: "#06C168",
   },
   headerSubtitle: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 2,
   },
   editButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderRadius: 8,
   },
   editButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   scrollView: {
     flex: 1,
@@ -739,159 +796,159 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   editActionsBar: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+    flexDirection: "row",
+    justifyContent: "flex-end",
     marginBottom: 16,
     gap: 12,
   },
   cancelButton: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 10,
   },
   cancelButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
+    fontWeight: "600",
+    color: "#374151",
   },
   saveButton: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderRadius: 10,
     minWidth: 120,
-    alignItems: 'center',
+    alignItems: "center",
   },
   saveButtonDisabled: {
-    backgroundColor: '#9ca3af',
+    backgroundColor: "#9ca3af",
   },
   saveButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   formCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
     borderWidth: 1,
-    borderColor: '#dcfce7',
+    borderColor: "#dcfce7",
   },
   section: {
     marginBottom: 20,
   },
   sectionLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
+    fontWeight: "600",
+    color: "#374151",
     marginBottom: 12,
   },
   logoSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 16,
   },
   logoContainer: {
     width: 100,
     height: 100,
     borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#e5e7eb',
+    overflow: "hidden",
+    backgroundColor: "#e5e7eb",
   },
   logoImage: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   logoPlaceholder: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   logoPlaceholderText: {
     fontSize: 12,
-    color: '#9ca3af',
-    textAlign: 'center',
+    color: "#9ca3af",
+    textAlign: "center",
   },
   coverContainer: {
-    width: '100%',
+    width: "100%",
     height: 160,
     borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#e5e7eb',
+    overflow: "hidden",
+    backgroundColor: "#e5e7eb",
     marginBottom: 12,
   },
   coverImage: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   coverPlaceholder: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   coverPlaceholderText: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
   uploadButton: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: "#3b82f6",
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     minWidth: 120,
   },
   uploadButtonFull: {
-    width: '100%',
+    width: "100%",
   },
   uploadButtonDisabled: {
-    backgroundColor: '#9ca3af',
+    backgroundColor: "#9ca3af",
   },
   uploadButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   inputLabel: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
     marginBottom: 8,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#ffffff',
+    color: "#111827",
+    backgroundColor: "#ffffff",
   },
   inputDisabled: {
-    backgroundColor: '#f3f4f6',
-    color: '#6b7280',
+    backgroundColor: "#f3f4f6",
+    color: "#6b7280",
   },
   timeRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
   },
   timeItem: {
     flex: 1,
   },
   mapCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 16,
     padding: 20,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -902,39 +959,39 @@ const styles = StyleSheet.create({
   },
   mapTitle: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: "600",
+    color: "#111827",
   },
   mapHint: {
     fontSize: 12,
-    color: '#6366f1',
+    color: "#6366f1",
     marginTop: 4,
   },
   addressInfo: {
-    flexDirection: 'row',
+    flexDirection: "row",
     marginBottom: 4,
   },
   addressLabel: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#6b7280',
+    fontWeight: "500",
+    color: "#6b7280",
     marginRight: 4,
   },
   addressText: {
     fontSize: 14,
-    color: '#374151',
+    color: "#374151",
     flex: 1,
   },
   coordsText: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: "#9ca3af",
     marginBottom: 12,
   },
   locationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#3b82f6',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#3b82f6",
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
@@ -942,32 +999,32 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   locationButtonDisabled: {
-    backgroundColor: '#9ca3af',
+    backgroundColor: "#9ca3af",
   },
   locationButtonIcon: {
     fontSize: 16,
   },
   locationButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   mapContainer: {
     height: 300,
     borderRadius: 12,
-    overflow: 'hidden',
+    overflow: "hidden",
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
   },
   mapContainerEditing: {
     borderWidth: 2,
-    borderColor: '#06C168',
+    borderColor: "#06C168",
   },
   map: {
     flex: 1,
   },
   coordsGrid: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
     marginTop: 16,
   },
@@ -976,21 +1033,21 @@ const styles = StyleSheet.create({
   },
   coordLabel: {
     fontSize: 12,
-    fontWeight: '500',
-    color: '#6b7280',
+    fontWeight: "500",
+    color: "#6b7280",
     marginBottom: 4,
   },
   coordValue: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: "#f3f4f6",
     borderRadius: 8,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: "#e5e7eb",
   },
   coordValueText: {
     fontSize: 14,
-    color: '#374151',
-    fontFamily: 'monospace',
+    color: "#374151",
+    fontFamily: "monospace",
   },
   // Skeleton Styles
   skeletonContainer: {
@@ -1000,27 +1057,27 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   skeletonBox: {
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 8,
   },
   skeletonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginTop: 16,
   },
   // Error Styles
   errorContainer: {
     flex: 1,
     padding: 16,
-    justifyContent: 'center',
+    justifyContent: "center",
   },
   errorBox: {
-    backgroundColor: '#fef2f2',
+    backgroundColor: "#fef2f2",
     borderWidth: 1,
-    borderColor: '#fecaca',
+    borderColor: "#fecaca",
     borderRadius: 12,
     padding: 24,
-    alignItems: 'center',
+    alignItems: "center",
   },
   errorIcon: {
     fontSize: 48,
@@ -1028,19 +1085,19 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: '#dc2626',
-    textAlign: 'center',
+    color: "#dc2626",
+    textAlign: "center",
     marginBottom: 16,
   },
   retryButton: {
-    backgroundColor: '#dc2626',
+    backgroundColor: "#dc2626",
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 10,
   },
   retryButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
 });

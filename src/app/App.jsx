@@ -17,7 +17,12 @@ import { NotificationProvider } from "./providers/NotificationProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
 import { mobileQueryClient } from "../lib/queryClient";
 import { initializeApiAuthFetch } from "../lib/apiAuthFetch";
+import {
+  getAuthStorageDiagnostics,
+  initializeAuthStorage,
+} from "../lib/authStorage";
 
+initializeAuthStorage();
 initializeApiAuthFetch();
 
 // Safe import — requires native rebuild to work
@@ -28,6 +33,27 @@ try {
 
 export default function App() {
   const navigationRef = useRef(null);
+
+  useEffect(() => {
+    const diagnostics = getAuthStorageDiagnostics();
+
+    if (diagnostics.secureStoreAvailable) {
+      console.log("[AuthStorage] SecureStore is available in this build.");
+      return;
+    }
+
+    console.warn(
+      "[AuthStorage] SecureStore is NOT available in this native build.",
+      {
+        secureStoreAvailabilityChecked:
+          diagnostics.secureStoreAvailabilityChecked,
+        authStorageShimInstalled: diagnostics.authStorageShimInstalled,
+        reason: diagnostics.secureStoreInitErrorMessage,
+        action:
+          "Rebuild native app/dev-client after adding expo-secure-store plugin.",
+      },
+    );
+  }, []);
 
   // Force Android system navigation bar to black with white icons
   useEffect(() => {

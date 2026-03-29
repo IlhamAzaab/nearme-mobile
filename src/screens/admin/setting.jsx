@@ -1,28 +1,63 @@
-import React, { useState, useEffect, useRef } from 'react';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation } from "@react-navigation/native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import { useEffect, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  Image,
   ActivityIndicator,
   Alert,
-  Switch,
+  Dimensions,
+  Image,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
-import FreeMapView from '../../components/maps/FreeMapView';
-import { useNavigation } from '@react-navigation/native';
-import { API_URL } from '../../config/env';
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import FreeMapView from "../../components/maps/FreeMapView";
+import { API_URL } from "../../config/env";
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+const fetchAdminRestaurant = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token found");
+
+  const res = await fetch(`${API_URL}/admin/restaurant`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to load restaurant");
+  return data.restaurant;
+};
+
+const updateAdminRestaurant = async (restaurantFormData) => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token found");
+
+  const res = await fetch(`${API_URL}/admin/restaurant`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(restaurantFormData),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to update restaurant");
+  return data.restaurant;
+};
 
 // Tab Button Component
 function TabButton({ title, active, onPress }) {
@@ -32,7 +67,9 @@ function TabButton({ title, active, onPress }) {
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <Text style={[styles.tabButtonText, active && styles.tabButtonTextActive]}>
+      <Text
+        style={[styles.tabButtonText, active && styles.tabButtonTextActive]}
+      >
         {title}
       </Text>
     </TouchableOpacity>
@@ -41,11 +78,17 @@ function TabButton({ title, active, onPress }) {
 
 // Time Picker Component
 function TimePicker({ label, value, onChange, disabled }) {
-  const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-  const minutes = ['00', '15', '30', '45'];
+  const hours = Array.from({ length: 24 }, (_, i) =>
+    String(i).padStart(2, "0"),
+  );
+  const minutes = ["00", "15", "30", "45"];
 
-  const [selectedHour, setSelectedHour] = useState(value ? value.split(':')[0] : '');
-  const [selectedMinute, setSelectedMinute] = useState(value ? value.split(':')[1] : '');
+  const [selectedHour, setSelectedHour] = useState(
+    value ? value.split(":")[0] : "",
+  );
+  const [selectedMinute, setSelectedMinute] = useState(
+    value ? value.split(":")[1] : "",
+  );
   const [showPicker, setShowPicker] = useState(false);
 
   useEffect(() => {
@@ -56,7 +99,7 @@ function TimePicker({ label, value, onChange, disabled }) {
 
   useEffect(() => {
     if (value) {
-      const [h, m] = value.split(':');
+      const [h, m] = value.split(":");
       setSelectedHour(h);
       setSelectedMinute(m);
     }
@@ -67,7 +110,7 @@ function TimePicker({ label, value, onChange, disabled }) {
       <View style={styles.inputGroup}>
         <Text style={styles.inputLabel}>{label}</Text>
         <View style={[styles.input, styles.inputDisabled]}>
-          <Text style={styles.inputText}>{value || 'Not set'}</Text>
+          <Text style={styles.inputText}>{value || "Not set"}</Text>
         </View>
       </View>
     );
@@ -80,9 +123,7 @@ function TimePicker({ label, value, onChange, disabled }) {
         style={styles.timePickerButton}
         onPress={() => setShowPicker(!showPicker)}
       >
-        <Text style={styles.timePickerText}>
-          {value || 'Select time'}
-        </Text>
+        <Text style={styles.timePickerText}>{value || "Select time"}</Text>
         <Text style={styles.timePickerIcon}>🕐</Text>
       </TouchableOpacity>
 
@@ -102,7 +143,8 @@ function TimePicker({ label, value, onChange, disabled }) {
                   <Text
                     style={[
                       styles.timePickerItemText,
-                      selectedHour === hour && styles.timePickerItemTextSelected,
+                      selectedHour === hour &&
+                        styles.timePickerItemTextSelected,
                     ]}
                   >
                     {hour}
@@ -127,7 +169,8 @@ function TimePicker({ label, value, onChange, disabled }) {
                   <Text
                     style={[
                       styles.timePickerItemText,
-                      selectedMinute === minute && styles.timePickerItemTextSelected,
+                      selectedMinute === minute &&
+                        styles.timePickerItemTextSelected,
                     ]}
                   >
                     {minute}
@@ -144,21 +187,22 @@ function TimePicker({ label, value, onChange, disabled }) {
 
 export default function Settings() {
   const navigation = useNavigation();
-  const [activeTab, setActiveTab] = useState('restaurant');
+  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState("restaurant");
   const mapRef = useRef(null);
 
   // Profile State
   const [profileData, setProfileData] = useState({
-    full_name: '',
-    email: '',
-    phone: '',
+    full_name: "",
+    email: "",
+    phone: "",
   });
 
   // Password State
   const [passwordData, setPasswordData] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
   });
   const [showPasswords, setShowPasswords] = useState({
     current: false,
@@ -167,22 +211,20 @@ export default function Settings() {
   });
 
   // Restaurant State
-  const [restaurant, setRestaurant] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [editingRestaurant, setEditingRestaurant] = useState(false);
   const [uploading, setUploading] = useState(null);
-  const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
 
   const [restaurantFormData, setRestaurantFormData] = useState({
-    restaurant_name: '',
-    address: '',
-    city: '',
-    postal_code: '',
-    opening_time: '',
-    close_time: '',
-    logo_url: '',
-    cover_image_url: '',
+    restaurant_name: "",
+    address: "",
+    city: "",
+    postal_code: "",
+    opening_time: "",
+    close_time: "",
+    logo_url: "",
+    cover_image_url: "",
     latitude: null,
     longitude: null,
   });
@@ -202,68 +244,71 @@ export default function Settings() {
     smsNotifications: false,
   });
 
-  // Fetch restaurant data
+  const restaurantQuery = useQuery({
+    queryKey: ["admin", "restaurant"],
+    queryFn: fetchAdminRestaurant,
+    staleTime: 120 * 1000,
+    enabled: activeTab === "restaurant",
+  });
+
+  const saveRestaurantMutation = useMutation({
+    mutationFn: updateAdminRestaurant,
+    onSuccess: async (updatedRestaurant) => {
+      queryClient.setQueryData(["admin", "restaurant"], updatedRestaurant);
+      setEditingRestaurant(false);
+      Alert.alert("Success", "Restaurant details updated successfully");
+      await queryClient.invalidateQueries({
+        queryKey: ["admin", "restaurant"],
+      });
+    },
+    onError: (err) => {
+      Alert.alert(
+        "Error",
+        err.message || "Network error while updating restaurant",
+      );
+    },
+  });
+
+  const restaurant = restaurantQuery.data || null;
+  const saving = saveRestaurantMutation.isPending;
+
   useEffect(() => {
-    if (activeTab === 'restaurant') {
-      fetchRestaurant();
-    }
-  }, [activeTab]);
+    if (activeTab !== "restaurant") return;
+    if (!restaurant) return;
 
-  const fetchRestaurant = async () => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      if (!token) {
-        Alert.alert('Error', 'No authentication token found');
-        setLoading(false);
-        return;
-      }
+    setRestaurantFormData({
+      restaurant_name: restaurant.restaurant_name || "",
+      address: restaurant.address || "",
+      city: restaurant.city || "",
+      postal_code: restaurant.postal_code || "",
+      opening_time: restaurant.opening_time || "",
+      close_time: restaurant.close_time || "",
+      logo_url: restaurant.logo_url || "",
+      cover_image_url: restaurant.cover_image_url || "",
+      latitude: restaurant.latitude || null,
+      longitude: restaurant.longitude || null,
+    });
 
-      const res = await fetch(`${API_URL}/admin/restaurant`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+    if (restaurant.latitude && restaurant.longitude) {
+      const lat = Number(restaurant.latitude);
+      const lng = Number(restaurant.longitude);
+      setMapPosition({ latitude: lat, longitude: lng });
+      setMapRegion({
+        latitude: lat,
+        longitude: lng,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
       });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        Alert.alert('Error', data?.message || 'Failed to load restaurant');
-        setLoading(false);
-        return;
-      }
-
-      setRestaurant(data.restaurant);
-      setRestaurantFormData({
-        restaurant_name: data.restaurant.restaurant_name || '',
-        address: data.restaurant.address || '',
-        city: data.restaurant.city || '',
-        postal_code: data.restaurant.postal_code || '',
-        opening_time: data.restaurant.opening_time || '',
-        close_time: data.restaurant.close_time || '',
-        logo_url: data.restaurant.logo_url || '',
-        cover_image_url: data.restaurant.cover_image_url || '',
-        latitude: data.restaurant.latitude || null,
-        longitude: data.restaurant.longitude || null,
-      });
-
-      if (data.restaurant.latitude && data.restaurant.longitude) {
-        const lat = Number(data.restaurant.latitude);
-        const lng = Number(data.restaurant.longitude);
-        setMapPosition({ latitude: lat, longitude: lng });
-        setMapRegion({
-          latitude: lat,
-          longitude: lng,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        });
-      }
-      setLoading(false);
-    } catch (err) {
-      console.error('Error fetching restaurant:', err);
-      Alert.alert('Error', 'Network error while loading restaurant');
-      setLoading(false);
     }
-  };
+  }, [activeTab, restaurant]);
+
+  useEffect(() => {
+    setLoading(
+      activeTab === "restaurant" &&
+        restaurantQuery.isLoading &&
+        !restaurantQuery.data,
+    );
+  }, [activeTab, restaurantQuery.isLoading, restaurantQuery.data]);
 
   const handleRestaurantInputChange = (key, value) => {
     setRestaurantFormData((prev) => ({ ...prev, [key]: value }));
@@ -271,17 +316,21 @@ export default function Settings() {
 
   const handleImageUpload = async (imageType) => {
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permissionResult.granted) {
-        Alert.alert('Permission Required', 'Please allow access to your photo library.');
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library.",
+        );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        aspect: imageType === 'logo' ? [1, 1] : [16, 9],
+        aspect: imageType === "logo" ? [1, 1] : [16, 9],
         quality: 0.8,
         base64: true,
       });
@@ -289,13 +338,13 @@ export default function Settings() {
       if (!result.canceled && result.assets[0]) {
         setUploading(imageType);
 
-        const token = await AsyncStorage.getItem('token');
+        const token = await AsyncStorage.getItem("token");
         const base64String = `data:image/jpeg;base64,${result.assets[0].base64}`;
 
         const response = await fetch(`${API_URL}/admin/upload-image`, {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ imageData: base64String }),
@@ -304,10 +353,10 @@ export default function Settings() {
         const data = await response.json();
 
         if (!response.ok) {
-          throw new Error(data.message || 'Failed to upload image');
+          throw new Error(data.message || "Failed to upload image");
         }
 
-        const fieldName = imageType === 'logo' ? 'logo_url' : 'cover_image_url';
+        const fieldName = imageType === "logo" ? "logo_url" : "cover_image_url";
         setRestaurantFormData((prev) => ({
           ...prev,
           [fieldName]: data.url,
@@ -316,8 +365,8 @@ export default function Settings() {
         setUploading(null);
       }
     } catch (err) {
-      console.error('Error uploading image:', err);
-      Alert.alert('Error', err.message || 'Failed to upload image');
+      console.error("Error uploading image:", err);
+      Alert.alert("Error", err.message || "Failed to upload image");
       setUploading(null);
     }
   };
@@ -327,8 +376,8 @@ export default function Settings() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
 
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Please enable location permissions.');
+      if (status !== "granted") {
+        Alert.alert("Permission Denied", "Please enable location permissions.");
         setLocating(false);
         return;
       }
@@ -354,8 +403,8 @@ export default function Settings() {
       setMapRegion(newRegion);
       mapRef.current?.animateToRegion(newRegion, 500);
     } catch (err) {
-      console.error('Location error:', err);
-      Alert.alert('Error', 'Unable to get your location.');
+      console.error("Location error:", err);
+      Alert.alert("Error", "Unable to get your location.");
     } finally {
       setLocating(false);
     }
@@ -374,49 +423,21 @@ export default function Settings() {
   };
 
   const handleRestaurantSave = async () => {
-    try {
-      setSaving(true);
-      const token = await AsyncStorage.getItem('token');
-
-      const res = await fetch(`${API_URL}/admin/restaurant`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(restaurantFormData),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        Alert.alert('Error', data?.message || 'Failed to update restaurant');
-        return;
-      }
-
-      setRestaurant(data.restaurant);
-      setEditingRestaurant(false);
-      Alert.alert('Success', 'Restaurant details updated successfully');
-    } catch (err) {
-      console.error('Error updating restaurant:', err);
-      Alert.alert('Error', 'Network error while updating restaurant');
-    } finally {
-      setSaving(false);
-    }
+    saveRestaurantMutation.mutate(restaurantFormData);
   };
 
   const handleCancelEdit = () => {
     setEditingRestaurant(false);
     if (restaurant) {
       setRestaurantFormData({
-        restaurant_name: restaurant.restaurant_name || '',
-        address: restaurant.address || '',
-        city: restaurant.city || '',
-        postal_code: restaurant.postal_code || '',
-        opening_time: restaurant.opening_time || '',
-        close_time: restaurant.close_time || '',
-        logo_url: restaurant.logo_url || '',
-        cover_image_url: restaurant.cover_image_url || '',
+        restaurant_name: restaurant.restaurant_name || "",
+        address: restaurant.address || "",
+        city: restaurant.city || "",
+        postal_code: restaurant.postal_code || "",
+        opening_time: restaurant.opening_time || "",
+        close_time: restaurant.close_time || "",
+        logo_url: restaurant.logo_url || "",
+        cover_image_url: restaurant.cover_image_url || "",
         latitude: restaurant.latitude || null,
         longitude: restaurant.longitude || null,
       });
@@ -431,21 +452,27 @@ export default function Settings() {
 
   const handleProfileUpdate = async () => {
     // TODO: Implement profile update API
-    Alert.alert('Coming Soon', 'Profile update functionality will be available soon.');
+    Alert.alert(
+      "Coming Soon",
+      "Profile update functionality will be available soon.",
+    );
   };
 
   const handlePasswordChange = async () => {
     if (passwordData.newPassword !== passwordData.confirmPassword) {
-      Alert.alert('Error', 'New passwords do not match!');
+      Alert.alert("Error", "New passwords do not match!");
       return;
     }
     // TODO: Implement password change API
-    Alert.alert('Coming Soon', 'Password change functionality will be available soon.');
+    Alert.alert(
+      "Coming Soon",
+      "Password change functionality will be available soon.",
+    );
   };
 
   const handleSaveNotifications = async () => {
     // TODO: Implement notification preferences API
-    Alert.alert('Success', 'Notification preferences saved');
+    Alert.alert("Success", "Notification preferences saved");
   };
 
   const renderRestaurantTab = () => {
@@ -488,7 +515,10 @@ export default function Settings() {
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.saveButton, (uploading || saving) && styles.saveButtonDisabled]}
+                style={[
+                  styles.saveButton,
+                  (uploading || saving) && styles.saveButtonDisabled,
+                ]}
                 onPress={handleRestaurantSave}
                 disabled={uploading !== null || saving}
               >
@@ -496,7 +526,7 @@ export default function Settings() {
                   <ActivityIndicator size="small" color="#ffffff" />
                 ) : (
                   <Text style={styles.saveButtonText}>
-                    {uploading ? 'Uploading...' : 'Save'}
+                    {uploading ? "Uploading..." : "Save"}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -520,11 +550,14 @@ export default function Settings() {
             </View>
             {editingRestaurant && (
               <TouchableOpacity
-                style={[styles.uploadButton, uploading === 'logo' && styles.uploadButtonDisabled]}
-                onPress={() => handleImageUpload('logo')}
+                style={[
+                  styles.uploadButton,
+                  uploading === "logo" && styles.uploadButtonDisabled,
+                ]}
+                onPress={() => handleImageUpload("logo")}
                 disabled={uploading !== null}
               >
-                {uploading === 'logo' ? (
+                {uploading === "logo" ? (
                   <ActivityIndicator size="small" color="#ffffff" />
                 ) : (
                   <Text style={styles.uploadButtonText}>Change Logo</Text>
@@ -549,11 +582,14 @@ export default function Settings() {
           </View>
           {editingRestaurant && (
             <TouchableOpacity
-              style={[styles.uploadButton, uploading === 'cover' && styles.uploadButtonDisabled]}
-              onPress={() => handleImageUpload('cover')}
+              style={[
+                styles.uploadButton,
+                uploading === "cover" && styles.uploadButtonDisabled,
+              ]}
+              onPress={() => handleImageUpload("cover")}
               disabled={uploading !== null}
             >
-              {uploading === 'cover' ? (
+              {uploading === "cover" ? (
                 <ActivityIndicator size="small" color="#ffffff" />
               ) : (
                 <Text style={styles.uploadButtonText}>Change Cover</Text>
@@ -568,7 +604,9 @@ export default function Settings() {
           <TextInput
             style={[styles.input, !editingRestaurant && styles.inputDisabled]}
             value={restaurantFormData.restaurant_name}
-            onChangeText={(value) => handleRestaurantInputChange('restaurant_name', value)}
+            onChangeText={(value) =>
+              handleRestaurantInputChange("restaurant_name", value)
+            }
             editable={editingRestaurant}
             placeholder="Enter restaurant name"
             placeholderTextColor="#9ca3af"
@@ -578,9 +616,15 @@ export default function Settings() {
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Address</Text>
           <TextInput
-            style={[styles.input, styles.textArea, !editingRestaurant && styles.inputDisabled]}
+            style={[
+              styles.input,
+              styles.textArea,
+              !editingRestaurant && styles.inputDisabled,
+            ]}
             value={restaurantFormData.address}
-            onChangeText={(value) => handleRestaurantInputChange('address', value)}
+            onChangeText={(value) =>
+              handleRestaurantInputChange("address", value)
+            }
             editable={editingRestaurant}
             placeholder="Enter full address"
             placeholderTextColor="#9ca3af"
@@ -595,7 +639,9 @@ export default function Settings() {
             <TextInput
               style={[styles.input, !editingRestaurant && styles.inputDisabled]}
               value={restaurantFormData.city}
-              onChangeText={(value) => handleRestaurantInputChange('city', value)}
+              onChangeText={(value) =>
+                handleRestaurantInputChange("city", value)
+              }
               editable={editingRestaurant}
               placeholder="City"
               placeholderTextColor="#9ca3af"
@@ -606,7 +652,9 @@ export default function Settings() {
             <TextInput
               style={[styles.input, !editingRestaurant && styles.inputDisabled]}
               value={restaurantFormData.postal_code}
-              onChangeText={(value) => handleRestaurantInputChange('postal_code', value)}
+              onChangeText={(value) =>
+                handleRestaurantInputChange("postal_code", value)
+              }
               editable={editingRestaurant}
               placeholder="Postal code"
               placeholderTextColor="#9ca3af"
@@ -620,7 +668,9 @@ export default function Settings() {
             <TimePicker
               label="Opening Time"
               value={restaurantFormData.opening_time}
-              onChange={(value) => handleRestaurantInputChange('opening_time', value)}
+              onChange={(value) =>
+                handleRestaurantInputChange("opening_time", value)
+              }
               disabled={!editingRestaurant}
             />
           </View>
@@ -628,7 +678,9 @@ export default function Settings() {
             <TimePicker
               label="Closing Time"
               value={restaurantFormData.close_time}
-              onChange={(value) => handleRestaurantInputChange('close_time', value)}
+              onChange={(value) =>
+                handleRestaurantInputChange("close_time", value)
+              }
               disabled={!editingRestaurant}
             />
           </View>
@@ -643,13 +695,17 @@ export default function Settings() {
 
           {mapPosition && (
             <Text style={styles.coordsText}>
-              Coordinates: {mapPosition.latitude.toFixed(6)}, {mapPosition.longitude.toFixed(6)}
+              Coordinates: {mapPosition.latitude.toFixed(6)},{" "}
+              {mapPosition.longitude.toFixed(6)}
             </Text>
           )}
 
           {editingRestaurant && (
             <TouchableOpacity
-              style={[styles.locationButton, locating && styles.locationButtonDisabled]}
+              style={[
+                styles.locationButton,
+                locating && styles.locationButtonDisabled,
+              ]}
               onPress={handleUseMyLocation}
               disabled={locating}
             >
@@ -664,7 +720,12 @@ export default function Settings() {
             </TouchableOpacity>
           )}
 
-          <View style={[styles.mapContainer, editingRestaurant && styles.mapContainerEditing]}>
+          <View
+            style={[
+              styles.mapContainer,
+              editingRestaurant && styles.mapContainerEditing,
+            ]}
+          >
             <FreeMapView
               ref={mapRef}
               style={styles.map}
@@ -672,13 +733,19 @@ export default function Settings() {
               onPress={handleMapPress}
               scrollEnabled={editingRestaurant}
               zoomEnabled={editingRestaurant}
-              markers={mapPosition ? [{
-                id: 'restaurant',
-                coordinate: mapPosition,
-                type: 'restaurant',
-                emoji: '🏪',
-                title: 'Restaurant Location',
-              }] : []}
+              markers={
+                mapPosition
+                  ? [
+                      {
+                        id: "restaurant",
+                        coordinate: mapPosition,
+                        type: "restaurant",
+                        emoji: "🏪",
+                        title: "Restaurant Location",
+                      },
+                    ]
+                  : []
+              }
             />
           </View>
         </View>
@@ -695,7 +762,9 @@ export default function Settings() {
         <TextInput
           style={styles.input}
           value={profileData.full_name}
-          onChangeText={(value) => setProfileData({ ...profileData, full_name: value })}
+          onChangeText={(value) =>
+            setProfileData({ ...profileData, full_name: value })
+          }
           placeholder="Enter your full name"
           placeholderTextColor="#9ca3af"
         />
@@ -706,7 +775,9 @@ export default function Settings() {
         <TextInput
           style={styles.input}
           value={profileData.email}
-          onChangeText={(value) => setProfileData({ ...profileData, email: value })}
+          onChangeText={(value) =>
+            setProfileData({ ...profileData, email: value })
+          }
           placeholder="Enter your email"
           placeholderTextColor="#9ca3af"
           keyboardType="email-address"
@@ -719,14 +790,19 @@ export default function Settings() {
         <TextInput
           style={styles.input}
           value={profileData.phone}
-          onChangeText={(value) => setProfileData({ ...profileData, phone: value })}
+          onChangeText={(value) =>
+            setProfileData({ ...profileData, phone: value })
+          }
           placeholder="Enter your phone number"
           placeholderTextColor="#9ca3af"
           keyboardType="phone-pad"
         />
       </View>
 
-      <TouchableOpacity style={styles.primaryButton} onPress={handleProfileUpdate}>
+      <TouchableOpacity
+        style={styles.primaryButton}
+        onPress={handleProfileUpdate}
+      >
         <Text style={styles.primaryButtonText}>Update Profile</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -750,10 +826,13 @@ export default function Settings() {
           <TouchableOpacity
             style={styles.eyeButton}
             onPress={() =>
-              setShowPasswords({ ...showPasswords, current: !showPasswords.current })
+              setShowPasswords({
+                ...showPasswords,
+                current: !showPasswords.current,
+              })
             }
           >
-            <Text>{showPasswords.current ? '👁️' : '🙈'}</Text>
+            <Text>{showPasswords.current ? "👁️" : "🙈"}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -777,7 +856,7 @@ export default function Settings() {
               setShowPasswords({ ...showPasswords, new: !showPasswords.new })
             }
           >
-            <Text>{showPasswords.new ? '👁️' : '🙈'}</Text>
+            <Text>{showPasswords.new ? "👁️" : "🙈"}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -798,10 +877,13 @@ export default function Settings() {
           <TouchableOpacity
             style={styles.eyeButton}
             onPress={() =>
-              setShowPasswords({ ...showPasswords, confirm: !showPasswords.confirm })
+              setShowPasswords({
+                ...showPasswords,
+                confirm: !showPasswords.confirm,
+              })
             }
           >
-            <Text>{showPasswords.confirm ? '👁️' : '🙈'}</Text>
+            <Text>{showPasswords.confirm ? "👁️" : "🙈"}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -815,7 +897,10 @@ export default function Settings() {
           </View>
         )}
 
-      <TouchableOpacity style={styles.primaryButton} onPress={handlePasswordChange}>
+      <TouchableOpacity
+        style={styles.primaryButton}
+        onPress={handlePasswordChange}
+      >
         <Text style={styles.primaryButtonText}>Change Password</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -826,49 +911,58 @@ export default function Settings() {
       <View style={styles.notificationItem}>
         <View style={styles.notificationInfo}>
           <Text style={styles.notificationTitle}>Order Notifications</Text>
-          <Text style={styles.notificationDesc}>Receive alerts for new orders</Text>
+          <Text style={styles.notificationDesc}>
+            Receive alerts for new orders
+          </Text>
         </View>
         <Switch
           value={notifications.orderNotifications}
           onValueChange={(value) =>
             setNotifications({ ...notifications, orderNotifications: value })
           }
-          trackColor={{ false: '#d1d5db', true: '#6EDE9A' }}
-          thumbColor={notifications.orderNotifications ? '#06C168' : '#9ca3af'}
+          trackColor={{ false: "#d1d5db", true: "#6EDE9A" }}
+          thumbColor={notifications.orderNotifications ? "#06C168" : "#9ca3af"}
         />
       </View>
 
       <View style={styles.notificationItem}>
         <View style={styles.notificationInfo}>
           <Text style={styles.notificationTitle}>Email Notifications</Text>
-          <Text style={styles.notificationDesc}>Receive order updates via email</Text>
+          <Text style={styles.notificationDesc}>
+            Receive order updates via email
+          </Text>
         </View>
         <Switch
           value={notifications.emailNotifications}
           onValueChange={(value) =>
             setNotifications({ ...notifications, emailNotifications: value })
           }
-          trackColor={{ false: '#d1d5db', true: '#6EDE9A' }}
-          thumbColor={notifications.emailNotifications ? '#06C168' : '#9ca3af'}
+          trackColor={{ false: "#d1d5db", true: "#6EDE9A" }}
+          thumbColor={notifications.emailNotifications ? "#06C168" : "#9ca3af"}
         />
       </View>
 
       <View style={styles.notificationItem}>
         <View style={styles.notificationInfo}>
           <Text style={styles.notificationTitle}>SMS Notifications</Text>
-          <Text style={styles.notificationDesc}>Receive order updates via SMS</Text>
+          <Text style={styles.notificationDesc}>
+            Receive order updates via SMS
+          </Text>
         </View>
         <Switch
           value={notifications.smsNotifications}
           onValueChange={(value) =>
             setNotifications({ ...notifications, smsNotifications: value })
           }
-          trackColor={{ false: '#d1d5db', true: '#6EDE9A' }}
-          thumbColor={notifications.smsNotifications ? '#06C168' : '#9ca3af'}
+          trackColor={{ false: "#d1d5db", true: "#6EDE9A" }}
+          thumbColor={notifications.smsNotifications ? "#06C168" : "#9ca3af"}
         />
       </View>
 
-      <TouchableOpacity style={styles.primaryButton} onPress={handleSaveNotifications}>
+      <TouchableOpacity
+        style={styles.primaryButton}
+        onPress={handleSaveNotifications}
+      >
         <Text style={styles.primaryButtonText}>Save Preferences</Text>
       </TouchableOpacity>
 
@@ -877,12 +971,14 @@ export default function Settings() {
         <Text style={styles.devSectionTitle}>Developer Tools</Text>
         <TouchableOpacity
           style={styles.devButton}
-          onPress={() => navigation.navigate('TestNotification')}
+          onPress={() => navigation.navigate("TestNotification")}
         >
           <Text style={styles.devButtonIcon}>🔔</Text>
           <View style={styles.devButtonInfo}>
             <Text style={styles.devButtonText}>Test Push Notifications</Text>
-            <Text style={styles.devButtonDesc}>Debug and test notification system</Text>
+            <Text style={styles.devButtonDesc}>
+              Debug and test notification system
+            </Text>
           </View>
           <Text style={styles.devButtonArrow}>→</Text>
         </TouchableOpacity>
@@ -891,9 +987,9 @@ export default function Settings() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         {/* Header */}
@@ -913,33 +1009,33 @@ export default function Settings() {
           >
             <TabButton
               title="Restaurant"
-              active={activeTab === 'restaurant'}
-              onPress={() => setActiveTab('restaurant')}
+              active={activeTab === "restaurant"}
+              onPress={() => setActiveTab("restaurant")}
             />
             <TabButton
               title="Profile"
-              active={activeTab === 'profile'}
-              onPress={() => setActiveTab('profile')}
+              active={activeTab === "profile"}
+              onPress={() => setActiveTab("profile")}
             />
             <TabButton
               title="Password"
-              active={activeTab === 'password'}
-              onPress={() => setActiveTab('password')}
+              active={activeTab === "password"}
+              onPress={() => setActiveTab("password")}
             />
             <TabButton
               title="Notifications"
-              active={activeTab === 'notifications'}
-              onPress={() => setActiveTab('notifications')}
+              active={activeTab === "notifications"}
+              onPress={() => setActiveTab("notifications")}
             />
           </ScrollView>
         </View>
 
         {/* Content Card */}
         <View style={styles.contentCard}>
-          {activeTab === 'restaurant' && renderRestaurantTab()}
-          {activeTab === 'profile' && renderProfileTab()}
-          {activeTab === 'password' && renderPasswordTab()}
-          {activeTab === 'notifications' && renderNotificationsTab()}
+          {activeTab === "restaurant" && renderRestaurantTab()}
+          {activeTab === "profile" && renderProfileTab()}
+          {activeTab === "password" && renderPasswordTab()}
+          {activeTab === "notifications" && renderNotificationsTab()}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -949,7 +1045,7 @@ export default function Settings() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#EDFBF2',
+    backgroundColor: "#EDFBF2",
   },
   header: {
     paddingHorizontal: 20,
@@ -957,19 +1053,19 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#06C168',
+    fontWeight: "bold",
+    color: "#06C168",
   },
   headerSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 4,
   },
   tabBar: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
@@ -984,22 +1080,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: "#f3f4f6",
   },
   tabButtonActive: {
-    backgroundColor: '#dcfce7',
+    backgroundColor: "#dcfce7",
   },
   tabButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontWeight: "600",
+    color: "#6b7280",
   },
   tabButtonTextActive: {
-    color: '#06C168',
+    color: "#06C168",
   },
   contentCard: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     paddingHorizontal: 20,
   },
   tabContent: {
@@ -1008,124 +1104,124 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingVertical: 60,
   },
   loadingText: {
     marginTop: 12,
     fontSize: 14,
-    color: '#6b7280',
+    color: "#6b7280",
   },
   sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
     marginBottom: 24,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#111827',
+    fontWeight: "bold",
+    color: "#111827",
   },
   sectionSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 4,
   },
   editButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#4f46e5',
+    backgroundColor: "#4f46e5",
     borderRadius: 8,
   },
   editButtonText: {
-    color: '#ffffff',
-    fontWeight: '600',
+    color: "#ffffff",
+    fontWeight: "600",
     fontSize: 14,
   },
   editActions: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
   },
   cancelButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 8,
   },
   cancelButtonText: {
-    color: '#374151',
-    fontWeight: '600',
+    color: "#374151",
+    fontWeight: "600",
     fontSize: 14,
   },
   saveButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderRadius: 8,
     minWidth: 70,
-    alignItems: 'center',
+    alignItems: "center",
   },
   saveButtonDisabled: {
-    backgroundColor: '#6EDE9A',
+    backgroundColor: "#6EDE9A",
   },
   saveButtonText: {
-    color: '#ffffff',
-    fontWeight: '600',
+    color: "#ffffff",
+    fontWeight: "600",
     fontSize: 14,
   },
   imageSection: {
     marginBottom: 20,
   },
   logoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 16,
   },
   logoPreview: {
     width: 100,
     height: 100,
     borderRadius: 12,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
   },
   logoImage: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   coverPreview: {
-    width: '100%',
+    width: "100%",
     height: 150,
     borderRadius: 12,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
     marginBottom: 12,
   },
   coverImage: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   noImageText: {
-    color: '#9ca3af',
+    color: "#9ca3af",
     fontSize: 13,
   },
   uploadButton: {
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: '#3b82f6',
+    backgroundColor: "#3b82f6",
     borderRadius: 8,
   },
   uploadButtonDisabled: {
-    backgroundColor: '#93c5fd',
+    backgroundColor: "#93c5fd",
   },
   uploadButtonText: {
-    color: '#ffffff',
-    fontWeight: '600',
+    color: "#ffffff",
+    fontWeight: "600",
     fontSize: 14,
   },
   inputGroup: {
@@ -1133,64 +1229,64 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
     marginBottom: 8,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#ffffff',
+    color: "#111827",
+    backgroundColor: "#ffffff",
   },
   inputDisabled: {
-    backgroundColor: '#f3f4f6',
-    color: '#6b7280',
+    backgroundColor: "#f3f4f6",
+    color: "#6b7280",
   },
   inputText: {
     fontSize: 16,
-    color: '#6b7280',
+    color: "#6b7280",
   },
   textArea: {
     minHeight: 70,
-    textAlignVertical: 'top',
+    textAlignVertical: "top",
   },
   row: {
-    flexDirection: 'row',
+    flexDirection: "row",
     marginBottom: 16,
   },
   timePickerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
   },
   timePickerText: {
     fontSize: 16,
-    color: '#111827',
+    color: "#111827",
   },
   timePickerIcon: {
     fontSize: 16,
   },
   timePickerDropdown: {
-    position: 'absolute',
+    position: "absolute",
     top: 80,
     left: 0,
     right: 0,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
+    borderColor: "#e5e7eb",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
@@ -1199,8 +1295,8 @@ const styles = StyleSheet.create({
     maxHeight: 200,
   },
   timePickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   timePickerColumn: {
     flex: 1,
@@ -1208,97 +1304,97 @@ const styles = StyleSheet.create({
   },
   timePickerSeparator: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#06C168',
+    fontWeight: "bold",
+    color: "#06C168",
   },
   timePickerItem: {
     paddingVertical: 10,
     paddingHorizontal: 16,
-    alignItems: 'center',
+    alignItems: "center",
   },
   timePickerItemSelected: {
-    backgroundColor: '#dcfce7',
+    backgroundColor: "#dcfce7",
   },
   timePickerItemText: {
     fontSize: 16,
-    color: '#374151',
+    color: "#374151",
   },
   timePickerItemTextSelected: {
-    color: '#06C168',
-    fontWeight: '600',
+    color: "#06C168",
+    fontWeight: "600",
   },
   mapSection: {
     marginTop: 16,
   },
   mapHint: {
     fontSize: 12,
-    color: '#4f46e5',
+    color: "#4f46e5",
     marginTop: 4,
     marginBottom: 8,
   },
   coordsText: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     marginBottom: 12,
   },
   locationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#3b82f6',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#3b82f6",
     paddingVertical: 12,
     borderRadius: 12,
     marginBottom: 12,
     gap: 8,
   },
   locationButtonDisabled: {
-    backgroundColor: '#93c5fd',
+    backgroundColor: "#93c5fd",
   },
   locationButtonIcon: {
     fontSize: 16,
   },
   locationButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   mapContainer: {
     height: 250,
     borderRadius: 12,
-    overflow: 'hidden',
+    overflow: "hidden",
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
   },
   mapContainerEditing: {
     borderWidth: 2,
-    borderColor: '#4f46e5',
+    borderColor: "#4f46e5",
   },
   map: {
     flex: 1,
   },
   passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
     borderRadius: 12,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
   },
   passwordInput: {
     flex: 1,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111827',
+    color: "#111827",
   },
   eyeButton: {
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   warningBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fef3c7',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fef3c7",
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
@@ -1309,38 +1405,38 @@ const styles = StyleSheet.create({
   },
   warningText: {
     fontSize: 14,
-    color: '#92400e',
+    color: "#92400e",
     flex: 1,
   },
   notificationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: "#f3f4f6",
   },
   notificationInfo: {
     flex: 1,
   },
   notificationTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: "600",
+    color: "#111827",
   },
   notificationDesc: {
     fontSize: 13,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 2,
   },
   primaryButton: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderRadius: 12,
     paddingVertical: 16,
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: 20,
     marginBottom: 32,
-    shadowColor: '#06C168',
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -1348,27 +1444,27 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   devSection: {
     marginTop: 24,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+    borderTopColor: "#e5e7eb",
   },
   devSectionTitle: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontWeight: "600",
+    color: "#6b7280",
     marginBottom: 12,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   devButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f3f4f6',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f3f4f6",
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -1382,16 +1478,16 @@ const styles = StyleSheet.create({
   },
   devButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: "600",
+    color: "#111827",
   },
   devButtonDesc: {
     fontSize: 13,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 2,
   },
   devButtonArrow: {
     fontSize: 18,
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
 });

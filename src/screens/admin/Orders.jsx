@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -23,12 +24,73 @@ import supabaseClient from "../../services/supabaseClient";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
+const fetchRestaurantOrders = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("Missing auth token. Please sign in again.");
+
+  const response = await fetch(`${API_URL}/orders/restaurant/orders`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || "Failed to fetch orders");
+  }
+
+  return data.orders || [];
+};
+
+const fetchAdminRestaurant = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("Missing auth token. Please sign in again.");
+
+  const response = await fetch(`${API_URL}/admin/restaurant`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || "Failed to fetch restaurant");
+  }
+
+  return data.restaurant || null;
+};
+
+const updateRestaurantOrderStatus = async ({ orderId, status, reason }) => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("Missing auth token. Please sign in again.");
+
+  const response = await fetch(
+    `${API_URL}/orders/restaurant/orders/${orderId}/status`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status, ...(reason ? { reason } : {}) }),
+    },
+  );
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || "Failed to update order status");
+  }
+
+  return data;
+};
+
 export default function Orders() {
   const navigation = useNavigation();
+  const queryClient = useQueryClient();
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [counts, setCounts] = useState({
@@ -39,12 +101,47 @@ export default function Orders() {
   });
   const [processingOrderId, setProcessingOrderId] = useState(null);
   const [newOrderNotification, setNewOrderNotification] = useState(null);
-  const [restaurant, setRestaurant] = useState(null);
   const [rejectModal, setRejectModal] = useState({
     open: false,
     orderId: null,
   });
   const [rejectReason, setRejectReason] = useState("");
+
+  const ordersQuery = useQuery({
+    queryKey: ["admin", "orders", "restaurant"],
+    queryFn: fetchRestaurantOrders,
+    staleTime: 20 * 1000,
+    refetchInterval: 30 * 1000,
+  });
+
+  const restaurantQuery = useQuery({
+    queryKey: ["admin", "restaurant"],
+    queryFn: fetchAdminRestaurant,
+    staleTime: 120 * 1000,
+  });
+
+  const acceptOrderMutation = useMutation({
+    mutationFn: (orderId) =>
+      updateRestaurantOrderStatus({ orderId, status: "accepted" }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "orders"] });
+    },
+  });
+
+  const rejectOrderMutation = useMutation({
+    mutationFn: ({ orderId, reason }) =>
+      updateRestaurantOrderStatus({ orderId, status: "failed", reason }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "orders"] });
+    },
+  });
+
+  const restaurant = restaurantQuery.data;
+  const loading =
+    (ordersQuery.isLoading && !ordersQuery.data) ||
+    (restaurantQuery.isLoading && !restaurantQuery.data);
+  const error =
+    ordersQuery.error?.message || restaurantQuery.error?.message || null;
 
   // Animation for modal
   const slideAnim = useRef(new Animated.Value(400)).current;
@@ -94,65 +191,28 @@ export default function Orders() {
     };
   };
 
-  const fetchOrders = async (silent = false) => {
-    if (!silent) setLoading(true);
-    setError(null);
+  useEffect(() => {
+    if (!ordersQuery.data) return;
+    setOrders(ordersQuery.data);
+    setCounts(computeCounts(ordersQuery.data));
+  }, [ordersQuery.data]);
 
+  const fetchOrdersRef = useRef(async () => {});
+  fetchOrdersRef.current = async (silent = false) => {
     try {
-      const token = await AsyncStorage.getItem("token");
-      if (!token) {
-        setError("Missing auth token. Please sign in again.");
-        if (!silent) setLoading(false);
+      if (silent) {
+        await queryClient.invalidateQueries({
+          queryKey: ["admin", "orders", "restaurant"],
+        });
         return;
       }
-
-      const response = await fetch(`${API_URL}/orders/restaurant/orders`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.message || "Failed to fetch orders");
-      }
-
-      const data = await response.json();
-      setOrders(data.orders || []);
-      setCounts(computeCounts(data.orders));
+      await ordersQuery.refetch();
     } catch (err) {
-      console.error("Failed to fetch orders", err);
-      if (!silent) setError(err.message || "Failed to fetch orders");
-    } finally {
-      if (!silent) setLoading(false);
+      console.error("Failed to refresh orders", err);
     }
   };
 
-  // Ref to always have the latest fetchOrders available in subscriptions
-  const fetchOrdersRef = useRef(fetchOrders);
-  fetchOrdersRef.current = fetchOrders;
-
   useEffect(() => {
-    // Fetch restaurant info
-    const fetchRestaurant = async () => {
-      try {
-        const token = await AsyncStorage.getItem("token");
-        const res = await fetch(`${API_URL}/admin/restaurant`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setRestaurant(data.restaurant);
-        }
-      } catch (err) {
-        console.error("Failed to fetch restaurant", err);
-      }
-    };
-
-    fetchRestaurant();
-    fetchOrders();
-
     // Set up real-time subscription for new deliveries
     const subscription = supabaseClient
       .channel("deliveries:new-inserts")
@@ -227,7 +287,7 @@ export default function Orders() {
       subscription.unsubscribe();
       statusSubscription.unsubscribe();
     };
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     if (selectedOrder || rejectModal.open) {
@@ -244,8 +304,14 @@ export default function Orders() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchOrders();
-    setRefreshing(false);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "orders"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "restaurant"] }),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const filteredOrders = orders.filter((order) => {
@@ -268,31 +334,9 @@ export default function Orders() {
     setProcessingOrderId(orderId);
 
     try {
-      const token = await AsyncStorage.getItem("token");
-      if (!token) {
-        Alert.alert("Error", "Missing auth token. Please sign in again.");
-        return;
-      }
-
-      const response = await fetch(
-        `${API_URL}/orders/restaurant/orders/${orderId}/status`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ status: "accepted" }),
-        },
-      );
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.message || "Failed to accept order");
-      }
+      await acceptOrderMutation.mutateAsync(orderId);
 
       Alert.alert("Success", "Order accepted!");
-      fetchOrders();
     } catch (err) {
       console.error("Failed to accept order", err);
       Alert.alert("Error", err.message || "Failed to accept order");
@@ -318,31 +362,10 @@ export default function Orders() {
     setProcessingOrderId(orderId);
 
     try {
-      const token = await AsyncStorage.getItem("token");
-      if (!token) {
-        Alert.alert("Error", "Missing auth token. Please sign in again.");
-        return;
-      }
-
-      const response = await fetch(
-        `${API_URL}/orders/restaurant/orders/${orderId}/status`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            status: "failed",
-            reason: rejectReason.trim(),
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.message || "Failed to reject order");
-      }
+      await rejectOrderMutation.mutateAsync({
+        orderId,
+        reason: rejectReason.trim(),
+      });
 
       // Optimistically update the UI immediately - update deliveries table only
       setOrders((prevOrders) => {
@@ -365,7 +388,6 @@ export default function Orders() {
       });
 
       Alert.alert("Success", "Order rejected");
-      fetchOrders();
     } catch (err) {
       console.error("Failed to reject order", err);
       Alert.alert("Error", err.message || "Failed to reject order");
@@ -670,6 +692,12 @@ export default function Orders() {
 
       {/* Main Content */}
       <View style={styles.mainContent}>
+        {error && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
         {/* Filter Tabs */}
         <ScrollView
           horizontal
@@ -1231,7 +1259,7 @@ function OrderDetailsModal({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f9fafb",
+    backgroundColor: "#fff",
   },
 
   // Stats Header
@@ -1239,29 +1267,31 @@ const styles = StyleSheet.create({
     backgroundColor: "#06C168",
     paddingHorizontal: 16,
     paddingTop: 16,
-    paddingBottom: 80,
+    paddingBottom: 12,
   },
   statsHeaderTop: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   headerTitle: {
-    fontSize: 22,
-    fontWeight: "bold",
+    fontSize: 28,
+    fontWeight: "800",
     color: "#fff",
+    lineHeight: 30,
   },
   headerSubtitle: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.7)",
+    fontSize: 11,
+    color: "rgba(255,255,255,0.8)",
     fontWeight: "500",
+    marginTop: 2,
   },
   refreshButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1270,34 +1300,54 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: 10,
   },
   statCard: {
     flex: 1,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   statLabel: {
     fontSize: 9,
-    fontWeight: "bold",
-    color: "rgba(255,255,255,0.6)",
-    letterSpacing: 1,
+    fontWeight: "700",
+    color: "#6b7280",
+    letterSpacing: 0.5,
   },
   statValue: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#fff",
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#06C168",
     marginTop: 4,
   },
 
   // Main Content
   mainContent: {
     flex: 1,
-    marginTop: -56,
+    marginTop: 0,
     paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  errorBanner: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  errorText: {
+    color: "#B91C1C",
+    fontSize: 13,
+    fontWeight: "500",
   },
 
   // Notification Banner
@@ -1307,7 +1357,7 @@ const styles = StyleSheet.create({
     borderColor: "#9EEBBE",
     borderRadius: 16,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1322,7 +1372,7 @@ const styles = StyleSheet.create({
   },
   notificationText: {
     fontSize: 14,
-    fontWeight: "bold",
+    fontWeight: "600",
     color: "#166534",
   },
   notificationTime: {
@@ -1337,25 +1387,30 @@ const styles = StyleSheet.create({
 
   // Filter Tabs
   filterTabs: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   filterTab: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderColor: "#E5E7EB",
     marginRight: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   filterTabActive: {
-    backgroundColor: "#04553C",
-    borderColor: "#04553C",
+    backgroundColor: "#06C168",
+    borderColor: "#06C168",
   },
   filterTabText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
-    color: "#4b5563",
+    color: "#6b7280",
   },
   filterTabTextActive: {
     color: "#fff",
@@ -1364,8 +1419,8 @@ const styles = StyleSheet.create({
   // Section Title
   sectionTitle: {
     fontSize: 14,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontWeight: "700",
+    color: "#111827",
     marginBottom: 10,
   },
 
@@ -1405,17 +1460,22 @@ const styles = StyleSheet.create({
   // Order Card
   orderCard: {
     backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#f3f4f6",
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   orderHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 12,
+    marginBottom: 8,
   },
   orderIdRow: {
     flexDirection: "row",
@@ -1423,31 +1483,32 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   orderId: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
   },
   statusBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   statusBadgeText: {
     fontSize: 10,
-    fontWeight: "bold",
+    fontWeight: "600",
     textTransform: "uppercase",
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   orderTime: {
     fontSize: 11,
-    color: "#6b7280",
+    color: "#9ca3af",
     fontWeight: "500",
     marginTop: 2,
   },
   orderAmount: {
     fontSize: 16,
-    fontWeight: "bold",
+    fontWeight: "800",
     color: "#06C168",
+    textAlign: "right",
   },
 
   // Customer Row
@@ -1456,42 +1517,48 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: 8,
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
   },
   customerInfo: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
+    flex: 1,
   },
   customerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "#f3f4f6",
     alignItems: "center",
     justifyContent: "center",
   },
   customerAvatarIcon: {
-    fontSize: 18,
+    fontSize: 16,
   },
   customerName: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
   },
   customerPhone: {
-    fontSize: 12,
-    color: "#6b7280",
+    fontSize: 11,
+    color: "#9ca3af",
+    marginTop: 1,
   },
   callButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#dcfce7",
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#E6F4FF",
     alignItems: "center",
     justifyContent: "center",
   },
   callIcon: {
-    fontSize: 16,
+    fontSize: 14,
   },
 
   // Items Preview
@@ -1504,58 +1571,58 @@ const styles = StyleSheet.create({
     backgroundColor: "#f9fafb",
     paddingVertical: 6,
     paddingLeft: 6,
-    paddingRight: 12,
+    paddingRight: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#f3f4f6",
+    borderColor: "#E5E7EB",
     marginRight: 8,
     gap: 8,
   },
   itemImage: {
-    width: 32,
-    height: 32,
+    width: 30,
+    height: 30,
     borderRadius: 6,
   },
   itemImagePlaceholder: {
-    width: 32,
-    height: 32,
+    width: 30,
+    height: 30,
     borderRadius: 6,
     backgroundColor: "#e5e7eb",
     alignItems: "center",
     justifyContent: "center",
   },
   itemImageEmoji: {
-    fontSize: 14,
+    fontSize: 13,
   },
   itemName: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
     color: "#374151",
   },
   itemSize: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "500",
     color: "#9ca3af",
     textTransform: "capitalize",
   },
   moreItemsCard: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     backgroundColor: "#f9fafb",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#f3f4f6",
+    borderColor: "#E5E7EB",
     justifyContent: "center",
   },
   moreItemsText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
     color: "#6b7280",
   },
 
   divider: {
     height: 1,
-    backgroundColor: "#f3f4f6",
-    marginVertical: 12,
+    backgroundColor: "#E5E7EB",
+    marginVertical: 8,
   },
 
   // Driver Row
@@ -1563,6 +1630,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
   },
   driverInfo: {
     flexDirection: "row",
@@ -1570,43 +1641,43 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   driverLabel: {
-    fontSize: 10,
-    fontWeight: "bold",
+    fontSize: 9,
+    fontWeight: "700",
     color: "#6b7280",
     textTransform: "uppercase",
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   driverBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#dcfce7",
+    backgroundColor: "#E6F9F1",
     paddingVertical: 4,
     paddingHorizontal: 8,
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#9EEBBE",
+    borderColor: "#B8F0D0",
     gap: 6,
   },
   driverInitials: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
   driverInitialsText: {
-    fontSize: 10,
-    fontWeight: "bold",
+    fontSize: 9,
+    fontWeight: "700",
     color: "#fff",
   },
   driverName: {
-    fontSize: 12,
-    fontWeight: "bold",
+    fontSize: 11,
+    fontWeight: "700",
     color: "#15803d",
   },
   driverCallIcon: {
-    fontSize: 18,
+    fontSize: 16,
     color: "#06C168",
   },
 
@@ -1614,30 +1685,33 @@ const styles = StyleSheet.create({
   actionButtons: {
     flexDirection: "row",
     gap: 8,
+    marginTop: 8,
   },
   acceptButton: {
     flex: 1,
     backgroundColor: "#06C168",
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingVertical: 11,
+    borderRadius: 10,
     alignItems: "center",
   },
   acceptButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "700",
     color: "#fff",
   },
   rejectButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#fee2e2",
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    backgroundColor: "#FEE2E2",
+    borderRadius: 10,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
   },
   rejectButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#dc2626",
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#DC2626",
   },
 
   // Status Row
@@ -1645,34 +1719,39 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginTop: 8,
   },
   statusText: {
     fontSize: 10,
     fontWeight: "500",
     color: "#9ca3af",
     textTransform: "uppercase",
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+    flex: 1,
   },
   viewDetailsButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    paddingVertical: 4,
+    paddingLeft: 8,
   },
   viewDetailsText: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "700",
     color: "#06C168",
   },
   viewDetailsArrow: {
-    fontSize: 18,
+    fontSize: 16,
     color: "#06C168",
+    marginTop: -2,
   },
 
   // End of List
   endOfList: {
     alignItems: "center",
     paddingVertical: 32,
-    opacity: 0.4,
+    opacity: 0.5,
   },
   endOfListIcon: {
     fontSize: 32,
@@ -1680,7 +1759,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   endOfListText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "500",
     color: "#6b7280",
   },
@@ -1695,33 +1774,34 @@ const styles = StyleSheet.create({
   // Reject Modal
   rejectModalContent: {
     backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     overflow: "hidden",
   },
   rejectModalHeader: {
-    backgroundColor: "#fef2f2",
+    backgroundColor: "#FEE2E2",
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#fecaca",
+    borderBottomColor: "#FCA5A5",
   },
   rejectModalTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#b91c1c",
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#991B1B",
   },
   rejectModalSubtitle: {
-    fontSize: 14,
-    color: "#ef4444",
-    marginTop: 4,
+    fontSize: 13,
+    color: "#DC2626",
+    marginTop: 3,
+    fontWeight: "500",
   },
   rejectModalBody: {
-    padding: 20,
+    padding: 18,
   },
   rejectLabel: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "700",
     color: "#374151",
     marginBottom: 8,
   },
@@ -1730,42 +1810,43 @@ const styles = StyleSheet.create({
   },
   rejectInput: {
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 14,
+    borderColor: "#E5E7EB",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 13,
     color: "#1f2937",
     minHeight: 80,
   },
   rejectModalButtons: {
     flexDirection: "row",
-    gap: 12,
-    marginTop: 16,
+    gap: 10,
+    marginTop: 14,
   },
   cancelRejectButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderColor: "#E5E7EB",
     alignItems: "center",
+    backgroundColor: "#fff",
   },
   cancelRejectText: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "700",
     color: "#4b5563",
   },
   confirmRejectButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: "#ef4444",
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: "#DC2626",
     alignItems: "center",
   },
   confirmRejectText: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "700",
     color: "#fff",
   },
   buttonDisabled: {
@@ -1775,16 +1856,16 @@ const styles = StyleSheet.create({
   // Details Modal
   detailsModalContent: {
     backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     maxHeight: "90%",
   },
   modalHandle: {
     alignItems: "center",
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   modalHandleBar: {
-    width: 40,
+    width: 38,
     height: 4,
     backgroundColor: "#d1d5db",
     borderRadius: 2,
@@ -1793,100 +1874,104 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingHorizontal: 18,
+    paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
+    borderBottomColor: "#E5E7EB",
   },
   detailsOrderId: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111827",
   },
   detailsTime: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#6b7280",
-    marginTop: 4,
+    marginTop: 3,
   },
   detailsSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
   },
   detailsSectionLabel: {
-    fontSize: 10,
-    fontWeight: "bold",
+    fontSize: 9,
+    fontWeight: "700",
     color: "#6b7280",
-    letterSpacing: 1,
-    marginBottom: 12,
+    letterSpacing: 0.5,
+    marginBottom: 10,
   },
   detailsCustomerCard: {
     backgroundColor: "#f9fafb",
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 12,
+    padding: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   detailsCustomerInfo: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
   },
   detailsCustomerAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderColor: "#E5E7EB",
     alignItems: "center",
     justifyContent: "center",
   },
   detailsCustomerAvatarIcon: {
-    fontSize: 20,
+    fontSize: 18,
   },
   detailsCustomerName: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
   },
   detailsCustomerPhone: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#6b7280",
+    marginTop: 2,
   },
   detailsCallButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
   detailsCallIcon: {
-    fontSize: 18,
+    fontSize: 16,
   },
   addressBox: {
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: 10,
+    paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
+    borderTopColor: "#E5E7EB",
   },
   addressLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#6b7280",
-    marginBottom: 4,
+    marginBottom: 3,
+    fontWeight: "600",
   },
   addressText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "500",
     color: "#374151",
   },
   detailsDriverCard: {
-    backgroundColor: "#dcfce7",
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: "#E6F9F1",
+    borderRadius: 12,
+    padding: 14,
     borderWidth: 1,
-    borderColor: "#9EEBBE",
+    borderColor: "#B8F0D0",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1894,29 +1979,30 @@ const styles = StyleSheet.create({
   detailsDriverInfo: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
   },
   detailsDriverAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
   },
   detailsDriverInitials: {
-    fontSize: 16,
-    fontWeight: "bold",
+    fontSize: 14,
+    fontWeight: "700",
     color: "#fff",
   },
   detailsDriverName: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
   },
   detailsDriverPhone: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#6b7280",
+    marginTop: 2,
   },
 
   // Items List
@@ -1927,78 +2013,82 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#f9fafb",
-    borderRadius: 12,
-    padding: 12,
-    gap: 12,
+    borderRadius: 10,
+    padding: 10,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   itemImageLarge: {
-    width: 56,
-    height: 56,
-    borderRadius: 10,
+    width: 52,
+    height: 52,
+    borderRadius: 8,
   },
   itemImageLargePlaceholder: {
-    width: 56,
-    height: 56,
-    borderRadius: 10,
+    width: 52,
+    height: 52,
+    borderRadius: 8,
     backgroundColor: "#e5e7eb",
     alignItems: "center",
     justifyContent: "center",
   },
   itemImageLargeEmoji: {
-    fontSize: 24,
+    fontSize: 22,
   },
   itemDetails: {
     flex: 1,
   },
   itemNameLarge: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#1f2937",
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
   },
   itemMeta: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#6b7280",
     marginTop: 2,
   },
   itemPrice: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
   },
 
   // Summary
   summaryCard: {
     backgroundColor: "#f9fafb",
-    borderRadius: 16,
-    padding: 16,
-    marginHorizontal: 20,
+    borderRadius: 12,
+    padding: 14,
+    marginHorizontal: 18,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   summaryLabel: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1f2937",
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
   },
   summaryAmount: {
-    fontSize: 24,
-    fontWeight: "bold",
+    fontSize: 20,
+    fontWeight: "800",
     color: "#06C168",
   },
 
   // Close Button
   closeButton: {
-    backgroundColor: "#f3f4f6",
-    marginHorizontal: 20,
-    marginVertical: 20,
-    paddingVertical: 14,
-    borderRadius: 12,
+    backgroundColor: "#E5E7EB",
+    marginHorizontal: 18,
+    marginVertical: 18,
+    paddingVertical: 12,
+    borderRadius: 10,
     alignItems: "center",
   },
   closeButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "700",
     color: "#374151",
   },
 

@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../../config/env';
 import orderTrackingService from '../../services/orderTrackingService';
 import pushNotificationService from '../../services/pushNotificationService';
+import { clearAuthSession, getAccessToken } from '../../lib/authStorage';
 
 const AuthContext = createContext(null);
 
@@ -34,7 +35,7 @@ export function AuthProvider({ children }) {
 
   const checkAuthState = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getAccessToken();
       const role = await AsyncStorage.getItem('role');
       const userName = await AsyncStorage.getItem('userName');
       const userEmail = await AsyncStorage.getItem('userEmail');
@@ -67,7 +68,7 @@ export function AuthProvider({ children }) {
 
   // Fetch admin status from API (for admin role only)
   const fetchAdminStatus = useCallback(async () => {
-    const token = await AsyncStorage.getItem('token');
+    const token = await getAccessToken();
     const role = await AsyncStorage.getItem('role');
     
     if (!token || role !== 'admin') {
@@ -141,7 +142,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     // Unregister push notification token before logout
-    const token = await AsyncStorage.getItem('token');
+    const token = await getAccessToken();
     if (token) {
       await pushNotificationService.unregisterToken(token);
       pushNotificationService.cleanup();
@@ -150,12 +151,7 @@ export function AuthProvider({ children }) {
     // Clear displayed orders tracking
     await orderTrackingService.clearAll();
     
-    await AsyncStorage.removeItem('token');
-    await AsyncStorage.removeItem('role');
-    await AsyncStorage.removeItem('userEmail');
-    await AsyncStorage.removeItem('userName');
-    await AsyncStorage.removeItem('userId');
-    await AsyncStorage.removeItem('profileCompleted');
+    await clearAuthSession();
     setUser(null);
     setUserRole(null);
     setIsAuthenticated(false);
@@ -174,7 +170,7 @@ export function AuthProvider({ children }) {
 
   // Initialize push notifications after login
   const initializePushNotifications = useCallback(async (navigationRef) => {
-    const token = await AsyncStorage.getItem('token');
+    const token = await getAccessToken();
     if (token) {
       console.log('🔔 AuthProvider: Initializing push notifications...');
       if (navigationRef) {

@@ -1,94 +1,174 @@
-import React, { useState, useEffect } from 'react';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation } from "@react-navigation/native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as ImagePicker from "expo-image-picker";
+import { useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  Image,
-  Modal,
-  Alert,
   ActivityIndicator,
-  Switch,
+  Alert,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import { useNavigation } from '@react-navigation/native';
-import { API_URL } from '../../config/env';
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { API_URL } from "../../config/env";
+
+const fetchFoods = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const res = await fetch(`${API_URL}/admin/foods`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to load products");
+  return data.foods || [];
+};
+
+const deleteFood = async (foodId) => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const res = await fetch(`${API_URL}/admin/foods/${foodId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to delete product");
+  return foodId;
+};
+
+const patchFoodAvailability = async ({ foodId, is_available }) => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const res = await fetch(`${API_URL}/admin/foods/${foodId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ is_available }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok)
+    throw new Error(data?.message || "Failed to update availability");
+  return data;
+};
+
+const uploadAdminImage = async (imageData) => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const res = await fetch(`${API_URL}/admin/upload-image`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ imageData }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to upload image");
+  return data.url;
+};
+
+const upsertFood = async ({ foodId, payload }) => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const url = foodId
+    ? `${API_URL}/admin/foods/${foodId}`
+    : `${API_URL}/admin/foods`;
+  const method = foodId ? "PATCH" : "POST";
+
+  const res = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to save product");
+  return data;
+};
 
 export default function Products() {
   const navigation = useNavigation();
-  const [foods, setFoods] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const queryClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingFood, setEditingFood] = useState(null);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    fetchFoods();
-  }, []);
+  const productsQuery = useQuery({
+    queryKey: ["admin", "products"],
+    queryFn: fetchFoods,
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+  });
 
-  const fetchFoods = async () => {
-    const token = await AsyncStorage.getItem('token');
-    if (!token) return;
+  const deleteMutation = useMutation({
+    mutationFn: deleteFood,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
+    },
+    onError: (err) => {
+      Alert.alert("Error", err.message || "Failed to delete product");
+    },
+  });
 
-    setLoading(true);
-    setError(null);
+  const toggleAvailabilityMutation = useMutation({
+    mutationFn: patchFoodAvailability,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
+    },
+    onError: async (err) => {
+      Alert.alert("Error", err.message || "Failed to update availability");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
+    },
+  });
 
-    try {
-      const res = await fetch(`${API_URL}/admin/foods`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data?.message || 'Failed to load products');
-      } else {
-        setFoods(data.foods || []);
-      }
-    } catch (err) {
-      setError('Network error while loading products');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const foods = productsQuery.data || [];
+  const loading = productsQuery.isLoading && !productsQuery.data;
+  const error = productsQuery.error?.message || null;
 
   const handleDelete = async (foodId) => {
     Alert.alert(
-      'Delete Product',
-      'Are you sure you want to delete this product?',
+      "Delete Product",
+      "Are you sure you want to delete this product?",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: 'Delete',
-          style: 'destructive',
+          text: "Delete",
+          style: "destructive",
           onPress: async () => {
-            try {
-              const token = await AsyncStorage.getItem('token');
-              const res = await fetch(`${API_URL}/admin/foods/${foodId}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${token}` },
-              });
-
-              if (res.ok) {
-                setFoods(foods.filter((f) => f.id !== foodId));
-              } else {
-                const data = await res.json();
-                Alert.alert('Error', data?.message || 'Failed to delete product');
-              }
-            } catch (err) {
-              Alert.alert('Error', 'Error deleting product');
-              console.error(err);
-            }
+            deleteMutation.mutate(foodId);
           },
         },
-      ]
+      ],
     );
   };
 
@@ -99,44 +179,28 @@ export default function Products() {
 
   const toggleAvailability = async (food) => {
     const newValue = !food.is_available;
-    // Optimistic update
-    setFoods((prev) =>
+    queryClient.setQueryData(["admin", "products"], (prev = []) =>
       prev.map((f) =>
-        f.id === food.id ? { ...f, is_available: newValue } : f
-      )
+        f.id === food.id ? { ...f, is_available: newValue } : f,
+      ),
     );
+    toggleAvailabilityMutation.mutate({
+      foodId: food.id,
+      is_available: newValue,
+    });
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
     try {
-      const token = await AsyncStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/foods/${food.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ is_available: newValue }),
-      });
-      if (!res.ok) {
-        // Revert on failure
-        setFoods((prev) =>
-          prev.map((f) =>
-            f.id === food.id ? { ...f, is_available: !newValue } : f
-          )
-        );
-        const data = await res.json();
-        Alert.alert('Error', data?.message || 'Failed to update availability');
-      }
-    } catch {
-      setFoods((prev) =>
-        prev.map((f) =>
-          f.id === food.id ? { ...f, is_available: !newValue } : f
-        )
-      );
-      Alert.alert('Error', 'Network error updating availability');
+      await queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
+    } finally {
+      setRefreshing(false);
     }
   };
 
   const filteredFoods = foods.filter((food) =>
-    food.name.toLowerCase().includes(search.toLowerCase())
+    food.name.toLowerCase().includes(search.toLowerCase()),
   );
 
   const renderStars = (rating = 0) => {
@@ -147,11 +211,11 @@ export default function Products() {
           key={i}
           style={[
             styles.star,
-            { color: i < Math.round(rating) ? '#facc15' : '#d1d5db' },
+            { color: i < Math.round(rating) ? "#facc15" : "#d1d5db" },
           ]}
         >
           ★
-        </Text>
+        </Text>,
       );
     }
     return (
@@ -168,9 +232,9 @@ export default function Products() {
         <View key={i} style={styles.skeletonCard}>
           <View style={styles.skeletonImage} />
           <View style={styles.skeletonContent}>
-            <View style={[styles.skeletonLine, { width: '75%' }]} />
-            <View style={[styles.skeletonLine, { width: '50%' }]} />
-            <View style={[styles.skeletonLine, { width: '35%' }]} />
+            <View style={[styles.skeletonLine, { width: "75%" }]} />
+            <View style={[styles.skeletonLine, { width: "50%" }]} />
+            <View style={[styles.skeletonLine, { width: "35%" }]} />
           </View>
           <View style={styles.skeletonActions}>
             <View style={[styles.skeletonLine, { width: 50 }]} />
@@ -190,7 +254,7 @@ export default function Products() {
       <Text style={styles.emptySubtitle}>
         {foods.length === 0
           ? 'Tap "Add Product" to create your first menu item.'
-          : 'No products match your search.'}
+          : "No products match your search."}
       </Text>
     </View>
   );
@@ -206,7 +270,10 @@ export default function Products() {
         {/* Product Image */}
         <View style={styles.productImageContainer}>
           {food.image_url ? (
-            <Image source={{ uri: food.image_url }} style={styles.productImage} />
+            <Image
+              source={{ uri: food.image_url }}
+              style={styles.productImage}
+            />
           ) : (
             <View style={styles.noImagePlaceholder}>
               <Text style={styles.noImageText}>No img</Text>
@@ -222,26 +289,26 @@ export default function Products() {
                 {food.name}
               </Text>
               <Text style={styles.productDescription} numberOfLines={2}>
-                {food.description || '-'}
+                {food.description || "-"}
               </Text>
             </View>
-            
+
             {/* Availability Toggle */}
             <View style={styles.availabilityToggle}>
               <Switch
                 value={food.is_available}
                 onValueChange={() => toggleAvailability(food)}
-                trackColor={{ false: '#d1d5db', true: '#06C168' }}
+                trackColor={{ false: "#d1d5db", true: "#06C168" }}
                 thumbColor="#ffffff"
                 ios_backgroundColor="#d1d5db"
               />
               <Text
                 style={[
                   styles.availabilityText,
-                  { color: food.is_available ? '#15803d' : '#dc2626' },
+                  { color: food.is_available ? "#15803d" : "#dc2626" },
                 ]}
               >
-                {food.is_available ? 'On' : 'Off'}
+                {food.is_available ? "On" : "Off"}
               </Text>
             </View>
           </View>
@@ -251,7 +318,9 @@ export default function Products() {
             <Text style={styles.productPrice}>Rs. {food.regular_price}</Text>
             {food.offer_price ? (
               <View style={styles.offerBadge}>
-                <Text style={styles.offerText}>Offer: Rs. {food.offer_price}</Text>
+                <Text style={styles.offerText}>
+                  Offer: Rs. {food.offer_price}
+                </Text>
               </View>
             ) : null}
             {renderStars(food.stars)}
@@ -287,36 +356,46 @@ export default function Products() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
+        <View style={styles.headerTopRow}>
           <Text style={styles.headerTitle}>Products</Text>
-          <Text style={styles.headerSubtitle}>
-            Manage your restaurant menu items and products.
-          </Text>
+          <View style={styles.headerActions}>
+            <View style={styles.filterPill}>
+              <Text style={styles.filterPillText}>All Products</Text>
+              <Text style={styles.filterPillArrow}>⌄</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={() => navigation.navigate("AdminNotifications")}
+            >
+              <Text style={styles.iconBtnText}>🔔</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iconBtn, styles.profileIconBtn]}
+              onPress={() => navigation.navigate("Account")}
+            >
+              <Text style={[styles.iconBtnText, styles.profileIconText]}>
+                ◉
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => {
-            setEditingFood(null);
-            setShowAddModal(true);
-          }}
-        >
-          <Text style={styles.addButtonIcon}>+</Text>
-        </TouchableOpacity>
+        <View style={styles.headerUnderline} />
       </View>
 
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#06C168"]}
+          />
+        }
       >
         {/* Search Bar */}
         <View style={styles.searchContainer}>
@@ -326,16 +405,28 @@ export default function Products() {
               style={styles.searchInput}
               value={search}
               onChangeText={setSearch}
-              placeholder="Search products by name..."
+              placeholder="Search food items, categories..."
               placeholderTextColor="#9ca3af"
             />
             {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch('')}>
+              <TouchableOpacity onPress={() => setSearch("")}>
                 <Text style={styles.clearSearch}>✕</Text>
               </TouchableOpacity>
             )}
           </View>
         </View>
+
+        <TouchableOpacity
+          style={styles.addProductCta}
+          onPress={() => {
+            setEditingFood(null);
+            setShowAddModal(true);
+          }}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.addProductCtaIcon}>＋</Text>
+          <Text style={styles.addProductCtaText}>Add Product</Text>
+        </TouchableOpacity>
 
         {/* Products List */}
         <View style={styles.productsContainer}>
@@ -360,7 +451,7 @@ export default function Products() {
           setEditingFood(null);
         }}
         onSave={() => {
-          fetchFoods();
+          queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
           setShowAddModal(false);
           setEditingFood(null);
         }}
@@ -372,40 +463,62 @@ export default function Products() {
 // Add/Edit Product Modal Component
 function AddProductModal({ visible, food, onClose, onSave }) {
   const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    image_url: '',
+    name: "",
+    description: "",
+    image_url: "",
     available_time: [],
-    regular_size: '',
-    regular_portion: '',
-    regular_price: '',
-    offer_price: '',
-    extra_size: '',
-    extra_portion: '',
-    extra_price: '',
+    regular_size: "",
+    regular_portion: "",
+    regular_price: "",
+    offer_price: "",
+    extra_size: "",
+    extra_portion: "",
+    extra_price: "",
     is_available: true,
   });
 
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
 
-  const availableTimes = ['breakfast', 'lunch', 'dinner'];
+  const availableTimes = ["breakfast", "lunch", "dinner"];
+
+  const uploadImageMutation = useMutation({
+    mutationFn: uploadAdminImage,
+    onSuccess: (imageUrl) => {
+      setFormData((prev) => ({ ...prev, image_url: imageUrl }));
+    },
+    onError: (err) => {
+      const message = err.message || "Failed to upload image";
+      setError(message);
+      Alert.alert("Error", message);
+    },
+  });
+
+  const saveFoodMutation = useMutation({
+    mutationFn: upsertFood,
+    onSuccess: () => {
+      onSave();
+    },
+    onError: (err) => {
+      const message = err.message || "Failed to save product";
+      setError(message);
+      Alert.alert("Error", message);
+    },
+  });
 
   useEffect(() => {
     if (visible) {
       setFormData({
-        name: food?.name || '',
-        description: food?.description || '',
-        image_url: food?.image_url || '',
+        name: food?.name || "",
+        description: food?.description || "",
+        image_url: food?.image_url || "",
         available_time: food?.available_time || [],
-        regular_size: food?.regular_size || '',
-        regular_portion: food?.regular_portion || '',
-        regular_price: food?.regular_price?.toString() || '',
-        offer_price: food?.offer_price?.toString() || '',
-        extra_size: food?.extra_size || '',
-        extra_portion: food?.extra_portion || '',
-        extra_price: food?.extra_price?.toString() || '',
+        regular_size: food?.regular_size || "",
+        regular_portion: food?.regular_portion || "",
+        regular_price: food?.regular_price?.toString() || "",
+        offer_price: food?.offer_price?.toString() || "",
+        extra_size: food?.extra_size || "",
+        extra_portion: food?.extra_portion || "",
+        extra_price: food?.extra_price?.toString() || "",
         is_available: food?.is_available ?? true,
       });
       setError(null);
@@ -427,10 +540,14 @@ function AddProductModal({ visible, food, onClose, onSave }) {
 
   const handleImagePick = async () => {
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
       if (!permissionResult.granted) {
-        Alert.alert('Permission Required', 'Please allow access to your photo library.');
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library.",
+        );
         return;
       }
 
@@ -443,78 +560,44 @@ function AddProductModal({ visible, food, onClose, onSave }) {
       });
 
       if (!result.canceled && result.assets[0]) {
-        setUploading(true);
         setError(null);
 
         try {
-          const token = await AsyncStorage.getItem('token');
           const imageData = `data:image/jpeg;base64,${result.assets[0].base64}`;
-
-          const res = await fetch(`${API_URL}/admin/upload-image`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ imageData }),
-          });
-
-          const data = await res.json();
-
-          if (!res.ok) {
-            setError(data?.message || 'Failed to upload image');
-            Alert.alert('Error', data?.message || 'Failed to upload image');
-          } else {
-            setFormData({ ...formData, image_url: data.url });
-          }
+          await uploadImageMutation.mutateAsync(imageData);
         } catch (err) {
-          setError('Error uploading image');
-          Alert.alert('Error', 'Error uploading image');
           console.error(err);
-        } finally {
-          setUploading(false);
         }
       }
     } catch (err) {
-      Alert.alert('Error', 'Error selecting image');
+      Alert.alert("Error", "Error selecting image");
       console.error(err);
     }
   };
 
   const handleSubmit = async () => {
     setError(null);
-    setLoading(true);
 
     // Validation
     if (!formData.name.trim()) {
-      setError('Product name is required');
-      Alert.alert('Validation Error', 'Product name is required');
-      setLoading(false);
+      setError("Product name is required");
+      Alert.alert("Validation Error", "Product name is required");
       return;
     }
 
     if (!formData.regular_price) {
-      setError('Regular price is required');
-      Alert.alert('Validation Error', 'Regular price is required');
-      setLoading(false);
+      setError("Regular price is required");
+      Alert.alert("Validation Error", "Regular price is required");
       return;
     }
 
     if (formData.available_time.length === 0) {
-      setError('Select at least one available time');
-      Alert.alert('Validation Error', 'Select at least one available time');
-      setLoading(false);
+      setError("Select at least one available time");
+      Alert.alert("Validation Error", "Select at least one available time");
       return;
     }
 
     try {
-      const token = await AsyncStorage.getItem('token');
-      const url = food
-        ? `${API_URL}/admin/foods/${food.id}`
-        : `${API_URL}/admin/foods`;
-
-      const method = food ? 'PATCH' : 'POST';
-
       const payload = {
         name: formData.name.trim(),
         description: formData.description.trim() || null,
@@ -534,31 +617,14 @@ function AddProductModal({ visible, food, onClose, onSave }) {
           : null,
       };
 
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data?.message || 'Failed to save product');
-        Alert.alert('Error', data?.message || 'Failed to save product');
-      } else {
-        onSave();
-      }
+      await saveFoodMutation.mutateAsync({ foodId: food?.id, payload });
     } catch (err) {
-      setError('Network error while saving product');
-      Alert.alert('Error', 'Network error while saving product');
       console.error(err);
-    } finally {
-      setLoading(false);
     }
   };
+
+  const loading = saveFoodMutation.isPending;
+  const uploading = uploadImageMutation.isPending;
 
   return (
     <Modal
@@ -573,18 +639,18 @@ function AddProductModal({ visible, food, onClose, onSave }) {
           <TouchableOpacity
             style={modalStyles.closeButton}
             onPress={onClose}
-            disabled={loading}
+            disabled={loading || uploading}
           >
             <Text style={modalStyles.closeButtonText}>✕</Text>
           </TouchableOpacity>
           <Text style={modalStyles.headerTitle}>
-            {food ? 'Edit Product' : 'Add New Product'}
+            {food ? "Edit Product" : "Add New Product"}
           </Text>
           <View style={{ width: 40 }} />
         </View>
 
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={{ flex: 1 }}
         >
           <ScrollView
@@ -618,7 +684,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                     <ActivityIndicator size="small" color="#ffffff" />
                   ) : (
                     <Text style={modalStyles.uploadButtonText}>
-                      {formData.image_url ? 'Change Image' : 'Upload Image'}
+                      {formData.image_url ? "Change Image" : "Upload Image"}
                     </Text>
                   )}
                 </TouchableOpacity>
@@ -634,7 +700,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <TextInput
                 style={modalStyles.input}
                 value={formData.name}
-                onChangeText={(value) => handleInputChange('name', value)}
+                onChangeText={(value) => handleInputChange("name", value)}
                 placeholder="e.g., Chicken Burger, Biryani"
                 placeholderTextColor="#9ca3af"
               />
@@ -646,7 +712,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <TextInput
                 style={[modalStyles.input, modalStyles.textArea]}
                 value={formData.description}
-                onChangeText={(value) => handleInputChange('description', value)}
+                onChangeText={(value) =>
+                  handleInputChange("description", value)
+                }
                 placeholder="Describe your product (e.g., ingredients, specialties)..."
                 placeholderTextColor="#9ca3af"
                 multiline
@@ -702,7 +770,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
             {/* Availability Toggle */}
             <View style={modalStyles.toggleSection}>
               <View>
-                <Text style={modalStyles.toggleLabel}>Product availability</Text>
+                <Text style={modalStyles.toggleLabel}>
+                  Product availability
+                </Text>
                 <Text style={modalStyles.toggleHelper}>
                   Toggle off to hide from menu
                 </Text>
@@ -712,7 +782,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                 onValueChange={(value) =>
                   setFormData({ ...formData, is_available: value })
                 }
-                trackColor={{ false: '#d1d5db', true: '#6366f1' }}
+                trackColor={{ false: "#d1d5db", true: "#6366f1" }}
                 thumbColor="#ffffff"
                 ios_backgroundColor="#d1d5db"
               />
@@ -720,7 +790,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
 
             {/* Regular Size Section */}
             <View style={modalStyles.sectionDivider}>
-              <Text style={modalStyles.sectionTitle}>Regular Size (Required)</Text>
+              <Text style={modalStyles.sectionTitle}>
+                Regular Size (Required)
+              </Text>
             </View>
 
             <View style={modalStyles.gridRow}>
@@ -729,7 +801,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                 <TextInput
                   style={modalStyles.input}
                   value={formData.regular_size}
-                  onChangeText={(value) => handleInputChange('regular_size', value)}
+                  onChangeText={(value) =>
+                    handleInputChange("regular_size", value)
+                  }
                   placeholder="e.g., Regular"
                   placeholderTextColor="#9ca3af"
                 />
@@ -740,7 +814,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                   style={modalStyles.input}
                   value={formData.regular_portion}
                   onChangeText={(value) =>
-                    handleInputChange('regular_portion', value)
+                    handleInputChange("regular_portion", value)
                   }
                   placeholder="e.g., 500g"
                   placeholderTextColor="#9ca3af"
@@ -753,7 +827,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <TextInput
                 style={modalStyles.input}
                 value={formData.regular_price}
-                onChangeText={(value) => handleInputChange('regular_price', value)}
+                onChangeText={(value) =>
+                  handleInputChange("regular_price", value)
+                }
                 placeholder="0.00"
                 placeholderTextColor="#9ca3af"
                 keyboardType="numeric"
@@ -765,7 +841,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <TextInput
                 style={modalStyles.input}
                 value={formData.offer_price}
-                onChangeText={(value) => handleInputChange('offer_price', value)}
+                onChangeText={(value) =>
+                  handleInputChange("offer_price", value)
+                }
                 placeholder="Leave empty if no offer"
                 placeholderTextColor="#9ca3af"
                 keyboardType="numeric"
@@ -777,7 +855,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
 
             {/* Extra Size Section */}
             <View style={modalStyles.sectionDivider}>
-              <Text style={modalStyles.sectionTitle}>Extra Size (Optional)</Text>
+              <Text style={modalStyles.sectionTitle}>
+                Extra Size (Optional)
+              </Text>
             </View>
 
             <View style={modalStyles.gridRow}>
@@ -786,7 +866,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                 <TextInput
                   style={modalStyles.input}
                   value={formData.extra_size}
-                  onChangeText={(value) => handleInputChange('extra_size', value)}
+                  onChangeText={(value) =>
+                    handleInputChange("extra_size", value)
+                  }
                   placeholder="e.g., Large"
                   placeholderTextColor="#9ca3af"
                 />
@@ -796,7 +878,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                 <TextInput
                   style={modalStyles.input}
                   value={formData.extra_portion}
-                  onChangeText={(value) => handleInputChange('extra_portion', value)}
+                  onChangeText={(value) =>
+                    handleInputChange("extra_portion", value)
+                  }
                   placeholder="e.g., 750g"
                   placeholderTextColor="#9ca3af"
                 />
@@ -808,7 +892,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <TextInput
                 style={modalStyles.input}
                 value={formData.extra_price}
-                onChangeText={(value) => handleInputChange('extra_price', value)}
+                onChangeText={(value) =>
+                  handleInputChange("extra_price", value)
+                }
                 placeholder="0.00"
                 placeholderTextColor="#9ca3af"
                 keyboardType="numeric"
@@ -825,7 +911,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
           <TouchableOpacity
             style={modalStyles.cancelButton}
             onPress={onClose}
-            disabled={loading}
+            disabled={loading || uploading}
           >
             <Text style={modalStyles.cancelButtonText}>Cancel</Text>
           </TouchableOpacity>
@@ -841,7 +927,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <ActivityIndicator size="small" color="#ffffff" />
             ) : (
               <Text style={modalStyles.saveButtonText}>
-                {food ? 'Update Product' : 'Add Product'}
+                {food ? "Update Product" : "Add Product"}
               </Text>
             )}
           </TouchableOpacity>
@@ -855,89 +941,123 @@ function AddProductModal({ visible, food, onClose, onSave }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#EDFBF2',
+    backgroundColor: "#F8FAFC",
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 8,
+    backgroundColor: "#ffffff",
     borderBottomWidth: 1,
-    borderBottomColor: '#dcfce7',
+    borderBottomColor: "#eef2f7",
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#EDFBF2',
-    justifyContent: 'center',
-    alignItems: 'center',
+  headerTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
-  backButtonText: {
-    fontSize: 24,
-    color: '#06C168',
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
-  headerTitleContainer: {
-    flex: 1,
-    marginLeft: 12,
+  filterPill: {
+    height: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#fff",
+  },
+  filterPillText: {
+    fontSize: 14,
+    color: "#334155",
+    fontWeight: "500",
+  },
+  filterPillArrow: {
+    fontSize: 13,
+    color: "#64748b",
+  },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  profileIconBtn: {
+    backgroundColor: "#06C168",
+    borderColor: "#06C168",
+  },
+  iconBtnText: {
+    fontSize: 15,
+  },
+  profileIconText: {
+    color: "#fff",
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#06C168',
+    fontSize: 39,
+    lineHeight: 40,
+    fontWeight: "700",
+    color: "#111827",
   },
-  headerSubtitle: {
-    fontSize: 12,
-    color: '#6b7280',
+  headerUnderline: {
+    width: 74,
+    height: 3,
+    borderRadius: 99,
+    backgroundColor: "#06C168",
     marginTop: 2,
+    marginLeft: 2,
   },
-  addButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#06C168',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#06C168',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+  addProductCta: {
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#06C168",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+    flexDirection: "row",
+    gap: 8,
   },
-  addButtonIcon: {
-    fontSize: 28,
-    color: '#ffffff',
-    fontWeight: 'bold',
+  addProductCtaIcon: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  addProductCtaText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: 16,
+    padding: 12,
     paddingBottom: 32,
   },
   searchContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    backgroundColor: "#ffffff",
+    borderRadius: 14,
+    padding: 8,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#dcfce7',
+    borderColor: "#e5e7eb",
   },
   searchInputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f9fafb',
-    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F3F4F6",
+    borderRadius: 10,
     paddingHorizontal: 12,
-    borderWidth: 2,
-    borderColor: '#dcfce7',
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   searchIcon: {
     fontSize: 16,
@@ -945,42 +1065,37 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#1f2937',
+    paddingVertical: 11,
+    fontSize: 15,
+    color: "#1f2937",
   },
   clearSearch: {
     fontSize: 16,
-    color: '#9ca3af',
+    color: "#9ca3af",
     padding: 4,
   },
   productsContainer: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
     borderWidth: 1,
-    borderColor: '#dcfce7',
-    overflow: 'hidden',
+    borderColor: "#e5e7eb",
+    overflow: "hidden",
   },
   skeletonContainer: {
     padding: 16,
   },
   skeletonCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: "#f3f4f6",
   },
   skeletonImage: {
     width: 64,
     height: 64,
     borderRadius: 12,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
   },
   skeletonContent: {
     flex: 1,
@@ -989,30 +1104,30 @@ const styles = StyleSheet.create({
   },
   skeletonLine: {
     height: 12,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 6,
   },
   skeletonActions: {
-    alignItems: 'flex-end',
+    alignItems: "flex-end",
     gap: 8,
   },
   skeletonSwitch: {
     width: 40,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
   },
   emptyState: {
     padding: 48,
-    alignItems: 'center',
+    alignItems: "center",
   },
   emptyIconContainer: {
     width: 80,
     height: 80,
     borderRadius: 20,
-    backgroundColor: '#dcfce7',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#dcfce7",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
   },
   emptyIcon: {
@@ -1020,61 +1135,61 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#374151',
+    fontWeight: "600",
+    color: "#374151",
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
+    color: "#6b7280",
+    textAlign: "center",
   },
   productsList: {
     padding: 12,
   },
   productCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: '#dcfce7',
+    borderColor: "#dcfce7",
     padding: 16,
     marginBottom: 12,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
   },
   productCardContent: {
-    flexDirection: 'row',
+    flexDirection: "row",
   },
   productImageContainer: {
     width: 72,
     height: 72,
     borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#f3f4f6',
+    overflow: "hidden",
+    backgroundColor: "#f3f4f6",
   },
   productImage: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   noImagePlaceholder: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   noImageText: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
   productInfo: {
     flex: 1,
     marginLeft: 12,
   },
   productHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
   productNameContainer: {
     flex: 1,
@@ -1082,85 +1197,85 @@ const styles = StyleSheet.create({
   },
   productName: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: "600",
+    color: "#111827",
   },
   productDescription: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 2,
   },
   availabilityToggle: {
-    alignItems: 'center',
+    alignItems: "center",
   },
   availabilityText: {
     fontSize: 10,
-    fontWeight: '500',
+    fontWeight: "500",
     marginTop: 2,
   },
   priceRatingRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
     marginTop: 8,
     gap: 8,
   },
   productPrice: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: "600",
+    color: "#111827",
   },
   offerBadge: {
-    backgroundColor: '#dcfce7',
+    backgroundColor: "#dcfce7",
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
   },
   offerText: {
     fontSize: 11,
-    fontWeight: '500',
-    color: '#15803d',
+    fontWeight: "500",
+    color: "#15803d",
   },
   starsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   starsRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
   },
   star: {
     fontSize: 14,
   },
   ratingText: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     marginLeft: 4,
   },
   timeBadgesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     marginTop: 8,
     gap: 4,
   },
   timeBadge: {
-    backgroundColor: '#dbeafe',
+    backgroundColor: "#dbeafe",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
   timeBadgeText: {
     fontSize: 10,
-    fontWeight: '500',
-    color: '#1d4ed8',
-    textTransform: 'capitalize',
+    fontWeight: "500",
+    color: "#1d4ed8",
+    textTransform: "capitalize",
   },
   actionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+    flexDirection: "row",
+    justifyContent: "flex-end",
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
+    borderTopColor: "#f3f4f6",
     gap: 16,
   },
   editButton: {
@@ -1169,8 +1284,8 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#6366f1',
+    fontWeight: "500",
+    color: "#6366f1",
   },
   deleteButton: {
     paddingVertical: 6,
@@ -1178,8 +1293,8 @@ const styles = StyleSheet.create({
   },
   deleteButtonText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#dc2626',
+    fontWeight: "500",
+    color: "#dc2626",
   },
 });
 
@@ -1187,33 +1302,33 @@ const styles = StyleSheet.create({
 const modalStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: "#e5e7eb",
   },
   closeButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
   },
   closeButtonText: {
     fontSize: 18,
-    color: '#6b7280',
+    color: "#6b7280",
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
+    fontWeight: "700",
+    color: "#111827",
   },
   scrollView: {
     flex: 1,
@@ -1226,13 +1341,13 @@ const modalStyles = StyleSheet.create({
   },
   sectionLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
+    fontWeight: "600",
+    color: "#374151",
     marginBottom: 8,
   },
   imageSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 16,
   },
   previewImage: {
@@ -1244,133 +1359,133 @@ const modalStyles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 12,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
     borderWidth: 2,
-    borderColor: '#e5e7eb',
-    borderStyle: 'dashed',
+    borderColor: "#e5e7eb",
+    borderStyle: "dashed",
   },
   imagePlaceholderIcon: {
     fontSize: 32,
   },
   uploadButton: {
     flex: 1,
-    backgroundColor: '#6366f1',
+    backgroundColor: "#6366f1",
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
-    alignItems: 'center',
+    alignItems: "center",
   },
   uploadButtonDisabled: {
-    backgroundColor: '#a5b4fc',
+    backgroundColor: "#a5b4fc",
   },
   uploadButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   helperText: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 8,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#ffffff',
+    color: "#111827",
+    backgroundColor: "#ffffff",
   },
   textArea: {
     minHeight: 80,
     paddingTop: 12,
   },
   timeOptionsRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 16,
   },
   timeOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: "#e5e7eb",
   },
   timeOptionSelected: {
-    borderColor: '#6366f1',
-    backgroundColor: '#eef2ff',
+    borderColor: "#6366f1",
+    backgroundColor: "#eef2ff",
   },
   checkbox: {
     width: 20,
     height: 20,
     borderRadius: 4,
     borderWidth: 2,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
     marginRight: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   checkboxSelected: {
-    borderColor: '#6366f1',
-    backgroundColor: '#6366f1',
+    borderColor: "#6366f1",
+    backgroundColor: "#6366f1",
   },
   checkboxCheck: {
     fontSize: 12,
-    color: '#ffffff',
-    fontWeight: 'bold',
+    color: "#ffffff",
+    fontWeight: "bold",
   },
   timeOptionText: {
     fontSize: 14,
-    color: '#374151',
+    color: "#374151",
   },
   timeOptionTextSelected: {
-    color: '#4f46e5',
-    fontWeight: '500',
+    color: "#4f46e5",
+    fontWeight: "500",
   },
   errorText: {
     fontSize: 12,
-    color: '#dc2626',
+    color: "#dc2626",
     marginTop: 8,
   },
   toggleSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingVertical: 16,
     paddingHorizontal: 4,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+    borderTopColor: "#e5e7eb",
     marginBottom: 20,
   },
   toggleLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: "600",
+    color: "#111827",
   },
   toggleHelper: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 2,
   },
   sectionDivider: {
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+    borderTopColor: "#e5e7eb",
     paddingTop: 20,
     marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: "600",
+    color: "#111827",
   },
   gridRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
     marginBottom: 16,
   },
@@ -1379,43 +1494,43 @@ const modalStyles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
     marginBottom: 8,
   },
   footer: {
-    flexDirection: 'row',
+    flexDirection: "row",
     padding: 16,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: '#ffffff',
+    borderTopColor: "#e5e7eb",
+    backgroundColor: "#ffffff",
     gap: 12,
   },
   cancelButton: {
     flex: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     paddingVertical: 14,
     borderRadius: 12,
-    alignItems: 'center',
+    alignItems: "center",
   },
   cancelButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
+    fontWeight: "600",
+    color: "#374151",
   },
   saveButton: {
     flex: 1,
-    backgroundColor: '#6366f1',
+    backgroundColor: "#6366f1",
     paddingVertical: 14,
     borderRadius: 12,
-    alignItems: 'center',
+    alignItems: "center",
   },
   saveButtonDisabled: {
-    backgroundColor: '#a5b4fc',
+    backgroundColor: "#a5b4fc",
   },
   saveButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
 });

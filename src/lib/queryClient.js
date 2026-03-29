@@ -12,7 +12,8 @@ function isNetworkLikeError(error) {
 export const mobileQueryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 60 * 1000,
+      // Keep warm cache for smooth transitions, refresh in background.
+      staleTime: 20 * 1000,
       gcTime: 15 * 60 * 1000,
       retry: (failureCount, error) => {
         if (isNetworkLikeError(error)) return false;
@@ -22,6 +23,8 @@ export const mobileQueryClient = new QueryClient({
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
       refetchOnMount: true,
+      refetchInterval: () => 30 * 1000,
+      refetchIntervalInBackground: true,
     },
     mutations: {
       retry: (failureCount, error) => {

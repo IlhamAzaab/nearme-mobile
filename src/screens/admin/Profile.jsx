@@ -1,150 +1,313 @@
-import React, { useEffect, useState } from 'react';
+﻿import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation } from "@react-navigation/native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
-import { API_URL } from '../../config/env';
-import { useAuth } from '../../app/providers/AuthProvider';
+  Animated,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../../app/providers/AuthProvider";
+import { API_URL } from "../../config/env";
+
+const fetchAdminProfile = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const response = await fetch(`${API_URL}/admin/me`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data?.message || "Failed to load profile");
+  }
+
+  return data?.admin || null;
+};
+
+const fetchAdminRestaurant = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const response = await fetch(`${API_URL}/admin/restaurant`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data?.message || "Failed to load restaurant");
+  }
+
+  return data?.restaurant || null;
+};
+
+const ProfileSkeleton = ({ opacity }) => {
+  const animatedOpacity = { opacity };
+
+  return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.headerWrap}>
+          <Animated.View
+            style={[
+              styles.skeletonLine,
+              styles.skeletonHeaderTitle,
+              animatedOpacity,
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.skeletonLine,
+              styles.skeletonHeaderSubtitle,
+              animatedOpacity,
+            ]}
+          />
+        </View>
+
+        <View style={styles.profileCard}>
+          <Animated.View style={[styles.skeletonAvatar, animatedOpacity]} />
+          <Animated.View style={[styles.skeletonPill, animatedOpacity]} />
+          <Animated.View
+            style={[
+              styles.skeletonLine,
+              styles.skeletonProfileName,
+              animatedOpacity,
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.skeletonLine,
+              styles.skeletonProfileRole,
+              animatedOpacity,
+            ]}
+          />
+
+          <View style={styles.metaBadgesRow}>
+            <Animated.View style={[styles.skeletonBadge, animatedOpacity]} />
+            <Animated.View style={[styles.skeletonBadge, animatedOpacity]} />
+          </View>
+        </View>
+
+        <View style={styles.infoCard}>
+          <View style={styles.sectionHeaderRow}>
+            <Animated.View
+              style={[styles.skeletonSectionIcon, animatedOpacity]}
+            />
+            <View style={styles.sectionTitleWrap}>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonSectionTitle,
+                  animatedOpacity,
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonSectionSubtitle,
+                  animatedOpacity,
+                ]}
+              />
+            </View>
+          </View>
+
+          <Animated.View style={[styles.skeletonDetailRow, animatedOpacity]} />
+          <Animated.View style={[styles.skeletonDetailRow, animatedOpacity]} />
+          <Animated.View
+            style={[styles.skeletonDetailRowShort, animatedOpacity]}
+          />
+        </View>
+
+        <View style={styles.actionCard}>
+          <View style={styles.actionLeft}>
+            <Animated.View
+              style={[styles.skeletonSectionIcon, animatedOpacity]}
+            />
+            <View style={styles.actionTextWrap}>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonActionTitle,
+                  animatedOpacity,
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonActionSubtitle,
+                  animatedOpacity,
+                ]}
+              />
+            </View>
+          </View>
+          <Animated.View style={[styles.skeletonChevron, animatedOpacity]} />
+        </View>
+
+        <View style={styles.securityCard}>
+          <View style={styles.actionLeft}>
+            <Animated.View
+              style={[styles.skeletonSectionIcon, animatedOpacity]}
+            />
+            <View style={styles.actionTextWrap}>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonActionTitle,
+                  animatedOpacity,
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonActionSubtitle,
+                  animatedOpacity,
+                ]}
+              />
+            </View>
+          </View>
+          <View style={styles.securityBottomRow}>
+            <View>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonPasswordLabel,
+                  animatedOpacity,
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  styles.skeletonPasswordHidden,
+                  animatedOpacity,
+                ]}
+              />
+            </View>
+            <Animated.View
+              style={[styles.skeletonChangePassword, animatedOpacity]}
+            />
+          </View>
+        </View>
+
+        <Animated.View style={[styles.skeletonLogout, animatedOpacity]} />
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
 
 export default function Profile() {
   const navigation = useNavigation();
+  const queryClient = useQueryClient();
   const { logout } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [profile, setProfile] = useState(null);
-  const [username, setUsername] = useState('');
-  const [phone, setPhone] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [userEmail, setUserEmail] = useState('');
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const translateYAnim = useRef(new Animated.Value(18)).current;
+  const skeletonOpacity = useRef(new Animated.Value(0.55)).current;
+
+  const profileQuery = useQuery({
+    queryKey: ["admin", "profile"],
+    queryFn: fetchAdminProfile,
+    staleTime: 60 * 1000,
+  });
+
+  const restaurantQuery = useQuery({
+    queryKey: ["admin", "restaurant"],
+    queryFn: fetchAdminRestaurant,
+    staleTime: 60 * 1000,
+  });
+
+  const admin = profileQuery.data;
+  const restaurant = restaurantQuery.data;
+
+  const displayName = useMemo(
+    () => admin?.username || admin?.name || "Admin",
+    [admin],
+  );
+
+  const displayEmail = useMemo(() => admin?.email || "-", [admin]);
+
+  const displayPhone = useMemo(
+    () => admin?.mobile_number || admin?.phone || "-",
+    [admin],
+  );
+
+  const isInitialLoading =
+    (profileQuery.isLoading && !profileQuery.data) ||
+    (restaurantQuery.isLoading && !restaurantQuery.data);
 
   useEffect(() => {
-    checkAuthAndFetchProfile();
-  }, []);
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateYAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, translateYAnim]);
 
-  const checkAuthAndFetchProfile = async () => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      const role = await AsyncStorage.getItem('role');
-      const email = await AsyncStorage.getItem('userEmail');
-
-      setUserEmail(email || '');
-
-      if (!token || role !== 'admin') {
-        await logout();
-        return;
-      }
-
-      await fetchProfile(token);
-    } catch (error) {
-      console.error('Auth check error:', error);
-      setLoading(false);
-    }
-  };
-
-  const fetchProfile = async (token) => {
-    try {
-      const res = await fetch(`${API_URL}/admin/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-
-      if (res.ok && data.admin) {
-        // If profile already completed, redirect to dashboard
-        if (data.admin.profile_completed) {
-          navigation.navigate('Dashboard');
-          return;
-        }
-
-        setProfile(data.admin);
-        setUsername(data.admin.username || '');
-        setPhone(data.admin.phone || '');
-      } else {
-        Alert.alert('Error', 'Failed to load profile');
-      }
-    } catch (e) {
-      Alert.alert('Error', 'Network error');
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSubmit = async () => {
-    // Validation
-    if (!username.trim() || !phone.trim() || !newPassword) {
-      Alert.alert('Validation Error', 'All fields are required');
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      Alert.alert('Validation Error', 'Passwords do not match');
-      return;
-    }
-
-    if (newPassword.length < 8) {
-      Alert.alert('Validation Error', 'Password must be at least 8 characters');
-      return;
-    }
-
-    setSaving(true);
-
-    try {
-      const token = await AsyncStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/update-profile`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          username: username.trim(),
-          phone: phone.trim(),
-          newPassword,
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(skeletonOpacity, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
         }),
-      });
+        Animated.timing(skeletonOpacity, {
+          toValue: 0.55,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
 
-      const data = await res.json();
+    loop.start();
+    return () => loop.stop();
+  }, [skeletonOpacity]);
 
-      if (res.ok) {
-        Alert.alert('Success', 'Profile updated successfully!', [
-          {
-            text: 'OK',
-            onPress: () => {
-              navigation.navigate('Dashboard');
-            },
-          },
-        ]);
-      } else {
-        Alert.alert('Error', data?.message || 'Failed to update profile');
-      }
-    } catch (e) {
-      Alert.alert('Error', 'Network error. Please try again.');
-      console.error(e);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "profile"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "restaurant"] }),
+      ]);
     } finally {
-      setSaving(false);
+      setRefreshing(false);
     }
-  };
+  }, [queryClient]);
 
-  const handleLogout = async () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
+  const handleLogout = () => {
+    Alert.alert("Logout", "Are you sure you want to logout?", [
+      { text: "Cancel", style: "cancel" },
       {
-        text: 'Logout',
-        style: 'destructive',
+        text: "Logout",
+        style: "destructive",
         onPress: async () => {
           await logout();
         },
@@ -152,166 +315,173 @@ export default function Profile() {
     ]);
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#6366f1" />
-        <Text style={styles.loadingText}>Loading...</Text>
-      </SafeAreaView>
-    );
+  if (isInitialLoading) {
+    return <ProfileSkeleton opacity={skeletonOpacity} />;
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.avatarContainer}>
-            <Text style={styles.avatarText}>
-              {userEmail?.charAt(0)?.toUpperCase() || 'A'}
-            </Text>
-          </View>
-          <View style={styles.headerInfo}>
-            <Text style={styles.headerTitle}>Admin Profile</Text>
-            <Text style={styles.headerEmail} numberOfLines={1}>
-              {userEmail}
-            </Text>
-          </View>
-        </View>
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </TouchableOpacity>
-      </View>
-
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: fadeAnim,
+          transform: [{ translateY: translateYAnim }],
+        }}
       >
         <ScrollView
-          style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={["#06C168"]}
+            />
+          }
         >
-          {/* Title Section */}
-          <View style={styles.titleSection}>
-            <Text style={styles.pageTitle}>Complete Your Profile</Text>
-            <Text style={styles.pageSubtitle}>
-              This is a one-time setup. Please update your details and change your
-              password.
+          <View style={styles.headerWrap}>
+            <Text style={styles.headerTitle}>My Account</Text>
+            <Text style={styles.headerSubtitle}>
+              Manage your admin profile and account security
             </Text>
           </View>
 
-          {/* Form Card */}
-          <View style={styles.formCard}>
-            {/* Email (Read-only) */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email (read-only)</Text>
-              <View style={styles.readOnlyInput}>
-                <Text style={styles.readOnlyText}>{profile?.email || ''}</Text>
-              </View>
-            </View>
-
-            {/* Username */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Username *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your username"
-                placeholderTextColor="#9ca3af"
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-              />
-            </View>
-
-            {/* Phone */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Mobile Number *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="+1234567890"
-                placeholderTextColor="#9ca3af"
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-              />
-            </View>
-
-            {/* New Password */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>New Password *</Text>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={styles.passwordInput}
-                  placeholder="Minimum 8 characters"
-                  placeholderTextColor="#9ca3af"
-                  value={newPassword}
-                  onChangeText={setNewPassword}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                />
-                <TouchableOpacity
-                  style={styles.eyeButton}
-                  onPress={() => setShowPassword(!showPassword)}
-                >
-                  <Text style={styles.eyeIcon}>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Confirm Password */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Confirm Password *</Text>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={styles.passwordInput}
-                  placeholder="Re-enter password"
-                  placeholderTextColor="#9ca3af"
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  secureTextEntry={!showConfirmPassword}
-                  autoCapitalize="none"
-                />
-                <TouchableOpacity
-                  style={styles.eyeButton}
-                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                >
-                  <Text style={styles.eyeIcon}>
-                    {showConfirmPassword ? '👁️' : '👁️‍🗨️'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Warning Box */}
-            <View style={styles.warningBox}>
-              <Text style={styles.warningIcon}>⚠️</Text>
-              <Text style={styles.warningText}>
-                <Text style={styles.warningBold}>Warning:</Text> Once submitted,
-                you cannot change these details again.
+          {(profileQuery.error || restaurantQuery.error) && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorText}>
+                {profileQuery.error?.message ||
+                  restaurantQuery.error?.message ||
+                  "Unable to load profile details"}
               </Text>
             </View>
+          )}
 
-            {/* Submit Button */}
-            <TouchableOpacity
-              style={[styles.submitButton, saving && styles.submitButtonDisabled]}
-              onPress={handleSubmit}
-              disabled={saving}
-              activeOpacity={0.8}
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <Text style={styles.submitButtonText}>Complete Profile</Text>
-              )}
-            </TouchableOpacity>
+          <View style={styles.profileCard}>
+            <View style={styles.avatarBox}>
+              <Text style={styles.avatarText}>
+                {displayName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.activeBadge}>
+              <Text style={styles.activeBadgeText}>Active</Text>
+            </View>
+            <Text style={styles.profileEmail}>{displayEmail}</Text>
+            <Text style={styles.profileRole}>Admin Account</Text>
+
+            <View style={styles.metaBadgesRow}>
+              <View style={styles.metaBadgeGreen}>
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={12}
+                  color="#05803E"
+                />
+                <Text style={styles.metaBadgeGreenText}>Admin Role</Text>
+              </View>
+              <View style={styles.metaBadgeBlue}>
+                <Ionicons name="checkmark-outline" size={12} color="#1D4ED8" />
+                <Text style={styles.metaBadgeBlueText}>Onboarded</Text>
+              </View>
+            </View>
           </View>
 
-          {/* Bottom Spacing */}
-          <View style={{ height: 32 }} />
+          <View style={styles.infoCard}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={styles.sectionIconGreen}>
+                <Ionicons
+                  name="person-circle-outline"
+                  size={16}
+                  color="#FFFFFF"
+                />
+              </View>
+              <View style={styles.sectionTitleWrap}>
+                <Text style={styles.sectionTitle}>Account Information</Text>
+                <Text style={styles.sectionSubTitle}>
+                  Your admin account details
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>EMAIL ADDRESS</Text>
+              <Text style={styles.detailValue}>{displayEmail}</Text>
+            </View>
+
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>PHONE NUMBER</Text>
+              <Text style={styles.detailValue}>{displayPhone}</Text>
+            </View>
+
+            <View style={styles.detailRowNoBorder}>
+              <Text style={styles.detailLabel}>ACCOUNT STATUS</Text>
+              <Text style={styles.detailHint}>
+                {admin?.admin_status || "Not set"}
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.actionCard}
+            activeOpacity={0.75}
+            onPress={() => navigation.navigate("RestaurantDetail")}
+          >
+            <View style={styles.actionLeft}>
+              <View style={styles.sectionIconOrange}>
+                <Ionicons name="restaurant-outline" size={17} color="#FFFFFF" />
+              </View>
+              <View style={styles.actionTextWrap}>
+                <Text style={styles.actionTitle}>Restaurant Details</Text>
+                <Text style={styles.actionSubTitle} numberOfLines={1}>
+                  View and manage your restaurant profile, images and location
+                </Text>
+                {restaurant?.restaurant_name ? (
+                  <Text style={styles.restaurantMiniText} numberOfLines={1}>
+                    {restaurant.restaurant_name}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#98A2B3" />
+          </TouchableOpacity>
+
+          <View style={styles.securityCard}>
+            <View style={styles.actionLeft}>
+              <View style={styles.sectionIconGreen}>
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={17}
+                  color="#FFFFFF"
+                />
+              </View>
+              <View style={styles.actionTextWrap}>
+                <Text style={styles.actionTitle}>Security</Text>
+                <Text style={styles.actionSubTitle}>Manage your password</Text>
+              </View>
+            </View>
+
+            <View style={styles.securityBottomRow}>
+              <View>
+                <Text style={styles.passwordLabel}>Password</Text>
+                <Text style={styles.passwordHidden}> (hidden)</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.changePasswordBtn}
+                onPress={() => navigation.navigate("AdminProfile")}
+              >
+                <Text style={styles.changePasswordText}>Change Password</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.logoutBtn}
+            onPress={handleLogout}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="log-out-outline" size={18} color="#DC2626" />
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -319,199 +489,391 @@ export default function Profile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9fafb',
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#f9fafb',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#6b7280',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  avatarContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#6366f1',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#ffffff',
-  },
-  headerInfo: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  headerEmail: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginTop: 2,
-  },
-  logoutButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#fef2f2',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#fecaca',
-  },
-  logoutButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#dc2626',
-  },
-  scrollView: {
-    flex: 1,
+    backgroundColor: "#F8FAFC",
   },
   scrollContent: {
-    padding: 16,
+    paddingHorizontal: 12,
+    paddingBottom: 20,
   },
-  titleSection: {
-    marginBottom: 20,
+  headerWrap: {
+    paddingHorizontal: 4,
+    paddingTop: 8,
+    marginBottom: 10,
   },
-  pageTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#111827',
+  headerTitle: {
+    fontSize: 33,
+    lineHeight: 36,
+    fontWeight: "700",
+    color: "#111827",
   },
-  pageSubtitle: {
+  headerSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
-    marginTop: 8,
-    lineHeight: 20,
+    color: "#64748B",
+    marginTop: 2,
   },
-  formCard: {
-    backgroundColor: '#ffffff',
+  errorBanner: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  errorText: {
+    color: "#B91C1C",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  profileCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
     borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    paddingVertical: 18,
+    alignItems: "center",
+    marginBottom: 12,
   },
-  inputGroup: {
-    marginBottom: 20,
+  avatarBox: {
+    width: 60,
+    height: 60,
+    borderRadius: 12,
+    backgroundColor: "#07B95A",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+  avatarText: {
+    color: "#FFFFFF",
+    fontSize: 34,
+    fontWeight: "700",
+  },
+  activeBadge: {
+    marginTop: -6,
+    backgroundColor: "#B8F0D0",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+  },
+  activeBadgeText: {
+    color: "#047857",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  profileEmail: {
+    marginTop: 10,
+    fontSize: 26,
+    lineHeight: 30,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  profileRole: {
+    marginTop: 4,
+    color: "#94A3B8",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  metaBadgesRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  metaBadgeGreen: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EAF9F0",
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  metaBadgeGreenText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#05803E",
+  },
+  metaBadgeBlue: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#E6EEFF",
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  metaBadgeBlueText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#1D4ED8",
+  },
+  infoCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 8,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+  sectionIconGreen: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#06C168",
+  },
+  sectionIconOrange: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F97316",
+  },
+  sectionTitleWrap: {
+    marginLeft: 10,
+  },
+  sectionTitle: {
+    color: "#111827",
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#ffffff',
+    fontWeight: "700",
   },
-  readOnlyInput: {
+  sectionSubTitle: {
+    color: "#6B7280",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  detailRow: {
+    borderTopWidth: 1,
+    borderTopColor: "#EEF2F7",
+    paddingVertical: 10,
+  },
+  detailRowNoBorder: {
+    borderTopWidth: 1,
+    borderTopColor: "#EEF2F7",
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  detailLabel: {
+    color: "#94A3B8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  detailValue: {
+    marginTop: 4,
+    color: "#111827",
+    fontSize: 17,
+    fontWeight: "500",
+  },
+  detailHint: {
+    marginTop: 4,
+    color: "#9CA3AF",
+    fontSize: 17,
+    fontStyle: "italic",
+  },
+  actionCard: {
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: '#f9fafb',
-  },
-  readOnlyText: {
-    fontSize: 16,
-    color: '#6b7280',
-  },
-  passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 12,
-    backgroundColor: '#ffffff',
-  },
-  passwordInput: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#111827',
-  },
-  eyeButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  eyeIcon: {
-    fontSize: 18,
-  },
-  warningBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#fefce8',
-    borderWidth: 1,
-    borderColor: '#fde047',
-    borderRadius: 12,
+    borderColor: "#E5E7EB",
+    borderRadius: 16,
     padding: 14,
-    marginBottom: 20,
+    marginBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
-  warningIcon: {
-    fontSize: 16,
-    marginRight: 10,
-  },
-  warningText: {
+  actionLeft: {
+    flexDirection: "row",
+    alignItems: "center",
     flex: 1,
+  },
+  actionTextWrap: {
+    marginLeft: 10,
+    flex: 1,
+  },
+  actionTitle: {
+    color: "#111827",
+    fontSize: 17,
+    fontWeight: "600",
+  },
+  actionSubTitle: {
+    marginTop: 2,
+    color: "#64748B",
+    fontSize: 12,
+  },
+  restaurantMiniText: {
+    marginTop: 4,
+    color: "#06C168",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  securityCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+  },
+  securityBottomRow: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#EEF2F7",
+    paddingTop: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  passwordLabel: {
+    fontSize: 22,
+    fontWeight: "500",
+    color: "#111827",
+  },
+  passwordHidden: {
+    marginTop: 2,
+    color: "#94A3B8",
+    fontSize: 14,
+  },
+  changePasswordBtn: {
+    borderWidth: 1,
+    borderColor: "#B8F0D0",
+    borderRadius: 10,
+    backgroundColor: "#EAF9F0",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  changePasswordText: {
+    color: "#05803E",
     fontSize: 13,
-    color: '#854d0e',
-    lineHeight: 20,
+    fontWeight: "700",
   },
-  warningBold: {
-    fontWeight: '600',
-  },
-  submitButton: {
-    backgroundColor: '#6366f1',
+  logoutBtn: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#FECACA",
     borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#6366f1',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    paddingVertical: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
-  submitButtonDisabled: {
-    backgroundColor: '#a5b4fc',
-    shadowOpacity: 0.1,
+  logoutText: {
+    color: "#DC2626",
+    fontSize: 14,
+    fontWeight: "700",
   },
-  submitButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+  skeletonLine: {
+    backgroundColor: "#E2E8F0",
+    borderRadius: 8,
+  },
+  skeletonHeaderTitle: {
+    width: 200,
+    height: 30,
+  },
+  skeletonHeaderSubtitle: {
+    width: 265,
+    height: 14,
+    marginTop: 8,
+  },
+  skeletonAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 12,
+    backgroundColor: "#E2E8F0",
+  },
+  skeletonPill: {
+    width: 56,
+    height: 18,
+    borderRadius: 10,
+    backgroundColor: "#E2E8F0",
+    marginTop: 8,
+  },
+  skeletonProfileName: {
+    width: 220,
+    height: 30,
+    marginTop: 10,
+  },
+  skeletonProfileRole: {
+    width: 110,
+    height: 14,
+    marginTop: 8,
+  },
+  skeletonBadge: {
+    width: 82,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#E2E8F0",
+  },
+  skeletonSectionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#E2E8F0",
+  },
+  skeletonSectionTitle: {
+    width: 165,
+    height: 16,
+  },
+  skeletonSectionSubtitle: {
+    width: 145,
+    height: 12,
+    marginTop: 6,
+  },
+  skeletonDetailRow: {
+    borderTopWidth: 1,
+    borderTopColor: "#EEF2F7",
+    marginTop: 2,
+    height: 56,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 8,
+  },
+  skeletonDetailRowShort: {
+    borderTopWidth: 1,
+    borderTopColor: "#EEF2F7",
+    marginTop: 2,
+    height: 50,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 8,
+  },
+  skeletonActionTitle: {
+    width: 130,
+    height: 18,
+  },
+  skeletonActionSubtitle: {
+    width: 210,
+    height: 12,
+    marginTop: 8,
+  },
+  skeletonChevron: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#E2E8F0",
+  },
+  skeletonPasswordLabel: {
+    width: 90,
+    height: 20,
+  },
+  skeletonPasswordHidden: {
+    width: 120,
+    height: 14,
+    marginTop: 8,
+  },
+  skeletonChangePassword: {
+    width: 126,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "#E2E8F0",
+  },
+  skeletonLogout: {
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#E2E8F0",
   },
 });

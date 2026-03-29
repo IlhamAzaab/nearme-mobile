@@ -1,75 +1,95 @@
-import React, { useEffect, useState, useCallback } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  RefreshControl,
-  StyleSheet,
   Animated,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { supabase } from "../../services/supabaseClient";
 import { API_URL } from "../../config/env";
+import { supabase } from "../../services/supabaseClient";
 
 const ADMIN_UNREAD_KEY = "@admin_notifications_unread_count";
 
+const fetchAdminNotifications = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const res = await fetch(`${API_URL}/admin/notifications?limit=100`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok)
+    throw new Error(data?.message || "Failed to fetch notifications");
+  return data.notifications || [];
+};
+
+const markAdminNotificationsRead = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const res = await fetch(`${API_URL}/admin/notifications/mark-all-read`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.message || "Failed to mark notifications as read");
+  }
+
+  await AsyncStorage.setItem(ADMIN_UNREAD_KEY, "0");
+};
+
 export default function AdminNotifications() {
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [adminId, setAdminId] = useState(null);
 
   // Animation
   const fadeAnim = useState(new Animated.Value(0))[0];
 
-  const markAllAsRead = useCallback(async () => {
-    try {
-      const token = await AsyncStorage.getItem("token");
-      await fetch(`${API_URL}/admin/notifications/mark-all-read`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      // Persist 0 unread count after server confirms read
-      await AsyncStorage.setItem(ADMIN_UNREAD_KEY, "0");
-    } catch (e) {
-      console.error("Mark all read error:", e);
-    }
-  }, []);
+  const notificationsQuery = useQuery({
+    queryKey: ["admin", "notifications"],
+    queryFn: fetchAdminNotifications,
+    staleTime: 20 * 1000,
+    refetchInterval: 30 * 1000,
+  });
 
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const token = await AsyncStorage.getItem("token");
-      const res = await fetch(`${API_URL}/admin/notifications?limit=100`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      setNotifications(data.notifications || []);
-
-      // Mark all as read after fetching
-      await markAllAsRead();
-
-      // Update local state to reflect read status
-      setNotifications((prev) =>
+  const markReadMutation = useMutation({
+    mutationFn: markAdminNotificationsRead,
+    onSuccess: () => {
+      queryClient.setQueryData(["admin", "notifications"], (prev = []) =>
         prev.map((notif) => ({
           ...notif,
           is_read: true,
-          read_at: new Date().toISOString(),
-        }))
+          read_at: notif.read_at || new Date().toISOString(),
+        })),
       );
-    } catch (e) {
-      console.error("Fetch error:", e);
-      setNotifications([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [markAllAsRead]);
+    },
+    onError: (e) => {
+      console.error("Mark all read error:", e);
+    },
+  });
+
+  const notifications = notificationsQuery.data || [];
+  const loading = notificationsQuery.isLoading && !notificationsQuery.data;
 
   useEffect(() => {
     const init = async () => {
       const userId = await AsyncStorage.getItem("userId");
       setAdminId(userId);
-      await fetchNotifications();
 
       // Start animation
       Animated.timing(fadeAnim, {
@@ -80,7 +100,17 @@ export default function AdminNotifications() {
     };
 
     init();
-  }, [fetchNotifications, fadeAnim]);
+  }, [fadeAnim]);
+
+  useEffect(() => {
+    if (notifications.length === 0) return;
+    if (markReadMutation.isPending) return;
+
+    const unreadExists = notifications.some((n) => !n.is_read);
+    if (!unreadExists) return;
+
+    markReadMutation.mutate();
+  }, [notifications, markReadMutation]);
 
   // Real-time subscription for new notifications
   useEffect(() => {
@@ -98,20 +128,28 @@ export default function AdminNotifications() {
         },
         (payload) => {
           console.log("New notification:", payload);
-          setNotifications((prev) => [payload.new, ...prev]);
-        }
+          queryClient.setQueryData(["admin", "notifications"], (prev = []) => [
+            payload.new,
+            ...prev,
+          ]);
+        },
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [adminId]);
+  }, [adminId, queryClient]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchNotifications();
-    setRefreshing(false);
+    try {
+      await queryClient.invalidateQueries({
+        queryKey: ["admin", "notifications"],
+      });
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const getNotificationIcon = (type) => {
@@ -155,8 +193,12 @@ export default function AdminNotifications() {
             <View style={styles.skeletonAvatar} />
             <View style={styles.skeletonContent}>
               <View style={[styles.skeletonLine, { width: "40%" }]} />
-              <View style={[styles.skeletonLine, { width: "80%", marginTop: 8 }]} />
-              <View style={[styles.skeletonLine, { width: "30%", marginTop: 8 }]} />
+              <View
+                style={[styles.skeletonLine, { width: "80%", marginTop: 8 }]}
+              />
+              <View
+                style={[styles.skeletonLine, { width: "30%", marginTop: 8 }]}
+              />
             </View>
           </View>
         </View>
@@ -191,7 +233,9 @@ export default function AdminNotifications() {
         key={n.id}
         style={[
           styles.notificationCard,
-          isUnread ? styles.notificationCardUnread : styles.notificationCardRead,
+          isUnread
+            ? styles.notificationCardUnread
+            : styles.notificationCardRead,
           {
             opacity: fadeAnim,
             transform: [

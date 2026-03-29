@@ -1,29 +1,62 @@
-import React, { useState, useEffect, useRef } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation } from "@react-navigation/native";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Animated,
-  Easing,
-  Alert,
-  ActivityIndicator,
-  Dimensions,
+  View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_URL } from "../../config/env";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
+const fetchAdminMe = async () => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const res = await fetch(`${API_URL}/admin/me`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to load profile");
+  return data?.admin || null;
+};
+
+const changeAdminPassword = async ({ username, newPassword }) => {
+  const token = await AsyncStorage.getItem("token");
+  if (!token) throw new Error("No authentication token");
+
+  const res = await fetch(`${API_URL}/admin/change-password`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ username, newPassword }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || "Failed to change password");
+  return data;
+};
+
 export default function AdminProfile() {
   const navigation = useNavigation();
-  const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
   const [formData, setFormData] = useState({
@@ -39,6 +72,28 @@ export default function AdminProfile() {
   const floatAnim2 = useRef(new Animated.Value(0)).current;
   const floatAnim3 = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  const profileQuery = useQuery({
+    queryKey: ["admin", "profile", "me"],
+    queryFn: fetchAdminMe,
+    staleTime: 60 * 1000,
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: changeAdminPassword,
+    onSuccess: () => {
+      setSuccess(true);
+      Alert.alert("Success", "Password changed successfully!", [
+        {
+          text: "Continue",
+          onPress: () => navigation.replace("AdminOnboardingStep1"),
+        },
+      ]);
+    },
+    onError: (e) => {
+      Alert.alert("Error", e.message || "Failed to change password");
+    },
+  });
 
   // Start animations
   useEffect(() => {
@@ -73,7 +128,7 @@ export default function AdminProfile() {
             easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
-        ])
+        ]),
       );
     };
 
@@ -96,44 +151,29 @@ export default function AdminProfile() {
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
-      ])
+      ]),
     ).start();
   }, []);
 
   useEffect(() => {
-    // Check if password change is required
-    const checkStatus = async () => {
-      const token = await AsyncStorage.getItem("token");
-      try {
-        const res = await fetch(`${API_URL}/admin/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (res.ok && data.admin) {
-          setForcePasswordChange(data.admin.force_password_change);
+    const admin = profileQuery.data;
+    if (!admin) return;
 
-          // If password change not required and onboarding not complete, redirect
-          if (
-            !data.admin.force_password_change &&
-            !data.admin.onboarding_completed
-          ) {
-            navigation.replace("AdminOnboardingStep1");
-          }
-          // If everything complete, go to dashboard
-          else if (
-            !data.admin.force_password_change &&
-            data.admin.onboarding_completed &&
-            data.admin.admin_status === "active"
-          ) {
-            navigation.replace("AdminDashboard");
-          }
-        }
-      } catch (e) {
-        console.error("Profile check error:", e);
-      }
-    };
-    checkStatus();
-  }, [navigation]);
+    setForcePasswordChange(!!admin.force_password_change);
+
+    if (!admin.force_password_change && !admin.onboarding_completed) {
+      navigation.replace("AdminOnboardingStep1");
+      return;
+    }
+
+    if (
+      !admin.force_password_change &&
+      admin.onboarding_completed &&
+      admin.admin_status === "active"
+    ) {
+      navigation.replace("AdminMain");
+    }
+  }, [navigation, profileQuery.data]);
 
   const handleSubmit = async () => {
     // Validation
@@ -152,41 +192,10 @@ export default function AdminProfile() {
       return;
     }
 
-    setLoading(true);
-
-    const token = await AsyncStorage.getItem("token");
-
-    try {
-      const res = await fetch(`${API_URL}/admin/change-password`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          username: formData.username,
-          newPassword: formData.newPassword,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setSuccess(true);
-        Alert.alert("Success", "Password changed successfully!", [
-          {
-            text: "Continue",
-            onPress: () => navigation.replace("AdminOnboardingStep1"),
-          },
-        ]);
-      } else {
-        Alert.alert("Error", data.message || "Failed to change password");
-      }
-    } catch (e) {
-      Alert.alert("Error", "Network error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
+    changePasswordMutation.mutate({
+      username: formData.username,
+      newPassword: formData.newPassword,
+    });
   };
 
   // Interpolate floating animations
@@ -264,7 +273,9 @@ export default function AdminProfile() {
               {forcePasswordChange && (
                 <View style={styles.warningBox}>
                   <Text style={styles.warningText}>
-                    <Text style={styles.warningBold}>⚠️ Password Change Required</Text>
+                    <Text style={styles.warningBold}>
+                      ⚠️ Password Change Required
+                    </Text>
                     {"\n"}For security reasons, you must change your temporary
                     password before proceeding.
                   </Text>
@@ -278,6 +289,15 @@ export default function AdminProfile() {
 
             {/* Form */}
             <View style={styles.form}>
+              {profileQuery.error && (
+                <View style={styles.errorBanner}>
+                  <Text style={styles.errorText}>
+                    {profileQuery.error?.message ||
+                      "Unable to verify profile status"}
+                  </Text>
+                </View>
+              )}
+
               {/* Username */}
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Username</Text>
@@ -336,13 +356,14 @@ export default function AdminProfile() {
               <TouchableOpacity
                 style={[
                   styles.submitButton,
-                  (loading || success) && styles.submitButtonDisabled,
+                  (changePasswordMutation.isPending || success) &&
+                    styles.submitButtonDisabled,
                 ]}
                 onPress={handleSubmit}
-                disabled={loading || success}
+                disabled={changePasswordMutation.isPending || success}
                 activeOpacity={0.8}
               >
-                {loading ? (
+                {changePasswordMutation.isPending ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator color="#fff" size="small" />
                     <Text style={styles.submitButtonText}>
@@ -468,6 +489,20 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#6b7280",
     textAlign: "center",
+  },
+  errorBanner: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 2,
+  },
+  errorText: {
+    color: "#B91C1C",
+    fontSize: 12,
+    fontWeight: "500",
   },
   form: {
     gap: 20,
