@@ -1,38 +1,39 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useNavigation } from "@react-navigation/native";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import { useEffect, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  Image,
   ActivityIndicator,
   Alert,
+  Dimensions,
+  Image,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
-import FreeMapView from '../../../components/maps/FreeMapView';
-import { useNavigation } from '@react-navigation/native';
-import { API_URL } from '../../../config/env';
-import { getAccessToken } from '../../../lib/authStorage';
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import FreeMapView from "../../../components/maps/FreeMapView";
+import { API_URL } from "../../../config/env";
+import { getAccessToken } from "../../../lib/authStorage";
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 // Step Progress Bar Component
 function StepProgress({ currentStep, totalSteps }) {
-  const steps = ['Personal', 'Restaurant', 'Bank', 'Contract', 'Review'];
+  const steps = ["Personal", "Restaurant", "Bank", "Contract", "Review"];
   const percentage = Math.round((currentStep / totalSteps) * 100);
 
   return (
     <View style={progressStyles.container}>
       <View style={progressStyles.header}>
-        <Text style={progressStyles.stepText}>Step {currentStep} of {totalSteps}</Text>
+        <Text style={progressStyles.stepText}>
+          Step {currentStep} of {totalSteps}
+        </Text>
         <Text style={progressStyles.percentText}>{percentage}% Complete</Text>
       </View>
 
@@ -79,85 +80,93 @@ const progressStyles = StyleSheet.create({
     marginBottom: 24,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 8,
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
   },
   percentText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#06C168',
+    fontWeight: "500",
+    color: "#06C168",
   },
   barContainer: {
     height: 10,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 5,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   barFill: {
-    height: '100%',
-    backgroundColor: '#06C168',
+    height: "100%",
+    backgroundColor: "#06C168",
     borderRadius: 5,
   },
   stepsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginTop: 16,
   },
   stepItem: {
-    alignItems: 'center',
+    alignItems: "center",
     flex: 1,
   },
   stepCircle: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   stepCompleted: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
   },
   stepCurrent: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderWidth: 4,
-    borderColor: '#9EEBBE',
+    borderColor: "#9EEBBE",
   },
   stepPending: {
-    backgroundColor: '#d1d5db',
+    backgroundColor: "#d1d5db",
   },
   checkmark: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   stepNumber: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontWeight: "600",
+    color: "#6b7280",
   },
   stepNumberCurrent: {
-    color: '#ffffff',
+    color: "#ffffff",
   },
   stepLabel: {
     fontSize: 10,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 4,
   },
 });
 
 // Time Picker Component
 function TimePicker({ label, value, onChange }) {
-  const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-  const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+  const hours = Array.from({ length: 24 }, (_, i) =>
+    String(i).padStart(2, "0"),
+  );
+  const minutes = Array.from({ length: 60 }, (_, i) =>
+    String(i).padStart(2, "0"),
+  );
 
-  const [selectedHour, setSelectedHour] = useState(value ? value.split(':')[0] : '');
-  const [selectedMinute, setSelectedMinute] = useState(value ? value.split(':')[1] : '');
+  const [selectedHour, setSelectedHour] = useState(
+    value ? value.split(":")[0] : "",
+  );
+  const [selectedMinute, setSelectedMinute] = useState(
+    value ? value.split(":")[1] : "",
+  );
   const [showHourPicker, setShowHourPicker] = useState(false);
   const [showMinutePicker, setShowMinutePicker] = useState(false);
 
@@ -177,7 +186,7 @@ function TimePicker({ label, value, onChange }) {
           onPress={() => setShowHourPicker(!showHourPicker)}
         >
           <Text style={timePickerStyles.selectorText}>
-            {selectedHour || 'HH'}
+            {selectedHour || "HH"}
           </Text>
           <Text style={timePickerStyles.clockIcon}>🕐</Text>
         </TouchableOpacity>
@@ -190,7 +199,7 @@ function TimePicker({ label, value, onChange }) {
           onPress={() => setShowMinutePicker(!showMinutePicker)}
         >
           <Text style={timePickerStyles.selectorText}>
-            {selectedMinute || 'MM'}
+            {selectedMinute || "MM"}
           </Text>
           <Text style={timePickerStyles.clockIcon}>🕐</Text>
         </TouchableOpacity>
@@ -218,7 +227,8 @@ function TimePicker({ label, value, onChange }) {
                 <Text
                   style={[
                     timePickerStyles.pickerItemText,
-                    selectedHour === hour && timePickerStyles.pickerItemTextSelected,
+                    selectedHour === hour &&
+                      timePickerStyles.pickerItemTextSelected,
                   ]}
                 >
                   {hour}
@@ -241,7 +251,8 @@ function TimePicker({ label, value, onChange }) {
                 key={minute}
                 style={[
                   timePickerStyles.pickerItem,
-                  selectedMinute === minute && timePickerStyles.pickerItemSelected,
+                  selectedMinute === minute &&
+                    timePickerStyles.pickerItemSelected,
                 ]}
                 onPress={() => {
                   setSelectedMinute(minute);
@@ -251,7 +262,8 @@ function TimePicker({ label, value, onChange }) {
                 <Text
                   style={[
                     timePickerStyles.pickerItemText,
-                    selectedMinute === minute && timePickerStyles.pickerItemTextSelected,
+                    selectedMinute === minute &&
+                      timePickerStyles.pickerItemTextSelected,
                   ]}
                 >
                   {minute}
@@ -271,50 +283,50 @@ const timePickerStyles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
     marginBottom: 8,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   selector: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#EDFBF2',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#EDFBF2",
     borderWidth: 2,
-    borderColor: '#dcfce7',
+    borderColor: "#dcfce7",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
   selectorText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: "600",
+    color: "#111827",
   },
   clockIcon: {
     fontSize: 16,
   },
   separator: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#06C168',
+    fontWeight: "bold",
+    color: "#06C168",
     marginHorizontal: 8,
   },
   pickerContainer: {
-    position: 'absolute',
+    position: "absolute",
     top: 80,
     left: 0,
     right: 0,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
+    borderColor: "#e5e7eb",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
@@ -329,19 +341,19 @@ const timePickerStyles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: "#f3f4f6",
   },
   pickerItemSelected: {
-    backgroundColor: '#dcfce7',
+    backgroundColor: "#dcfce7",
   },
   pickerItemText: {
     fontSize: 16,
-    color: '#374151',
-    textAlign: 'center',
+    color: "#374151",
+    textAlign: "center",
   },
   pickerItemTextSelected: {
-    color: '#06C168',
-    fontWeight: '600',
+    color: "#06C168",
+    fontWeight: "600",
   },
 });
 
@@ -350,13 +362,13 @@ export default function Step2() {
   const mapRef = useRef(null);
 
   const [form, setForm] = useState({
-    restaurantName: '',
-    registrationNumber: '',
-    address: '',
-    city: '',
-    postalCode: '',
-    openingTime: '',
-    closeTime: '',
+    restaurantName: "",
+    registrationNumber: "",
+    address: "",
+    city: "",
+    postalCode: "",
+    openingTime: "",
+    closeTime: "",
   });
 
   const [position, setPosition] = useState(null);
@@ -396,8 +408,11 @@ export default function Step2() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
 
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Please enable location permissions to use this feature.');
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Denied",
+          "Please enable location permissions to use this feature.",
+        );
         setLocating(false);
         return;
       }
@@ -418,8 +433,11 @@ export default function Step2() {
       setMapRegion(newRegion);
       mapRef.current?.animateToRegion(newRegion, 500);
     } catch (err) {
-      console.error('Location error:', err);
-      Alert.alert('Error', 'Unable to get your location. Please select manually on the map.');
+      console.error("Location error:", err);
+      Alert.alert(
+        "Error",
+        "Unable to get your location. Please select manually on the map.",
+      );
     } finally {
       setLocating(false);
     }
@@ -432,17 +450,21 @@ export default function Step2() {
 
   const handleImagePick = async (fieldKey) => {
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permissionResult.granted) {
-        Alert.alert('Permission Required', 'Please allow access to your photo library.');
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library.",
+        );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: [ImagePicker.MediaType.Images],
         allowsEditing: true,
-        aspect: fieldKey === 'logo' ? [1, 1] : [16, 9],
+        aspect: fieldKey === "logo" ? [1, 1] : [16, 9],
         quality: 0.8,
       });
 
@@ -451,8 +473,8 @@ export default function Step2() {
         setFiles((prev) => ({ ...prev, [fieldKey]: result.assets[0] }));
       }
     } catch (err) {
-      console.error('Image picker error:', err);
-      Alert.alert('Error', 'Failed to select image');
+      console.error("Image picker error:", err);
+      Alert.alert("Error", "Failed to select image");
     }
   };
 
@@ -463,47 +485,48 @@ export default function Step2() {
 
         // Get file info from asset
         const uri = asset.uri;
-        const uriParts = uri.split('.');
-        const fileExtension = uriParts[uriParts.length - 1]?.toLowerCase() || 'jpg';
-        
+        const uriParts = uri.split(".");
+        const fileExtension =
+          uriParts[uriParts.length - 1]?.toLowerCase() || "jpg";
+
         // Determine mime type
-        let mimeType = 'image/jpeg';
-        if (fileExtension === 'png') {
-          mimeType = 'image/png';
-        } else if (fileExtension === 'gif') {
-          mimeType = 'image/gif';
+        let mimeType = "image/jpeg";
+        if (fileExtension === "png") {
+          mimeType = "image/png";
+        } else if (fileExtension === "gif") {
+          mimeType = "image/gif";
         }
 
         // Create FormData
         const formData = new FormData();
-        formData.append('file', {
+        formData.append("file", {
           uri: uri,
           type: mimeType,
           name: `${imageType}_${Date.now()}.${fileExtension}`,
         });
-        formData.append('imageType', imageType);
+        formData.append("imageType", imageType);
 
-        console.log('Uploading image:', { uri, mimeType, imageType });
+        console.log("Uploading image:", { uri, mimeType, imageType });
 
         // Use XMLHttpRequest for better React Native compatibility
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', `${API_URL}/restaurant-onboarding/upload-image`);
-        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.open("POST", `${API_URL}/restaurant-onboarding/upload-image`);
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.setRequestHeader("Accept", "application/json");
 
         xhr.onload = () => {
-          console.log('Upload response status:', xhr.status);
-          console.log('Upload response:', xhr.responseText);
-          
+          console.log("Upload response status:", xhr.status);
+          console.log("Upload response:", xhr.responseText);
+
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
               const data = JSON.parse(xhr.responseText);
               resolve(data.url);
             } catch (e) {
-              reject(new Error('Invalid response from server'));
+              reject(new Error("Invalid response from server"));
             }
           } else {
-            let errorMessage = 'Upload failed';
+            let errorMessage = "Upload failed";
             try {
               const errorData = JSON.parse(xhr.responseText);
               errorMessage = errorData.message || `Server error: ${xhr.status}`;
@@ -515,13 +538,13 @@ export default function Step2() {
         };
 
         xhr.onerror = () => {
-          console.error('XHR error:', xhr.status, xhr.responseText);
-          reject(new Error('Network error during upload'));
+          console.error("XHR error:", xhr.status, xhr.responseText);
+          reject(new Error("Network error during upload"));
         };
 
         xhr.send(formData);
       } catch (error) {
-        console.error('Upload setup error:', error);
+        console.error("Upload setup error:", error);
         reject(error);
       }
     });
@@ -537,17 +560,20 @@ export default function Step2() {
       !form.openingTime ||
       !form.closeTime
     ) {
-      Alert.alert('Validation Error', 'All required fields must be filled');
+      Alert.alert("Validation Error", "All required fields must be filled");
       return;
     }
 
     if (!position) {
-      Alert.alert('Validation Error', 'Please select restaurant location on the map');
+      Alert.alert(
+        "Validation Error",
+        "Please select restaurant location on the map",
+      );
       return;
     }
 
     if (!files.coverImage) {
-      Alert.alert('Validation Error', 'Cover image is required');
+      Alert.alert("Validation Error", "Cover image is required");
       return;
     }
 
@@ -564,10 +590,10 @@ export default function Step2() {
         uploadPromises.push(
           (async () => {
             setUploading((prev) => ({ ...prev, logo: true }));
-            const url = await uploadToCloudinary(files.logo, 'logo');
+            const url = await uploadToCloudinary(files.logo, "logo");
             setUploading((prev) => ({ ...prev, logo: false }));
             return url;
-          })()
+          })(),
         );
       } else {
         uploadPromises.push(Promise.resolve(null));
@@ -576,20 +602,21 @@ export default function Step2() {
       uploadPromises.push(
         (async () => {
           setUploading((prev) => ({ ...prev, coverImage: true }));
-          const url = await uploadToCloudinary(files.coverImage, 'cover_image');
+          const url = await uploadToCloudinary(files.coverImage, "cover_image");
           setUploading((prev) => ({ ...prev, coverImage: false }));
           return url;
-        })()
+        })(),
       );
 
-      const [uploadedLogoUrl, coverImageUrl] = await Promise.all(uploadPromises);
+      const [uploadedLogoUrl, coverImageUrl] =
+        await Promise.all(uploadPromises);
       logoUrl = uploadedLogoUrl;
 
       // Submit to backend
       const res = await fetch(`${API_URL}/restaurant-onboarding/step-2`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
@@ -603,13 +630,16 @@ export default function Step2() {
 
       const data = await res.json();
       if (!res.ok) {
-        Alert.alert('Error', data?.message || 'Failed to save step 2');
+        Alert.alert("Error", data?.message || "Failed to save step 2");
         return;
       }
-      navigation.navigate('AdminOnboardingStep3');
+      navigation.navigate("AdminOnboardingStep3");
     } catch (err) {
-      console.error('Step2 submit error', err);
-      Alert.alert('Error', err.message || 'Failed to upload images. Please try again.');
+      console.error("Step2 submit error", err);
+      Alert.alert(
+        "Error",
+        err.message || "Failed to upload images. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -657,13 +687,13 @@ export default function Step2() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Background Decorations */}
       <View style={styles.bgDecoration1} />
       <View style={styles.bgDecoration2} />
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         <ScrollView
@@ -694,7 +724,7 @@ export default function Step2() {
               <TextInput
                 style={styles.input}
                 value={form.restaurantName}
-                onChangeText={(value) => updateField('restaurantName', value)}
+                onChangeText={(value) => updateField("restaurantName", value)}
                 placeholder="Enter restaurant name"
                 placeholderTextColor="#9ca3af"
               />
@@ -702,11 +732,15 @@ export default function Step2() {
 
             {/* Registration Number */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Business Registration Number</Text>
+              <Text style={styles.inputLabel}>
+                Business Registration Number
+              </Text>
               <TextInput
                 style={styles.input}
                 value={form.registrationNumber}
-                onChangeText={(value) => updateField('registrationNumber', value)}
+                onChangeText={(value) =>
+                  updateField("registrationNumber", value)
+                }
                 placeholder="Enter registration number"
                 placeholderTextColor="#9ca3af"
               />
@@ -718,7 +752,7 @@ export default function Step2() {
               <TextInput
                 style={[styles.input, styles.textArea]}
                 value={form.address}
-                onChangeText={(value) => updateField('address', value)}
+                onChangeText={(value) => updateField("address", value)}
                 placeholder="Enter complete address"
                 placeholderTextColor="#9ca3af"
                 multiline
@@ -734,7 +768,7 @@ export default function Step2() {
                 <TextInput
                   style={styles.input}
                   value={form.city}
-                  onChangeText={(value) => updateField('city', value)}
+                  onChangeText={(value) => updateField("city", value)}
                   placeholder="Enter city"
                   placeholderTextColor="#9ca3af"
                 />
@@ -744,7 +778,7 @@ export default function Step2() {
                 <TextInput
                   style={styles.input}
                   value={form.postalCode}
-                  onChangeText={(value) => updateField('postalCode', value)}
+                  onChangeText={(value) => updateField("postalCode", value)}
                   placeholder="Enter postal code"
                   placeholderTextColor="#9ca3af"
                   keyboardType="number-pad"
@@ -763,18 +797,27 @@ export default function Step2() {
                   style={styles.map}
                   region={mapRegion}
                   onPress={handleMapPress}
-                  markers={position ? [{
-                    id: 'restaurant',
-                    coordinate: position,
-                    type: 'restaurant',
-                    emoji: '🏪',
-                    title: 'Restaurant Location',
-                  }] : []}
+                  markers={
+                    position
+                      ? [
+                          {
+                            id: "restaurant",
+                            coordinate: position,
+                            type: "restaurant",
+                            emoji: "🏪",
+                            title: "Restaurant Location",
+                          },
+                        ]
+                      : []
+                  }
                 />
               </View>
 
               <TouchableOpacity
-                style={[styles.locationButton, locating && styles.locationButtonDisabled]}
+                style={[
+                  styles.locationButton,
+                  locating && styles.locationButtonDisabled,
+                ]}
                 onPress={handleUseMyLocation}
                 disabled={locating}
               >
@@ -783,14 +826,17 @@ export default function Step2() {
                 ) : (
                   <>
                     <Text style={styles.locationButtonIcon}>📍</Text>
-                    <Text style={styles.locationButtonText}>Find My Location</Text>
+                    <Text style={styles.locationButtonText}>
+                      Find My Location
+                    </Text>
                   </>
                 )}
               </TouchableOpacity>
 
               {position && (
                 <Text style={styles.coordsText}>
-                  Coordinates: {position.latitude.toFixed(6)}, {position.longitude.toFixed(6)}
+                  Coordinates: {position.latitude.toFixed(6)},{" "}
+                  {position.longitude.toFixed(6)}
                 </Text>
               )}
             </View>
@@ -800,19 +846,19 @@ export default function Step2() {
               <TimePicker
                 label="Opening Time"
                 value={form.openingTime}
-                onChange={(value) => updateField('openingTime', value)}
+                onChange={(value) => updateField("openingTime", value)}
               />
               <View style={{ width: 16 }} />
               <TimePicker
                 label="Closing Time"
                 value={form.closeTime}
-                onChange={(value) => updateField('closeTime', value)}
+                onChange={(value) => updateField("closeTime", value)}
               />
             </View>
 
             {/* Image Uploads */}
-            {renderImageUploader('Restaurant Logo (Optional)', 'logo', false)}
-            {renderImageUploader('Cover Image', 'coverImage', true)}
+            {renderImageUploader("Restaurant Logo (Optional)", "logo", false)}
+            {renderImageUploader("Cover Image", "coverImage", true)}
 
             {/* Action Buttons */}
             <View style={styles.buttonRow}>
@@ -824,7 +870,10 @@ export default function Step2() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+                style={[
+                  styles.submitButton,
+                  loading && styles.submitButtonDisabled,
+                ]}
                 onPress={handleSubmit}
                 disabled={loading}
                 activeOpacity={0.8}
@@ -855,25 +904,25 @@ export default function Step2() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
   },
   bgDecoration1: {
-    position: 'absolute',
+    position: "absolute",
     top: 100,
     left: -50,
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
   bgDecoration2: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 100,
     right: -80,
     width: 250,
     height: 250,
     borderRadius: 125,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   scrollView: {
     flex: 1,
@@ -882,7 +931,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 24,
     paddingTop: 16,
   },
@@ -890,11 +939,11 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#ffffff",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
@@ -905,20 +954,20 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#ffffff',
+    fontWeight: "bold",
+    color: "#ffffff",
     marginBottom: 8,
   },
   headerSubtitle: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
+    color: "rgba(255, 255, 255, 0.9)",
+    textAlign: "center",
   },
   formCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 20,
     padding: 20,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -929,29 +978,29 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
     marginBottom: 8,
   },
   required: {
-    color: '#ef4444',
+    color: "#ef4444",
   },
   input: {
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: "#e5e7eb",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#ffffff',
+    color: "#111827",
+    backgroundColor: "#ffffff",
   },
   textArea: {
     minHeight: 80,
     paddingTop: 14,
   },
   row: {
-    flexDirection: 'row',
+    flexDirection: "row",
     marginBottom: 20,
   },
   halfInput: {
@@ -963,106 +1012,106 @@ const styles = StyleSheet.create({
   },
   mapHint: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     marginBottom: 12,
   },
   mapContainer: {
     height: 250,
     borderRadius: 12,
-    overflow: 'hidden',
+    overflow: "hidden",
     borderWidth: 2,
-    borderColor: '#dcfce7',
+    borderColor: "#dcfce7",
     marginBottom: 12,
   },
   map: {
     flex: 1,
   },
   locationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#06C168',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#06C168",
     paddingVertical: 14,
     borderRadius: 12,
     marginBottom: 8,
     gap: 8,
   },
   locationButtonDisabled: {
-    backgroundColor: '#6EDE9A',
+    backgroundColor: "#6EDE9A",
   },
   locationButtonIcon: {
     fontSize: 16,
   },
   locationButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   coordsText: {
     fontSize: 12,
-    color: '#6b7280',
-    textAlign: 'center',
+    color: "#6b7280",
+    textAlign: "center",
   },
   imageUploader: {
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: "#e5e7eb",
     borderRadius: 12,
-    borderStyle: 'dashed',
-    overflow: 'hidden',
+    borderStyle: "dashed",
+    overflow: "hidden",
     minHeight: 140,
   },
   imagePreviewContainer: {
-    position: 'relative',
+    position: "relative",
   },
   imagePreview: {
-    width: '100%',
+    width: "100%",
     height: 140,
   },
   imageOverlay: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
     paddingVertical: 8,
   },
   changeText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 13,
-    textAlign: 'center',
-    fontWeight: '500',
+    textAlign: "center",
+    fontWeight: "500",
   },
   uploadedBadge: {
-    position: 'absolute',
+    position: "absolute",
     top: 8,
     right: 8,
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#06C168',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#06C168",
+    justifyContent: "center",
+    alignItems: "center",
   },
   uploadedBadgeText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   uploadingContainer: {
     height: 140,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   uploadingText: {
     marginTop: 12,
     fontSize: 14,
-    color: '#6b7280',
+    color: "#6b7280",
   },
   uploadPlaceholder: {
     height: 140,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f9fafb',
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f9fafb",
   },
   uploadIcon: {
     fontSize: 32,
@@ -1070,65 +1119,65 @@ const styles = StyleSheet.create({
   },
   uploadText: {
     fontSize: 15,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
     marginBottom: 4,
   },
   uploadHint: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
   buttonRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
     marginTop: 8,
   },
   backButton: {
     flex: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 12,
     paddingVertical: 16,
-    alignItems: 'center',
+    alignItems: "center",
   },
   backButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
+    fontWeight: "600",
+    color: "#374151",
   },
   submitButton: {
     flex: 2,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderRadius: 12,
     paddingVertical: 16,
-    shadowColor: '#06C168',
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: '#6EDE9A',
+    backgroundColor: "#6EDE9A",
     shadowOpacity: 0.1,
   },
   buttonContent: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
   },
   buttonLoading: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
     gap: 8,
   },
   submitButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   buttonArrow: {
     fontSize: 18,
-    color: '#ffffff',
+    color: "#ffffff",
     marginLeft: 8,
   },
 });

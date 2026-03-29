@@ -1,6 +1,5 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -61,6 +60,28 @@ const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
 
 export default function LoginScreen({ navigation }) {
   const { applyAuthSession } = useAuth();
+
+  const normalizeAuthPayload = (payload = {}) => {
+    const root = payload && typeof payload === "object" ? payload : {};
+    const nestedData =
+      root?.data && typeof root.data === "object" ? root.data : null;
+    const nestedSession =
+      root?.session && typeof root.session === "object" ? root.session : null;
+
+    return nestedSession || nestedData || root;
+  };
+
+  const pickAuthToken = (payload = {}) => {
+    const session = normalizeAuthPayload(payload);
+    return (
+      session?.token ||
+      session?.access_token ||
+      session?.accessToken ||
+      session?.authToken ||
+      session?.jwt ||
+      null
+    );
+  };
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -128,15 +149,17 @@ export default function LoginScreen({ navigation }) {
 
       clearTimeout(timeoutId);
       const data = await res.json().catch(() => ({}));
+      const session = normalizeAuthPayload(data);
+      const authToken = pickAuthToken(data);
 
       console.log("🔐 Login response:", {
-        token: data?.token
-          ? `${String(data.token).substring(0, 20)}...`
-          : "NULL",
-        role: data?.role,
-        profileCompleted: data?.profileCompleted,
-        userId: data?.userId,
-        userName: data?.userName,
+        token: authToken ? `${String(authToken).substring(0, 20)}...` : "NULL",
+        role: session?.role || session?.user?.role || null,
+        profileCompleted:
+          session?.profileCompleted ?? session?.profile_completed ?? null,
+        userId: session?.userId || session?.user?.id || null,
+        userName: session?.userName || session?.user?.name || null,
+        payloadKeys: data && typeof data === "object" ? Object.keys(data) : [],
       });
 
       if (res.status === 403) {
@@ -157,18 +180,23 @@ export default function LoginScreen({ navigation }) {
       }
 
       // If profile not completed, navigate to CompleteProfile screen
-      if (data?.profileCompleted === false && data?.role === "customer") {
+      const role =
+        session?.role || session?.userRole || session?.user?.role || null;
+      const profileCompleted =
+        session?.profileCompleted ?? session?.profile_completed ?? null;
+
+      if (profileCompleted === false && role === "customer") {
         setIsLoading(false);
         navigation.navigate("CompleteProfile", {
-          userId: data.userId,
-          accessToken: data.access_token || null,
+          userId: session?.userId || session?.user?.id || null,
+          accessToken: authToken,
         });
         return;
       }
 
       const sessionOptions = {
         userEmail: email,
-        profileCompleted: !!data?.profileCompleted,
+        profileCompleted: Boolean(profileCompleted),
       };
 
       setIsLoading(false);
@@ -178,6 +206,12 @@ export default function LoginScreen({ navigation }) {
         try {
           const result = await applyAuthSession(data, sessionOptions);
           if (!result?.ok) {
+            console.error("[AuthDebug] applyAuthSession failed after login", {
+              role,
+              hasToken: Boolean(authToken),
+              payloadKeys:
+                data && typeof data === "object" ? Object.keys(data) : [],
+            });
             setIsTransitioning(false);
             triggerShake();
             Alert.alert(
@@ -187,14 +221,17 @@ export default function LoginScreen({ navigation }) {
             return;
           }
 
-          const authToken =
-            data?.token || data?.access_token || data?.accessToken;
-
           // Initialize push notifications only after auth session is applied.
           if (authToken) {
             console.log("🔔 Initializing push notifications after login...");
             pushNotificationService.initialize(authToken).catch((err) => {
               console.warn("Push notification init error:", err);
+            });
+          } else {
+            console.error("[AuthDebug] Login success but token is missing", {
+              role,
+              payloadKeys:
+                data && typeof data === "object" ? Object.keys(data) : [],
             });
           }
         } catch (redirectErr) {
@@ -397,7 +434,9 @@ export default function LoginScreen({ navigation }) {
 
                 {/* Signup link */}
                 <View style={styles.footerRow}>
-                  <Text style={styles.footerText}>Don't have an account? </Text>
+                  <Text style={styles.footerText}>
+                    Don&apos;t have an account?{" "}
+                  </Text>
                   <Pressable onPress={() => navigation.navigate("Signup")}>
                     <Text style={styles.footerLink}>Sign up here</Text>
                   </Pressable>

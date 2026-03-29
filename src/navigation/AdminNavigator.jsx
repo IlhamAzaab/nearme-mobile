@@ -1,24 +1,24 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import AdminTabs from './AdminTabs';
-import { useAuth } from '../app/providers/AuthProvider';
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useAuth } from "../app/providers/AuthProvider";
+import AdminTabs from "./AdminTabs";
 
 // Admin Screens
-import AdminNotifications from '../screens/admin/AdminNotifications';
-import AdminProfile from '../screens/admin/AdminProfile';
-import AdminWithdrawals from '../screens/admin/AdminWithdrawals';
-import Categories from '../screens/admin/Categories';
-import Earnings from '../screens/admin/Earnings';
-import RestaurantDetail from '../screens/admin/RestaurantDetail';
-import TestNotificationScreen from '../screens/admin/TestNotificationScreen';
+import AdminNotifications from "../screens/admin/AdminNotifications";
+import AdminProfile from "../screens/admin/AdminProfile";
+import AdminWithdrawals from "../screens/admin/AdminWithdrawals";
+import Categories from "../screens/admin/Categories";
+import Earnings from "../screens/admin/Earnings";
+import RestaurantDetail from "../screens/admin/RestaurantDetail";
+import TestNotificationScreen from "../screens/admin/TestNotificationScreen";
 
 // Onboarding Screens
-import Pending from '../screens/admin/onboarding/Pending';
-import Step1 from '../screens/admin/onboarding/Step1';
-import Step2 from '../screens/admin/onboarding/Step2';
-import Step3 from '../screens/admin/onboarding/Step3';
-import Step4 from '../screens/admin/onboarding/Step4';
+import Pending from "../screens/admin/onboarding/Pending";
+import Step1 from "../screens/admin/onboarding/Step1";
+import Step2 from "../screens/admin/onboarding/Step2";
+import Step3 from "../screens/admin/onboarding/Step3";
+import Step4 from "../screens/admin/onboarding/Step4";
 
 const Stack = createNativeStackNavigator();
 
@@ -44,7 +44,7 @@ function AdminLoadingScreen() {
  */
 function getInitialRoute(adminData) {
   if (!adminData) {
-    return 'AdminOnboardingStep1'; // Default fallback
+    return "AdminOnboardingStep1"; // Default fallback
   }
 
   const {
@@ -59,7 +59,7 @@ function getInitialRoute(adminData) {
 
   // 1. Force password change first
   if (force_password_change) {
-    return 'AdminProfile';
+    return "AdminProfile";
   }
 
   // 2. Onboarding not completed - go to appropriate step
@@ -69,16 +69,16 @@ function getInitialRoute(adminData) {
   }
 
   // 3. Onboarding completed but not active - go to pending
-  if (normalizedStatus && normalizedStatus !== 'active') {
-    return 'AdminOnboardingPending';
+  if (normalizedStatus && normalizedStatus !== "active") {
+    return "AdminOnboardingPending";
   }
 
   // 4. All checks passed - go to dashboard
-  return 'AdminMain';
+  return "AdminMain";
 }
 
 export default function AdminNavigator() {
-  const { 
+  const {
     fetchAdminStatus,
     adminStatus,
     forcePasswordChange,
@@ -95,7 +95,7 @@ export default function AdminNavigator() {
     const checkAdminStatus = async () => {
       setIsChecking(true);
       const data = await fetchAdminStatus();
-      
+
       if (data) {
         const route = getInitialRoute(data);
         setInitialRoute(route);
@@ -106,11 +106,11 @@ export default function AdminNavigator() {
           force_password_change: forcePasswordChange,
           onboarding_completed: completed,
           onboarding_step: completed ? 4 : onboardingStep,
-          admin_status: completed ? 'active' : adminStatus,
+          admin_status: completed ? "active" : adminStatus,
         });
         setInitialRoute(route);
       }
-      
+
       setIsChecking(false);
     };
 
@@ -134,7 +134,7 @@ export default function AdminNavigator() {
       initialRouteName={initialRoute}
       screenOptions={{
         headerShown: false,
-        animation: 'slide_from_right',
+        animation: "slide_from_right",
       }}
     >
       {/* Onboarding Screens - shown first for new admins */}
@@ -146,7 +146,7 @@ export default function AdminNavigator() {
 
       {/* Main Admin Tab Navigation - only accessible when status === 'active' */}
       <Stack.Screen name="AdminMain" component={AdminTabs} />
-      
+
       {/* Secondary Admin Screens */}
       <Stack.Screen name="AdminNotifications" component={AdminNotifications} />
       <Stack.Screen name="AdminProfile" component={AdminProfile} />
@@ -154,12 +154,12 @@ export default function AdminNavigator() {
       <Stack.Screen name="Categories" component={Categories} />
       <Stack.Screen name="Earnings" component={Earnings} />
       <Stack.Screen name="RestaurantDetail" component={RestaurantDetail} />
-      
+
       {/* Dev/Test Screen - Remove in production */}
-      <Stack.Screen 
-        name="TestNotification" 
+      <Stack.Screen
+        name="TestNotification"
         component={TestNotificationScreen}
-        options={{ headerShown: true, title: 'Test Notifications' }}
+        options={{ headerShown: true, title: "Test Notifications" }}
       />
     </Stack.Navigator>
   );
@@ -168,13 +168,13 @@ export default function AdminNavigator() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#fff",
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#6B7280',
+    color: "#6B7280",
   },
 });

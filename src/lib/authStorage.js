@@ -53,30 +53,108 @@ const USER_EMAIL_KEY = "userEmail";
 const PROFILE_COMPLETED_KEY = "profileCompleted";
 const SESSION_META_KEY = "authSessionMeta";
 
+function buildSessionCandidates(session = {}) {
+  const root = session && typeof session === "object" ? session : {};
+  const queue = [root];
+  const seen = new Set(queue);
+
+  // Traverse nested auth payload wrappers with a hard cap to avoid cycles.
+  while (queue.length > 0 && seen.size < 12) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
+
+    const nested = [
+      current.data,
+      current.session,
+      current.payload,
+      current.result,
+      current.auth,
+      current.userSession,
+    ];
+
+    for (const candidate of nested) {
+      if (!candidate || typeof candidate !== "object") continue;
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      queue.push(candidate);
+    }
+  }
+
+  return Array.from(seen);
+}
+
 function resolveSessionToken(session = {}) {
-  if (session?.token) return String(session.token);
-  if (session?.access_token) return String(session.access_token);
-  if (session?.accessToken) return String(session.accessToken);
+  const candidates = buildSessionCandidates(session);
+
+  for (const candidate of candidates) {
+    if (candidate?.token) return String(candidate.token);
+    if (candidate?.access_token) return String(candidate.access_token);
+    if (candidate?.accessToken) return String(candidate.accessToken);
+    if (candidate?.authToken) return String(candidate.authToken);
+    if (candidate?.jwt) return String(candidate.jwt);
+  }
+
   return "";
 }
 
 function resolveSessionRole(session = {}) {
-  const role =
-    session?.role ??
-    session?.userRole ??
-    session?.user?.role ??
-    session?.profile?.role;
+  const candidates = buildSessionCandidates(session);
+
+  let role = null;
+  for (const candidate of candidates) {
+    role =
+      candidate?.role ??
+      candidate?.userRole ??
+      candidate?.user?.role ??
+      candidate?.profile?.role;
+    if (role) break;
+  }
 
   if (!role) return null;
   return String(role).trim().toLowerCase();
 }
 
 function resolveSessionUserId(session = {}) {
-  return session?.userId ?? session?.user_id ?? session?.user?.id ?? null;
+  const candidates = buildSessionCandidates(session);
+  for (const candidate of candidates) {
+    const userId =
+      candidate?.userId ?? candidate?.user_id ?? candidate?.user?.id ?? null;
+    if (userId != null) return userId;
+  }
+  return null;
 }
 
 function resolveSessionUserName(session = {}) {
-  return session?.userName ?? session?.username ?? session?.user?.name ?? "";
+  const candidates = buildSessionCandidates(session);
+  for (const candidate of candidates) {
+    const userName =
+      candidate?.userName ??
+      candidate?.username ??
+      candidate?.user?.name ??
+      candidate?.user?.full_name ??
+      "";
+    if (userName) return userName;
+  }
+  return "";
+}
+
+function resolveSessionProfileCompleted(session = {}) {
+  const candidates = buildSessionCandidates(session);
+  for (const candidate of candidates) {
+    if (candidate?.profileCompleted != null) {
+      return Boolean(candidate.profileCompleted);
+    }
+    if (candidate?.profile_completed != null) {
+      return Boolean(candidate.profile_completed);
+    }
+    if (candidate?.user?.profileCompleted != null) {
+      return Boolean(candidate.user.profileCompleted);
+    }
+    if (candidate?.user?.profile_completed != null) {
+      return Boolean(candidate.user.profile_completed);
+    }
+  }
+  return null;
 }
 
 function getSecureStoreOptions(secureStore) {
@@ -141,15 +219,28 @@ export async function getAccessToken() {
     const secureToken = secureStore
       ? await secureStore.getItemAsync(ACCESS_TOKEN_KEY)
       : null;
-    if (secureToken) return secureToken;
-  } catch {
+    if (secureToken) {
+      console.log("[AuthStorage] Token retrieved from secure store");
+      return secureToken;
+    }
+  } catch (error) {
+    console.warn("[AuthStorage] Failed to read from secure store:", error?.message);
     // Ignore secure store read failures and fallback to AsyncStorage.
   }
 
   const migratedToken = await migrateLegacyAccessTokenFromAsyncStorage();
-  if (migratedToken) return migratedToken;
+  if (migratedToken) {
+    console.log("[AuthStorage] Token migrated from legacy AsyncStorage");
+    return migratedToken;
+  }
 
-  return rawAsyncStorage.getItem(ACCESS_TOKEN_KEY);
+  const asyncToken = await rawAsyncStorage.getItem(ACCESS_TOKEN_KEY);
+  if (asyncToken) {
+    console.log("[AuthStorage] Token retrieved from AsyncStorage");
+  } else {
+    console.warn("[AuthStorage] No token found in any storage");
+  }
+  return asyncToken;
 }
 
 async function setAccessToken(token) {
@@ -164,17 +255,18 @@ async function setAccessToken(token) {
         String(token),
         getSecureStoreOptions(secureStore),
       );
+      console.log("[AuthStorage] Token saved to secure store successfully");
+      // Remove any older token copy from AsyncStorage to reduce exposure.
+      await rawAsyncStorage.removeItem(ACCESS_TOKEN_KEY);
     } else {
       throw new Error("Secure store unavailable");
     }
-  } catch {
+  } catch (error) {
     // Fallback to AsyncStorage if secure store is unavailable.
+    console.warn("[AuthStorage] Secure store unavailable, falling back to AsyncStorage:", error?.message);
     await rawAsyncStorage.setItem(ACCESS_TOKEN_KEY, String(token));
-    return;
+    console.log("[AuthStorage] Token saved to AsyncStorage successfully");
   }
-
-  // Remove any older token copy from AsyncStorage to reduce exposure.
-  await rawAsyncStorage.removeItem(ACCESS_TOKEN_KEY);
 }
 
 async function clearAccessToken() {
@@ -212,8 +304,28 @@ export async function persistAuthSession(session = {}, options = {}) {
   const userId = resolveSessionUserId(session);
   const userName = resolveSessionUserName(session);
 
+  console.log("[AuthStorage] Persisting auth session:", {
+    hasToken: Boolean(token),
+    tokenPreview: token ? `${String(token).substring(0, 10)}...` : "none",
+    role,
+    userId,
+  });
+
   if (token) {
     await setAccessToken(token);
+
+    // Verify the token was saved by reading it back
+    const savedToken = await getAccessToken();
+    if (!savedToken || savedToken !== token) {
+      console.error("[AuthStorage] Token verification failed! Token was not saved correctly", {
+        saved: Boolean(savedToken),
+        match: savedToken === token,
+      });
+      throw new Error("Failed to persist auth token");
+    }
+    console.log("[AuthStorage] Token verified successfully");
+  } else {
+    console.warn("[AuthStorage] No token found in session to persist");
   }
 
   if (role) writes.push([ROLE_KEY, role]);
@@ -225,7 +337,7 @@ export async function persistAuthSession(session = {}, options = {}) {
   const profileCompleted =
     options.profileCompleted != null
       ? options.profileCompleted
-      : session.profileCompleted;
+      : resolveSessionProfileCompleted(session);
 
   if (profileCompleted != null) {
     writes.push([PROFILE_COMPLETED_KEY, profileCompleted ? "true" : "false"]);

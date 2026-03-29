@@ -1,37 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { useNavigation } from "@react-navigation/native";
+import * as ImagePicker from "expo-image-picker";
+import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  Image,
   ActivityIndicator,
   Alert,
+  Dimensions,
+  Image,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { useNavigation } from '@react-navigation/native';
-import { API_URL } from '../../../config/env';
-import { getAccessToken } from '../../../lib/authStorage';
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { API_URL } from "../../../config/env";
+import { getAccessToken } from "../../../lib/authStorage";
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 // Step Progress Bar Component
 function StepProgress({ currentStep, totalSteps }) {
-  const steps = ['Personal', 'Restaurant', 'Location', 'Documents', 'Review'];
+  const steps = ["Personal", "Restaurant", "Location", "Documents", "Review"];
   const percentage = Math.round((currentStep / totalSteps) * 100);
 
   return (
     <View style={progressStyles.container}>
       <View style={progressStyles.header}>
-        <Text style={progressStyles.stepText}>Step {currentStep} of {totalSteps}</Text>
+        <Text style={progressStyles.stepText}>
+          Step {currentStep} of {totalSteps}
+        </Text>
         <Text style={progressStyles.percentText}>{percentage}% Complete</Text>
       </View>
 
@@ -78,92 +79,92 @@ const progressStyles = StyleSheet.create({
     marginBottom: 24,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 8,
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
   },
   percentText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#06C168',
+    fontWeight: "500",
+    color: "#06C168",
   },
   barContainer: {
     height: 10,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: "#e5e7eb",
     borderRadius: 5,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   barFill: {
-    height: '100%',
-    backgroundColor: '#06C168',
+    height: "100%",
+    backgroundColor: "#06C168",
     borderRadius: 5,
   },
   stepsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginTop: 16,
   },
   stepItem: {
-    alignItems: 'center',
+    alignItems: "center",
     flex: 1,
   },
   stepCircle: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   stepCompleted: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
   },
   stepCurrent: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderWidth: 4,
-    borderColor: '#9EEBBE',
+    borderColor: "#9EEBBE",
   },
   stepPending: {
-    backgroundColor: '#d1d5db',
+    backgroundColor: "#d1d5db",
   },
   checkmark: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   stepNumber: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontWeight: "600",
+    color: "#6b7280",
   },
   stepNumberCurrent: {
-    color: '#ffffff',
+    color: "#ffffff",
   },
   stepLabel: {
     fontSize: 10,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 4,
   },
 });
 
 export default function Step1() {
   const navigation = useNavigation();
-  const [userEmail, setUserEmail] = useState('');
+  const [userEmail, setUserEmail] = useState("");
 
   // Form state
   const [form, setForm] = useState({
-    fullName: '',
-    nicNumber: '',
-    dateOfBirth: '',
-    mobileNumber: '',
-    homeAddress: '',
-    profilePhotoUrl: '',
-    nicFrontUrl: '',
-    nicBackUrl: '',
+    fullName: "",
+    nicNumber: "",
+    dateOfBirth: "",
+    mobileNumber: "",
+    homeAddress: "",
+    profilePhotoUrl: "",
+    nicFrontUrl: "",
+    nicBackUrl: "",
   });
 
   const [errors, setErrors] = useState({});
@@ -194,10 +195,10 @@ export default function Step1() {
       });
       if (res.ok) {
         const data = await res.json();
-        setUserEmail(data.email || '');
+        setUserEmail(data.email || "");
       }
     } catch (err) {
-      console.error('Failed to fetch user data:', err);
+      console.error("Failed to fetch user data:", err);
     }
   };
 
@@ -213,14 +214,14 @@ export default function Step1() {
         const data = await res.json();
         if (data) {
           setForm({
-            fullName: data.fullName || '',
-            nicNumber: data.nicNumber || '',
-            dateOfBirth: data.dateOfBirth || '',
-            mobileNumber: data.phone || '',
-            homeAddress: data.homeAddress || '',
-            profilePhotoUrl: data.profilePhotoUrl || '',
-            nicFrontUrl: data.nicFrontUrl || '',
-            nicBackUrl: data.nicBackUrl || '',
+            fullName: data.fullName || "",
+            nicNumber: data.nicNumber || "",
+            dateOfBirth: data.dateOfBirth || "",
+            mobileNumber: data.phone || "",
+            homeAddress: data.homeAddress || "",
+            profilePhotoUrl: data.profilePhotoUrl || "",
+            nicFrontUrl: data.nicFrontUrl || "",
+            nicBackUrl: data.nicBackUrl || "",
           });
           if (data.dateOfBirth) {
             setSelectedDate(new Date(data.dateOfBirth));
@@ -228,29 +229,33 @@ export default function Step1() {
         }
       }
     } catch (err) {
-      console.error('Failed to fetch saved data:', err);
+      console.error("Failed to fetch saved data:", err);
     }
   };
 
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
-    setErrors((prev) => ({ ...prev, [key]: '' }));
+    setErrors((prev) => ({ ...prev, [key]: "" }));
   };
 
   // Image picker handler
   const handleImagePick = async (imageType) => {
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permissionResult.granted) {
-        Alert.alert('Permission Required', 'Please allow access to your photo library.');
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library.",
+        );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: [ImagePicker.MediaType.Images],
+        mediaTypes: [ImagePicker.MediaType.Images],
         allowsEditing: true,
-        aspect: imageType === 'profilePhoto' ? [1, 1] : [16, 10],
+        aspect: imageType === "profilePhoto" ? [1, 1] : [16, 10],
         quality: 0.8,
       });
 
@@ -258,8 +263,8 @@ export default function Step1() {
         await uploadImage(imageType, result.assets[0]);
       }
     } catch (err) {
-      console.error('Image picker error:', err);
-      Alert.alert('Error', 'Failed to select image');
+      console.error("Image picker error:", err);
+      Alert.alert("Error", "Failed to select image");
     }
   };
 
@@ -271,18 +276,18 @@ export default function Step1() {
 
       // Create form data for file upload
       const formData = new FormData();
-      formData.append('file', {
+      formData.append("file", {
         uri: asset.uri,
-        type: 'image/jpeg',
+        type: "image/jpeg",
         name: `${imageType}.jpg`,
       });
-      formData.append('imageType', imageType);
+      formData.append("imageType", imageType);
 
       const res = await fetch(`${API_URL}/restaurant-onboarding/upload-image`, {
-        method: 'POST',
+        method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
+          "Content-Type": "multipart/form-data",
         },
         body: formData,
       });
@@ -290,20 +295,20 @@ export default function Step1() {
       const data = await res.json();
 
       if (!res.ok) {
-        Alert.alert('Error', data?.message || 'Failed to upload image');
+        Alert.alert("Error", data?.message || "Failed to upload image");
         return;
       }
 
       // Update form with the uploaded image URL
       const fieldMap = {
-        profilePhoto: 'profilePhotoUrl',
-        nicFront: 'nicFrontUrl',
-        nicBack: 'nicBackUrl',
+        profilePhoto: "profilePhotoUrl",
+        nicFront: "nicFrontUrl",
+        nicBack: "nicBackUrl",
       };
       updateField(fieldMap[imageType], data.url);
     } catch (err) {
-      console.error('File upload error:', err);
-      Alert.alert('Error', 'Failed to upload image. Please try again.');
+      console.error("File upload error:", err);
+      Alert.alert("Error", "Failed to upload image. Please try again.");
     } finally {
       setUploading((prev) => ({ ...prev, [imageType]: false }));
     }
@@ -311,11 +316,11 @@ export default function Step1() {
 
   // Date picker handler
   const handleDateChange = (event, date) => {
-    setShowDatePicker(Platform.OS === 'ios');
+    setShowDatePicker(Platform.OS === "ios");
     if (date) {
       setSelectedDate(date);
-      const formattedDate = date.toISOString().split('T')[0];
-      updateField('dateOfBirth', formattedDate);
+      const formattedDate = date.toISOString().split("T")[0];
+      updateField("dateOfBirth", formattedDate);
     }
   };
 
@@ -328,50 +333,50 @@ export default function Step1() {
 
   const validateMobile = (mobile) => {
     const sriLankanMobile = /^(?:\+94|0)?7[0-9]{8}$/;
-    return sriLankanMobile.test(mobile.replace(/\s/g, ''));
+    return sriLankanMobile.test(mobile.replace(/\s/g, ""));
   };
 
   const validateForm = () => {
     const newErrors = {};
 
     if (!form.fullName.trim()) {
-      newErrors.fullName = 'Full name is required';
+      newErrors.fullName = "Full name is required";
     } else if (form.fullName.trim().length < 3) {
-      newErrors.fullName = 'Full name must be at least 3 characters';
+      newErrors.fullName = "Full name must be at least 3 characters";
     }
 
     if (!form.nicNumber.trim()) {
-      newErrors.nicNumber = 'NIC number is required';
+      newErrors.nicNumber = "NIC number is required";
     } else if (!validateNIC(form.nicNumber)) {
-      newErrors.nicNumber = 'Invalid NIC format (10-digit old or 12-digit new)';
+      newErrors.nicNumber = "Invalid NIC format (10-digit old or 12-digit new)";
     }
 
     if (!form.dateOfBirth) {
-      newErrors.dateOfBirth = 'Date of birth is required';
+      newErrors.dateOfBirth = "Date of birth is required";
     }
 
     if (!form.mobileNumber.trim()) {
-      newErrors.mobileNumber = 'Mobile number is required';
+      newErrors.mobileNumber = "Mobile number is required";
     } else if (!validateMobile(form.mobileNumber)) {
-      newErrors.mobileNumber = 'Invalid Sri Lankan mobile number';
+      newErrors.mobileNumber = "Invalid Sri Lankan mobile number";
     }
 
     if (!form.homeAddress.trim()) {
-      newErrors.homeAddress = 'Home address is required';
+      newErrors.homeAddress = "Home address is required";
     } else if (form.homeAddress.trim().length < 10) {
-      newErrors.homeAddress = 'Address must be at least 10 characters';
+      newErrors.homeAddress = "Address must be at least 10 characters";
     }
 
     if (!form.profilePhotoUrl) {
-      newErrors.profilePhotoUrl = 'Profile photo is required';
+      newErrors.profilePhotoUrl = "Profile photo is required";
     }
 
     if (!form.nicFrontUrl) {
-      newErrors.nicFrontUrl = 'NIC front image is required';
+      newErrors.nicFrontUrl = "NIC front image is required";
     }
 
     if (!form.nicBackUrl) {
-      newErrors.nicBackUrl = 'NIC back image is required';
+      newErrors.nicBackUrl = "NIC back image is required";
     }
 
     setErrors(newErrors);
@@ -380,7 +385,7 @@ export default function Step1() {
 
   const handleSubmit = async () => {
     if (!validateForm()) {
-      Alert.alert('Validation Error', 'Please fix the errors in the form');
+      Alert.alert("Validation Error", "Please fix the errors in the form");
       return;
     }
 
@@ -389,9 +394,9 @@ export default function Step1() {
     try {
       const token = await getAccessToken();
       const res = await fetch(`${API_URL}/restaurant-onboarding/step-1`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
@@ -408,13 +413,16 @@ export default function Step1() {
 
       const data = await res.json();
       if (!res.ok) {
-        Alert.alert('Error', data?.message || 'Failed to save personal information');
+        Alert.alert(
+          "Error",
+          data?.message || "Failed to save personal information",
+        );
         return;
       }
-      navigation.navigate('AdminOnboardingStep2');
+      navigation.navigate("AdminOnboardingStep2");
     } catch (err) {
-      console.error('Step1 submit error', err);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      console.error("Step1 submit error", err);
+      Alert.alert("Error", "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -467,13 +475,13 @@ export default function Step1() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       {/* Background Decorations */}
       <View style={styles.bgDecoration1} />
       <View style={styles.bgDecoration2} />
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         <ScrollView
@@ -513,7 +521,9 @@ export default function Step1() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Verified Email</Text>
               <View style={styles.emailContainer}>
-                <Text style={styles.emailText}>{userEmail || 'Loading...'}</Text>
+                <Text style={styles.emailText}>
+                  {userEmail || "Loading..."}
+                </Text>
                 <View style={styles.verifiedBadge}>
                   <Text style={styles.verifiedIcon}>✓</Text>
                   <Text style={styles.verifiedText}>Verified</Text>
@@ -527,7 +537,7 @@ export default function Step1() {
               <TextInput
                 style={[styles.input, errors.fullName && styles.inputError]}
                 value={form.fullName}
-                onChangeText={(value) => updateField('fullName', value)}
+                onChangeText={(value) => updateField("fullName", value)}
                 placeholder="Enter your full name"
                 placeholderTextColor="#9ca3af"
               />
@@ -545,7 +555,7 @@ export default function Step1() {
               <TextInput
                 style={[styles.input, errors.nicNumber && styles.inputError]}
                 value={form.nicNumber}
-                onChangeText={(value) => updateField('nicNumber', value)}
+                onChangeText={(value) => updateField("nicNumber", value)}
                 placeholder="eg: 123456789V or 200012345678"
                 placeholderTextColor="#9ca3af"
                 autoCapitalize="characters"
@@ -564,7 +574,7 @@ export default function Step1() {
               <TextInput
                 style={[styles.input, errors.mobileNumber && styles.inputError]}
                 value={form.mobileNumber}
-                onChangeText={(value) => updateField('mobileNumber', value)}
+                onChangeText={(value) => updateField("mobileNumber", value)}
                 placeholder="Enter your phone number"
                 placeholderTextColor="#9ca3af"
                 keyboardType="phone-pad"
@@ -581,7 +591,11 @@ export default function Step1() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Date of Birth</Text>
               <TouchableOpacity
-                style={[styles.input, styles.dateInput, errors.dateOfBirth && styles.inputError]}
+                style={[
+                  styles.input,
+                  styles.dateInput,
+                  errors.dateOfBirth && styles.inputError,
+                ]}
                 onPress={() => setShowDatePicker(true)}
               >
                 <Text
@@ -590,7 +604,7 @@ export default function Step1() {
                     !form.dateOfBirth && styles.datePlaceholder,
                   ]}
                 >
-                  {form.dateOfBirth || 'Select date of birth'}
+                  {form.dateOfBirth || "Select date of birth"}
                 </Text>
                 <Text style={styles.calendarIcon}>📅</Text>
               </TouchableOpacity>
@@ -606,7 +620,7 @@ export default function Step1() {
               <DateTimePicker
                 value={selectedDate}
                 mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                display={Platform.OS === "ios" ? "spinner" : "default"}
                 onChange={handleDateChange}
                 maximumDate={new Date()}
               />
@@ -622,7 +636,7 @@ export default function Step1() {
                   errors.homeAddress && styles.inputError,
                 ]}
                 value={form.homeAddress}
-                onChangeText={(value) => updateField('homeAddress', value)}
+                onChangeText={(value) => updateField("homeAddress", value)}
                 placeholder="Enter your complete home address"
                 placeholderTextColor="#9ca3af"
                 multiline
@@ -639,27 +653,30 @@ export default function Step1() {
 
             {/* Image Uploads */}
             {renderImageUploader(
-              'Profile Photo',
-              'profilePhoto',
-              'profilePhotoUrl',
-              'profilePhotoUrl'
+              "Profile Photo",
+              "profilePhoto",
+              "profilePhotoUrl",
+              "profilePhotoUrl",
             )}
             {renderImageUploader(
-              'NIC Front Image',
-              'nicFront',
-              'nicFrontUrl',
-              'nicFrontUrl'
+              "NIC Front Image",
+              "nicFront",
+              "nicFrontUrl",
+              "nicFrontUrl",
             )}
             {renderImageUploader(
-              'NIC Back Image',
-              'nicBack',
-              'nicBackUrl',
-              'nicBackUrl'
+              "NIC Back Image",
+              "nicBack",
+              "nicBackUrl",
+              "nicBackUrl",
             )}
 
             {/* Submit Button */}
             <TouchableOpacity
-              style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+              style={[
+                styles.submitButton,
+                loading && styles.submitButtonDisabled,
+              ]}
               onPress={handleSubmit}
               disabled={loading}
               activeOpacity={0.8}
@@ -689,25 +706,25 @@ export default function Step1() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
   },
   bgDecoration1: {
-    position: 'absolute',
+    position: "absolute",
     top: 100,
     left: -50,
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
   bgDecoration2: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 100,
     right: -80,
     width: 250,
     height: 250,
     borderRadius: 125,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   scrollView: {
     flex: 1,
@@ -716,7 +733,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 24,
     paddingTop: 16,
   },
@@ -724,11 +741,11 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#ffffff",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
@@ -739,44 +756,44 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#ffffff',
+    fontWeight: "bold",
+    color: "#ffffff",
     marginBottom: 8,
   },
   headerSubtitle: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
+    color: "rgba(255, 255, 255, 0.9)",
   },
   formCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 20,
     padding: 20,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 4,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     marginBottom: 24,
   },
   sectionIndicator: {
     width: 4,
     height: 48,
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderRadius: 2,
     marginRight: 12,
   },
   sectionTitle: {
     fontSize: 22,
-    fontWeight: 'bold',
-    color: '#111827',
+    fontWeight: "bold",
+    color: "#111827",
   },
   sectionSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 4,
   },
   inputGroup: {
@@ -784,79 +801,79 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
     marginBottom: 8,
   },
   input: {
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: "#e5e7eb",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#ffffff',
+    color: "#111827",
+    backgroundColor: "#ffffff",
   },
   inputError: {
-    borderColor: '#ef4444',
+    borderColor: "#ef4444",
   },
   textArea: {
     minHeight: 100,
     paddingTop: 14,
   },
   dateInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   dateText: {
     fontSize: 16,
-    color: '#111827',
+    color: "#111827",
   },
   datePlaceholder: {
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
   calendarIcon: {
     fontSize: 20,
   },
   emailContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#f9fafb',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#f9fafb",
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: "#e5e7eb",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
   emailText: {
     fontSize: 16,
-    color: '#6b7280',
+    color: "#6b7280",
     flex: 1,
   },
   verifiedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#dcfce7',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#dcfce7",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 20,
   },
   verifiedIcon: {
     fontSize: 12,
-    color: '#06C168',
+    color: "#06C168",
     marginRight: 4,
   },
   verifiedText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#06C168',
+    fontWeight: "600",
+    color: "#06C168",
   },
   errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginTop: 6,
   },
   errorIcon: {
@@ -865,71 +882,71 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 13,
-    color: '#ef4444',
+    color: "#ef4444",
   },
   imageUploader: {
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: "#e5e7eb",
     borderRadius: 12,
-    borderStyle: 'dashed',
-    overflow: 'hidden',
+    borderStyle: "dashed",
+    overflow: "hidden",
     minHeight: 140,
   },
   imageUploaderError: {
-    borderColor: '#ef4444',
+    borderColor: "#ef4444",
   },
   imagePreviewContainer: {
-    position: 'relative',
+    position: "relative",
   },
   imagePreview: {
-    width: '100%',
+    width: "100%",
     height: 140,
   },
   imageOverlay: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
     paddingVertical: 8,
   },
   changeText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 13,
-    textAlign: 'center',
-    fontWeight: '500',
+    textAlign: "center",
+    fontWeight: "500",
   },
   uploadedBadge: {
-    position: 'absolute',
+    position: "absolute",
     top: 8,
     right: 8,
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#06C168',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#06C168",
+    justifyContent: "center",
+    alignItems: "center",
   },
   uploadedBadgeText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   uploadingContainer: {
     height: 140,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   uploadingText: {
     marginTop: 12,
     fontSize: 14,
-    color: '#6b7280',
+    color: "#6b7280",
   },
   uploadPlaceholder: {
     height: 140,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f9fafb',
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f9fafb",
   },
   uploadIcon: {
     fontSize: 32,
@@ -937,48 +954,48 @@ const styles = StyleSheet.create({
   },
   uploadText: {
     fontSize: 15,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: "500",
+    color: "#374151",
     marginBottom: 4,
   },
   uploadHint: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
   submitButton: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     borderRadius: 12,
     paddingVertical: 16,
     marginTop: 8,
-    shadowColor: '#06C168',
+    shadowColor: "#06C168",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: '#6EDE9A',
+    backgroundColor: "#6EDE9A",
     shadowOpacity: 0.1,
   },
   buttonContent: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
   },
   buttonLoading: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
     gap: 8,
   },
   submitButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   buttonArrow: {
     fontSize: 18,
-    color: '#ffffff',
+    color: "#ffffff",
     marginLeft: 8,
   },
 });
