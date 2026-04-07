@@ -1,319 +1,327 @@
-import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { useState, useEffect, useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SafeAreaView, Platform } from "react-native";
 import * as Location from "expo-location";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StatusBar,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
+import colors from "../../constants/colors";
 import OSMMapView from "../../components/maps/OSMMapView";
-
-const DEFAULT_REGION = {
-  latitude: 7.8731,
-  longitude: 80.7718,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
-};
 
 export default function AddressPickerScreen({ navigation }) {
   const mapRef = useRef(null);
-  const [pin, setPin] = useState(null);
-  const [addressLabel, setAddressLabel] = useState("");
+  const [initialRegion, setInitialRegion] = useState(null);
+  const [currentCoordinate, setCurrentCoordinate] = useState(null);
+  const [addressLabel, setAddressLabel] = useState("Loading address...");
+  const [addressCity, setAddressCity] = useState("");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [loadingLocation, setLoadingLocation] = useState(true);
-  const [region, setRegion] = useState(DEFAULT_REGION);
+  const [userLocation, setUserLocation] = useState(null);
 
-  // Try to get user location on mount
   useEffect(() => {
     (async () => {
+      setLoading(true);
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === "granted") {
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          const userRegion = {
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          };
-          setRegion(userRegion);
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          setAddressLabel("Permission to access location was denied");
+          setLoading(false);
+          return;
         }
-      } catch (e) {
-        console.log("Location error:", e);
+
+        const savedAddressStr = await AsyncStorage.getItem("@saved_address");
+        let startLocation;
+
+        if (savedAddressStr) {
+          const savedAddress = JSON.parse(savedAddressStr);
+          startLocation = {
+            latitude: savedAddress.latitude,
+            longitude: savedAddress.longitude,
+          };
+          setAddressLabel(savedAddress.label || "Selected Location");
+          setAddressCity(savedAddress.city || "");
+        } else {
+          let location = await Location.getCurrentPositionAsync({});
+          startLocation = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          };
+          reverseGeocode(startLocation.latitude, startLocation.longitude);
+        }
+
+        const region = {
+          latitude: startLocation.latitude,
+          longitude: startLocation.longitude,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
+        };
+
+        setInitialRegion(region);
+        setCurrentCoordinate(startLocation);
+        setUserLocation(startLocation);
+
+      } catch (error) {
+        console.error("Location error:", error);
+        setAddressLabel("Could not fetch location");
       } finally {
-        setLoadingLocation(false);
+        setLoading(false);
       }
     })();
   }, []);
 
-  // Reverse geocode the pin to get a readable label
-  const reverseGeocode = useCallback(async (lat, lng) => {
+  const reverseGeocode = async (latitude, longitude) => {
     try {
-      const results = await Location.reverseGeocodeAsync({
-        latitude: lat,
-        longitude: lng,
-      });
-      if (results?.[0]) {
-        const r = results[0];
-        const parts = [r.name, r.street, r.district, r.city, r.region].filter(Boolean);
-        return parts.join(", ");
+      setAddressLabel("Loading address...");
+      let geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
+      if (geocode.length > 0) {
+        const place = geocode[0];
+        const formattedAddress = `${place.name ? place.name + ", " : ""}${place.street || ""}, ${place.city || ""}`;
+        setAddressLabel(formattedAddress.trim().replace(/^,|,$/g, ""));
+        setAddressCity(place.city || place.subregion || place.region || "");
+      } else {
+        setAddressLabel("Unknown location");
+        setAddressCity("");
       }
-    } catch {}
-    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-  }, []);
-
-  const handleMapPress = useCallback(
-    async (e) => {
-      const { latitude, longitude } = e.nativeEvent.coordinate;
-      setPin({ latitude, longitude });
-      const label = await reverseGeocode(latitude, longitude);
-      setAddressLabel(label);
-    },
-    [reverseGeocode],
-  );
-
-  const handleSave = useCallback(async () => {
-    if (!pin) {
-      Alert.alert("Select a location", "Tap on the map to pin your address.");
-      return;
+    } catch (error) {
+      console.error("Reverse Geocode error:", error);
+      setAddressLabel("Could not get address details");
+      setAddressCity("");
     }
+  };
+
+  const handleRegionChangeComplete = (region) => {
+    if (!region) return;
+    setCurrentCoordinate({ latitude: region.latitude, longitude: region.longitude });
+    reverseGeocode(region.latitude, region.longitude);
+  };
+
+  const saveLocation = async () => {
+    if (!currentCoordinate) return;
     setSaving(true);
     try {
-      const data = {
-        latitude: pin.latitude,
-        longitude: pin.longitude,
-        label: addressLabel || "Saved address",
+      const addressData = {
+        latitude: currentCoordinate.latitude,
+        longitude: currentCoordinate.longitude,
+        label: addressLabel,
+        city: addressCity,
       };
-      await AsyncStorage.setItem("@saved_address", JSON.stringify(data));
+      await AsyncStorage.setItem("@saved_address", JSON.stringify(addressData));
       navigation.goBack();
-    } catch {
-      Alert.alert("Error", "Failed to save address.");
+    } catch (error) {
+      console.error("Error saving address:", error);
     } finally {
       setSaving(false);
     }
-  }, [pin, addressLabel, navigation]);
+  };
+
+  const centerOnUser = async () => {
+    try {
+      let location = await Location.getCurrentPositionAsync({});
+      const coords = {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      };
+      setUserLocation(coords);
+
+      if (mapRef.current?.animateToRegion) {
+        mapRef.current.animateToRegion({
+          ...coords,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
+        });
+      } else if (mapRef.current?.panTo) {
+        mapRef.current.panTo(coords.latitude, coords.longitude, 16);
+      }
+    } catch (error) {
+      console.error("Error centering user:", error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#06C168" />
+        <Text style={styles.loadingText}>Fetching location...</Text>
+      </View>
+    );
+  }
 
   return (
-    <SafeAreaView style={st.root} edges={["top"]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#EDFBF2" />
-
-      {/* ── Header ── */}
-      <View style={st.header}>
-        <Pressable style={st.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={22} color="#374151" />
-        </Pressable>
-        <Text style={st.headerTitle}>Pick Address</Text>
-        <View style={{ width: 40 }} />
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#06C168" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Select Delivery Address</Text>
       </View>
 
-      {/* ── Map ── */}
-      <View style={st.mapContainer}>
-        {loadingLocation ? (
-          <View style={st.loadingWrap}>
-            <ActivityIndicator size="large" color="#06C168" />
-            <Text style={st.loadingTxt}>Getting your location...</Text>
-          </View>
-        ) : (
+      <View style={styles.mapContainer}>
+        {initialRegion && (
           <OSMMapView
             ref={mapRef}
-            style={StyleSheet.absoluteFillObject}
-            initialRegion={region}
-            onPress={handleMapPress}
-            scrollEnabled
-            zoomEnabled
-            markers={
-              pin
-                ? [
-                    {
-                      id: "pin",
-                      coordinate: pin,
-                      type: "customer",
-                      title: "Selected Location",
-                      emoji: "📍",
-                    },
-                  ]
-                : []
-            }
+            style={styles.map}
+            initialRegion={initialRegion}
+            onRegionChangeComplete={handleRegionChangeComplete}
+            showsUserLocation={true}
+            userLocation={userLocation}
           />
         )}
+        
+        {/* Fixed Center Pin */}
+        <View style={styles.centerPinContainer} pointerEvents="none">
+          <Ionicons name="location" size={48} color="#E11D48" style={styles.pinIcon} />
+        </View>
 
-        {/* Instruction overlay */}
-        {!pin && !loadingLocation && (
-          <View style={st.instructionBubble}>
-            <Ionicons name="finger-print-outline" size={16} color="#06C168" />
-            <Text style={st.instructionTxt}>Tap to pin your delivery address</Text>
-          </View>
-        )}
+        {/* Floating precise location button */}
+        <TouchableOpacity style={styles.myLocationButton} onPress={centerOnUser}>
+          <Ionicons name="locate" size={24} color="#06C168" />
+        </TouchableOpacity>
       </View>
 
-      {/* ── Bottom card ── */}
-      <View style={st.bottomCard}>
-        {pin ? (
-          <>
-            <View style={st.addressRow}>
-              <View style={st.addressIconWrap}>
-                <Ionicons name="location" size={18} color="#06C168" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={st.addressLabel}>Selected Address</Text>
-                <Text style={st.addressText} numberOfLines={2}>
-                  {addressLabel || "Loading..."}
-                </Text>
-              </View>
-            </View>
-            <Pressable
-              style={[st.saveBtn, saving && { opacity: 0.6 }]}
-              onPress={handleSave}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-circle" size={18} color="#fff" />
-                  <Text style={st.saveBtnTxt}>Save Address</Text>
-                </>
-              )}
-            </Pressable>
-          </>
-        ) : (
-          <View style={st.emptyRow}>
-            <Ionicons name="map-outline" size={22} color="#9CA3AF" />
-            <Text style={st.emptyTxt}>Tap on the map to select your address</Text>
+      {/* Bottom Panel */}
+      <View style={styles.bottomPanel}>
+        <View style={styles.addressInfoContainer}>
+          <Ionicons name="location-outline" size={24} color={colors.text} />
+          <View style={styles.addressTextContainer}>
+            <Text style={styles.addressLabel}>Delivery Location</Text>
+            <Text style={styles.addressText} numberOfLines={2}>
+              {addressLabel}
+            </Text>
           </View>
-        )}
+        </View>
+
+        <TouchableOpacity 
+          style={[styles.confirmButton, saving && styles.confirmButtonDisabled]} 
+          onPress={saveLocation}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator color={colors.white} />
+          ) : (
+            <Text style={styles.confirmButtonText}>Confirm Location</Text>
+          )}
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
 }
 
-/* ═══════════════════════ STYLES ═══════════════════════ */
-
-const st = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#EDFBF2" },
-
-  /* header */
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 10,
+    color: colors.textDetails,
+    fontSize: 16,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#EDFBF2",
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  headerTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
-
-  /* map */
-  mapContainer: {
-    flex: 1,
-    overflow: "hidden",
-  },
-  loadingWrap: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 10,
-  },
-  loadingTxt: { fontSize: 13, color: "#6B7280", fontWeight: "500" },
-
-  instructionBubble: {
-    position: "absolute",
-    top: 16,
-    alignSelf: "center",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#fff",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    backgroundColor: colors.white,
+    zIndex: 1,
+    elevation: 3,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowRadius: 2,
+    // Add top padding for Android SafeAreaView issue
+    paddingTop: Platform.OS === 'android' ? 40 : 15,
   },
-  instructionTxt: { fontSize: 13, fontWeight: "600", color: "#374151" },
-
-  /* bottom card */
-  bottomCard: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    paddingBottom: 34,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 10,
+  backButton: {
+    padding: 5,
+    marginRight: 10,
   },
-  addressRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 16,
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: colors.text,
   },
-  addressIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: "#E6F9EE",
+  mapContainer: {
+    height: "50%",
+    minHeight: 260,
+    position: "relative",
+  },
+  map: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  centerPinContainer: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    marginLeft: -24,
+    marginTop: -48,
     justifyContent: "center",
     alignItems: "center",
+  },
+  pinIcon: {
+    textShadowColor: "rgba(0, 0, 0, 0.3)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 3,
+  },
+  myLocationButton: {
+    position: "absolute",
+    bottom: 20,
+    right: 20,
+    backgroundColor: colors.white,
+    padding: 12,
+    borderRadius: 30,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+  },
+  bottomPanel: {
+    flex: 1,
+    backgroundColor: colors.white,
+    padding: 20,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+  },
+  addressInfoContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  addressTextContainer: {
+    marginLeft: 15,
+    flex: 1,
   },
   addressLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#9CA3AF",
-    letterSpacing: 0.4,
-    marginBottom: 2,
+    fontSize: 12,
+    color: colors.textDetails,
+    marginBottom: 4,
   },
   addressText: {
-    fontSize: 14,
+    fontSize: 16,
+    color: colors.text,
     fontWeight: "500",
-    color: "#111827",
-    lineHeight: 20,
   },
-  saveBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
+  confirmButton: {
     backgroundColor: "#06C168",
-    borderRadius: 14,
     paddingVertical: 15,
-  },
-  saveBtnTxt: { fontSize: 15, fontWeight: "700", color: "#fff" },
-
-  emptyRow: {
-    flexDirection: "row",
+    borderRadius: 12,
     alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 8,
   },
-  emptyTxt: { fontSize: 14, color: "#9CA3AF", fontWeight: "500" },
+  confirmButtonDisabled: {
+    opacity: 0.7,
+  },
+  confirmButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: "bold",
+  },
 });

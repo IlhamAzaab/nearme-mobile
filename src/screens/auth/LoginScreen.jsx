@@ -18,8 +18,12 @@ import Svg, { G, Path, Rect } from "react-native-svg";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
 import pushNotificationService from "../../services/pushNotificationService";
+import { persistAuthSession } from "../../lib/authStorage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const IS_WEB = Platform.OS === "web";
+const WEB_CARD_MAX_WIDTH = 560;
+const WEB_LOGO_SIZE = 220;
 
 /* ─── Icon Components ─── */
 const UserIcon = ({ size = 20, color = "#9CA3AF" }) => (
@@ -59,29 +63,7 @@ const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
 );
 
 export default function LoginScreen({ navigation }) {
-  const { applyAuthSession } = useAuth();
-
-  const normalizeAuthPayload = (payload = {}) => {
-    const root = payload && typeof payload === "object" ? payload : {};
-    const nestedData =
-      root?.data && typeof root.data === "object" ? root.data : null;
-    const nestedSession =
-      root?.session && typeof root.session === "object" ? root.session : null;
-
-    return nestedSession || nestedData || root;
-  };
-
-  const pickAuthToken = (payload = {}) => {
-    const session = normalizeAuthPayload(payload);
-    return (
-      session?.token ||
-      session?.access_token ||
-      session?.accessToken ||
-      session?.authToken ||
-      session?.jwt ||
-      null
-    );
-  };
+  const { refreshAuthState } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -149,17 +131,17 @@ export default function LoginScreen({ navigation }) {
 
       clearTimeout(timeoutId);
       const data = await res.json().catch(() => ({}));
-      const session = normalizeAuthPayload(data);
-      const authToken = pickAuthToken(data);
+      const accessToken =
+        data?.token || data?.access_token || data?.accessToken || null;
 
       console.log("🔐 Login response:", {
-        token: authToken ? `${String(authToken).substring(0, 20)}...` : "NULL",
-        role: session?.role || session?.user?.role || null,
-        profileCompleted:
-          session?.profileCompleted ?? session?.profile_completed ?? null,
-        userId: session?.userId || session?.user?.id || null,
-        userName: session?.userName || session?.user?.name || null,
-        payloadKeys: data && typeof data === "object" ? Object.keys(data) : [],
+        token: accessToken
+          ? `${String(accessToken).substring(0, 20)}...`
+          : "NULL",
+        role: data?.role,
+        profileCompleted: data?.profileCompleted,
+        userId: data?.userId,
+        userName: data?.userName,
       });
 
       if (res.status === 403) {
@@ -180,67 +162,41 @@ export default function LoginScreen({ navigation }) {
       }
 
       // If profile not completed, navigate to CompleteProfile screen
-      const role =
-        session?.role || session?.userRole || session?.user?.role || null;
-      const profileCompleted =
-        session?.profileCompleted ?? session?.profile_completed ?? null;
-
-      if (profileCompleted === false && role === "customer") {
+      if (data?.profileCompleted === false && data?.role === "customer") {
         setIsLoading(false);
         navigation.navigate("CompleteProfile", {
-          userId: session?.userId || session?.user?.id || null,
-          accessToken: authToken,
+          userId: data.userId,
+          accessToken,
         });
         return;
       }
 
-      const sessionOptions = {
+      // Save session
+      await persistAuthSession(
+        {
+          ...data,
+          token: accessToken,
+        },
+        {
         userEmail: email,
-        profileCompleted: Boolean(profileCompleted),
-      };
+        profileCompleted: !!data?.profileCompleted,
+        },
+      );
+
+      // Initialize push notifications after successful login
+      if (accessToken) {
+        console.log("🔔 Initializing push notifications after login...");
+        pushNotificationService.initialize(accessToken).catch((err) => {
+          console.warn("Push notification init error:", err);
+        });
+      }
 
       setIsLoading(false);
       setIsTransitioning(true);
 
       setTimeout(async () => {
-        try {
-          const result = await applyAuthSession(data, sessionOptions);
-          if (!result?.ok) {
-            console.error("[AuthDebug] applyAuthSession failed after login", {
-              role,
-              hasToken: Boolean(authToken),
-              payloadKeys:
-                data && typeof data === "object" ? Object.keys(data) : [],
-            });
-            setIsTransitioning(false);
-            triggerShake();
-            Alert.alert(
-              "Login redirect failed",
-              "Session saved but role routing failed. Please login again.",
-            );
-            return;
-          }
-
-          // Initialize push notifications only after auth session is applied.
-          const persistedToken = result?.accessToken || authToken || null;
-          if (persistedToken) {
-            console.log("🔔 Initializing push notifications after login...");
-            pushNotificationService.initialize(persistedToken).catch((err) => {
-              console.warn("Push notification init error:", err);
-            });
-          } else {
-            console.error("[AuthDebug] Login success but token is missing", {
-              role,
-              payloadKeys:
-                data && typeof data === "object" ? Object.keys(data) : [],
-            });
-          }
-        } catch (redirectErr) {
-          console.error("Login redirect error:", redirectErr);
-          setIsTransitioning(false);
-          triggerShake();
-          Alert.alert("Login redirect failed", "Please try again.");
-        }
+        // Refresh auth state - RootNavigator will automatically show correct screen
+        await refreshAuthState();
       }, 1200);
     } catch (error) {
       console.error("Login error:", error);
@@ -273,18 +229,27 @@ export default function LoginScreen({ navigation }) {
         )}
 
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            IS_WEB && styles.scrollContentWeb,
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           bounces={false}
         >
-          <Animated.View style={{ transform: [{ translateX: shakeX }] }}>
+          <Animated.View
+            style={[
+              styles.loginShell,
+              IS_WEB && styles.loginShellWeb,
+              { transform: [{ translateX: shakeX }] },
+            ]}
+          >
             {/* ═══ GREEN TOP SECTION ═══ */}
             <LinearGradient
               colors={["#04753E", "#059B52", "#06C168"]}
               start={{ x: 0.5, y: 0 }}
               end={{ x: 0.5, y: 1 }}
-              style={styles.greenSection}
+              style={[styles.greenSection, IS_WEB && styles.greenSectionWeb]}
             >
               {/* Decorative circles */}
               <View style={styles.bgCircle1} />
@@ -292,7 +257,11 @@ export default function LoginScreen({ navigation }) {
 
               {/* Meezo SVG Logo */}
               <View style={styles.logoWrap}>
-                <Svg width={280} height={280} viewBox="0 0 1080 1080">
+                <Svg
+                  width={IS_WEB ? WEB_LOGO_SIZE : 280}
+                  height={IS_WEB ? WEB_LOGO_SIZE : 280}
+                  viewBox="0 0 1080 1080"
+                >
                   <Rect
                     x="0"
                     y="0"
@@ -356,9 +325,9 @@ export default function LoginScreen({ navigation }) {
             </View>
 
             {/* ═══ WHITE BOTTOM SECTION ═══ */}
-            <View style={styles.whiteSection}>
+            <View style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}>
               {/* Form content */}
-              <View style={styles.formWrap}>
+              <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
                 <Text style={styles.cardTitle}>Welcome Back!</Text>
                 <Text style={styles.cardSub}>Please sign in to continue</Text>
 
@@ -435,9 +404,7 @@ export default function LoginScreen({ navigation }) {
 
                 {/* Signup link */}
                 <View style={styles.footerRow}>
-                  <Text style={styles.footerText}>
-                    Don&apos;t have an account?{" "}
-                  </Text>
+                  <Text style={styles.footerText}>Do not have an account? </Text>
                   <Pressable onPress={() => navigation.navigate("Signup")}>
                     <Text style={styles.footerLink}>Sign up here</Text>
                   </Pressable>
@@ -454,11 +421,33 @@ export default function LoginScreen({ navigation }) {
 const styles = StyleSheet.create({
   pageContainer: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#EEF4EF",
   },
 
   scrollContent: {
     flexGrow: 1,
+  },
+  scrollContentWeb: {
+    justifyContent: "center",
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+  },
+
+  loginShell: {
+    width: "100%",
+  },
+  loginShellWeb: {
+    width: "100%",
+    maxWidth: WEB_CARD_MAX_WIDTH,
+    alignSelf: "center",
+    borderRadius: 28,
+    overflow: "hidden",
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#0B3B1E",
+    shadowOpacity: 0.16,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 10,
   },
 
   /* ═══ GREEN TOP SECTION ═══ */
@@ -467,6 +456,10 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     alignItems: "center",
     overflow: "hidden",
+  },
+  greenSectionWeb: {
+    paddingTop: 34,
+    paddingBottom: 8,
   },
 
   /* Decorative background circles */
@@ -516,8 +509,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 40,
   },
+  whiteSectionWeb: {
+    paddingHorizontal: 30,
+    paddingBottom: 30,
+  },
   formWrap: {
     paddingTop: 8,
+  },
+  formWrapWeb: {
+    width: "100%",
+    maxWidth: 440,
+    alignSelf: "center",
   },
 
   /* Titles */

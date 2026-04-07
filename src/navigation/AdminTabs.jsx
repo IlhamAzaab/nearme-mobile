@@ -8,7 +8,7 @@ import AdminDashboard from "../screens/admin/AdminDashboard";
 import Earnings from "../screens/admin/Earnings";
 import Orders from "../screens/admin/Orders";
 import Products from "../screens/admin/Products";
-import Profile from "../screens/admin/Profile";
+import Profile from "../screens/admin/Profile.jsx";
 
 const Tab = createBottomTabNavigator();
 

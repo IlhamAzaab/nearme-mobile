@@ -393,6 +393,7 @@ const OSMMapView = forwardRef(({
         javaScriptEnabled={true}
         domStorageEnabled={true}
         startInLoadingState={true}
+        userAgent="NearMe-App/1.0"
         renderLoading={() => (
           <View style={styles.loading}>
             <ActivityIndicator size="large" color="#06C168" />

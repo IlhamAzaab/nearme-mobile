@@ -80,6 +80,21 @@ export default {
     },
     owner: "mohamedilham",
     extra: {
+      API_URL:
+        process.env.API_URL ||
+        process.env.EXPO_PUBLIC_API_URL ||
+        "https://meezo-backend-d3gw.onrender.com",
+      SUPABASE_URL:
+        process.env.SUPABASE_URL ||
+        process.env.EXPO_PUBLIC_SUPABASE_URL ||
+        process.env.VITE_SUPABASE_URL ||
+        "",
+      SUPABASE_ANON_KEY:
+        process.env.SUPABASE_ANON_KEY ||
+        process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
+        process.env.VITE_SUPABASE_ANON_KEY ||
+        "",
+      ENABLE_LOGGING: String(process.env.ENABLE_LOGGING || "true") === "true",
       eas: {
         projectId: "ae8e5d23-1d5a-4b87-81bf-feb46fe5dedb",
       },

@@ -1,11 +1,8 @@
-﻿import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
-  Animated,
-  RefreshControl,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,296 +10,172 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useAuth } from "../../app/providers/AuthProvider";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_URL } from "../../config/env";
+import { useAuth } from "../../app/providers/AuthProvider";
 import { getAccessToken } from "../../lib/authStorage";
 
-const fetchAdminProfile = async () => {
-  const token = await getAccessToken();
-  if (!token) throw new Error("No authentication token");
+const PRIVACY_POLICY_URL = "https://tiny-medovik-de85ce.netlify.app";
+const TERMS_AND_CONDITIONS_URL = "https://silly-toffee-589ef6.netlify.app";
+const HELP_AND_SUPPORT_URL = "https://amazing-zabaione-f13806.netlify.app";
 
-  const response = await fetch(`${API_URL}/admin/me`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data?.message || "Failed to load profile");
-  }
-
-  return data?.admin || null;
-};
-
-const fetchAdminRestaurant = async () => {
-  const token = await getAccessToken();
-  if (!token) throw new Error("No authentication token");
-
-  const response = await fetch(`${API_URL}/admin/restaurant`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data?.message || "Failed to load restaurant");
-  }
-
-  return data?.restaurant || null;
-};
-
-const ProfileSkeleton = ({ opacity }) => {
-  const animatedOpacity = { opacity };
-
-  return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.headerWrap}>
-          <Animated.View
-            style={[
-              styles.skeletonLine,
-              styles.skeletonHeaderTitle,
-              animatedOpacity,
-            ]}
-          />
-          <Animated.View
-            style={[
-              styles.skeletonLine,
-              styles.skeletonHeaderSubtitle,
-              animatedOpacity,
-            ]}
-          />
-        </View>
-
-        <View style={styles.profileCard}>
-          <Animated.View style={[styles.skeletonAvatar, animatedOpacity]} />
-          <Animated.View style={[styles.skeletonPill, animatedOpacity]} />
-          <Animated.View
-            style={[
-              styles.skeletonLine,
-              styles.skeletonProfileName,
-              animatedOpacity,
-            ]}
-          />
-          <Animated.View
-            style={[
-              styles.skeletonLine,
-              styles.skeletonProfileRole,
-              animatedOpacity,
-            ]}
-          />
-
-          <View style={styles.metaBadgesRow}>
-            <Animated.View style={[styles.skeletonBadge, animatedOpacity]} />
-            <Animated.View style={[styles.skeletonBadge, animatedOpacity]} />
-          </View>
-        </View>
-
-        <View style={styles.infoCard}>
-          <View style={styles.sectionHeaderRow}>
-            <Animated.View
-              style={[styles.skeletonSectionIcon, animatedOpacity]}
-            />
-            <View style={styles.sectionTitleWrap}>
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonSectionTitle,
-                  animatedOpacity,
-                ]}
-              />
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonSectionSubtitle,
-                  animatedOpacity,
-                ]}
-              />
-            </View>
-          </View>
-
-          <Animated.View style={[styles.skeletonDetailRow, animatedOpacity]} />
-          <Animated.View style={[styles.skeletonDetailRow, animatedOpacity]} />
-          <Animated.View
-            style={[styles.skeletonDetailRowShort, animatedOpacity]}
-          />
-        </View>
-
-        <View style={styles.actionCard}>
-          <View style={styles.actionLeft}>
-            <Animated.View
-              style={[styles.skeletonSectionIcon, animatedOpacity]}
-            />
-            <View style={styles.actionTextWrap}>
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonActionTitle,
-                  animatedOpacity,
-                ]}
-              />
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonActionSubtitle,
-                  animatedOpacity,
-                ]}
-              />
-            </View>
-          </View>
-          <Animated.View style={[styles.skeletonChevron, animatedOpacity]} />
-        </View>
-
-        <View style={styles.securityCard}>
-          <View style={styles.actionLeft}>
-            <Animated.View
-              style={[styles.skeletonSectionIcon, animatedOpacity]}
-            />
-            <View style={styles.actionTextWrap}>
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonActionTitle,
-                  animatedOpacity,
-                ]}
-              />
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonActionSubtitle,
-                  animatedOpacity,
-                ]}
-              />
-            </View>
-          </View>
-          <View style={styles.securityBottomRow}>
-            <View>
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonPasswordLabel,
-                  animatedOpacity,
-                ]}
-              />
-              <Animated.View
-                style={[
-                  styles.skeletonLine,
-                  styles.skeletonPasswordHidden,
-                  animatedOpacity,
-                ]}
-              />
-            </View>
-            <Animated.View
-              style={[styles.skeletonChangePassword, animatedOpacity]}
-            />
-          </View>
-        </View>
-
-        <Animated.View style={[styles.skeletonLogout, animatedOpacity]} />
-      </ScrollView>
-    </SafeAreaView>
-  );
-};
-
-export default function Profile() {
-  const navigation = useNavigation();
-  const queryClient = useQueryClient();
-  const { logout } = useAuth();
-
-  const [refreshing, setRefreshing] = useState(false);
-
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const translateYAnim = useRef(new Animated.Value(18)).current;
-  const skeletonOpacity = useRef(new Animated.Value(0.55)).current;
-
-  const profileQuery = useQuery({
-    queryKey: ["admin", "profile"],
-    queryFn: fetchAdminProfile,
-    staleTime: 60 * 1000,
-  });
-
-  const restaurantQuery = useQuery({
-    queryKey: ["admin", "restaurant"],
-    queryFn: fetchAdminRestaurant,
-    staleTime: 60 * 1000,
-  });
-
-  const admin = profileQuery.data;
-  const restaurant = restaurantQuery.data;
-
-  const displayName = useMemo(
-    () => admin?.username || admin?.name || "Admin",
-    [admin],
-  );
-
-  const displayEmail = useMemo(() => admin?.email || "-", [admin]);
-
-  const displayPhone = useMemo(
-    () => admin?.mobile_number || admin?.phone || "-",
-    [admin],
-  );
-
-  const isInitialLoading =
-    (profileQuery.isLoading && !profileQuery.data) ||
-    (restaurantQuery.isLoading && !restaurantQuery.data);
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateYAnim, {
-        toValue: 0,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [fadeAnim, translateYAnim]);
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(skeletonOpacity, {
-          toValue: 1,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-        Animated.timing(skeletonOpacity, {
-          toValue: 0.55,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-
-    loop.start();
-    return () => loop.stop();
-  }, [skeletonOpacity]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["admin", "profile"] }),
-        queryClient.invalidateQueries({ queryKey: ["admin", "restaurant"] }),
-      ]);
-    } finally {
-      setRefreshing(false);
+function pickFirstValue(source, keys, fallback = "-") {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim();
     }
-  }, [queryClient]);
+  }
+  return fallback;
+}
 
-  const handleLogout = () => {
+function formatJoinedDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value || "-"}</Text>
+    </View>
+  );
+}
+
+function SupportItem({ label, onPress, isLast = false }) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
+      style={[styles.supportItem, isLast && styles.supportItemLast]}
+    >
+      <Text style={styles.supportText}>{label}</Text>
+      <Text style={styles.supportArrow}>{">"}</Text>
+    </TouchableOpacity>
+  );
+}
+
+export default function Profile({ navigation }) {
+  const { logout } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [details, setDetails] = useState({
+    fullName: "-",
+    adminId: "-",
+    role: "Admin",
+    phoneNumber: "-",
+    email: "-",
+    assignedAreaOrBranch: "-",
+    joinedDate: "-",
+    restaurantName: "Restaurant",
+    restaurantLogoUrl: "",
+  });
+
+  const openInAppWebView = useCallback(
+    (title, url) => {
+      navigation.navigate("WebView", { title, url });
+    },
+    [navigation],
+  );
+
+  const loadProfile = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [token, storedRole, storedUserName] = await Promise.all([
+        getAccessToken(),
+        AsyncStorage.getItem("role"),
+        AsyncStorage.getItem("userName"),
+      ]);
+
+      if (!token || storedRole !== "admin") {
+        await logout();
+        return;
+      }
+
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const [response, restaurantResponse] = await Promise.all([
+        fetch(`${API_URL}/admin/me`, { headers }),
+        fetch(`${API_URL}/admin/restaurant`, { headers }),
+      ]);
+
+      const data = await response.json().catch(() => ({}));
+      const restaurantData = await restaurantResponse.json().catch(() => ({}));
+
+      if (
+        response.status === 401 ||
+        response.status === 403 ||
+        restaurantResponse.status === 401 ||
+        restaurantResponse.status === 403
+      ) {
+        await logout();
+        return;
+      }
+
+      if (!response.ok || !data?.admin) {
+        Alert.alert("Error", "Failed to load admin profile.");
+        return;
+      }
+
+      const admin = data.admin;
+      const restaurant =
+        restaurantData?.restaurant || admin?.restaurant || data?.restaurant || {};
+      const adminAndRestaurant = { ...restaurant, ...admin };
+
+      setDetails({
+        fullName: pickFirstValue(
+          admin,
+          ["full_name", "name", "username"],
+          storedUserName || "-",
+        ),
+        adminId: pickFirstValue(admin, ["admin_id", "id", "user_id"]),
+        role: pickFirstValue(admin, ["role", "admin_role"], "Admin"),
+        phoneNumber: pickFirstValue(admin, ["phone", "mobile", "mobile_number"]),
+        email: pickFirstValue(admin, ["email"]),
+        assignedAreaOrBranch: pickFirstValue(adminAndRestaurant, [
+          "assigned_area",
+          "area",
+          "branch",
+          "branch_name",
+        ]),
+        joinedDate: formatJoinedDate(
+          pickFirstValue(admin, ["joined_date", "joined_at", "created_at"], ""),
+        ),
+        restaurantName: pickFirstValue(
+          restaurant,
+          ["restaurant_name", "business_name", "name", "brand_name"],
+          "Restaurant",
+        ),
+        restaurantLogoUrl: pickFirstValue(
+          restaurant,
+          [
+            "restaurant_logo_url",
+            "restaurant_logo",
+            "logo_url",
+            "logoUrl",
+            "restaurantLogoUrl",
+          ],
+          "",
+        ),
+      });
+    } catch {
+      Alert.alert("Error", "Network error while loading profile.");
+    } finally {
+      setLoading(false);
+    }
+  }, [logout]);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
+
+  const onLogoutPress = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -315,173 +188,99 @@ export default function Profile() {
     ]);
   };
 
-  if (isInitialLoading) {
-    return <ProfileSkeleton opacity={skeletonOpacity} />;
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#0F766E" />
+        <Text style={styles.loadingText}>Loading profile...</Text>
+      </SafeAreaView>
+    );
   }
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <Animated.View
-        style={{
-          flex: 1,
-          opacity: fadeAnim,
-          transform: [{ translateY: translateYAnim }],
-        }}
+      <View style={styles.bgOrbOne} />
+      <View style={styles.bgOrbTwo} />
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={["#06C168"]}
-            />
-          }
-        >
-          <View style={styles.headerWrap}>
-            <Text style={styles.headerTitle}>My Account</Text>
-            <Text style={styles.headerSubtitle}>
-              Manage your admin profile and account security
+        <View style={styles.heroCard}>
+          <View style={styles.heroLogoWrap}>
+            {details.restaurantLogoUrl ? (
+              <Image
+                source={{ uri: details.restaurantLogoUrl }}
+                style={styles.heroLogo}
+              />
+            ) : (
+              <Text style={styles.heroLogoFallback}>
+                {String(details.restaurantName || "R").charAt(0).toUpperCase()}
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.heroContent}>
+            <Text style={styles.heroKicker}>Restaurant</Text>
+            <Text style={styles.heroTitle} numberOfLines={1}>
+              {details.restaurantName}
+            </Text>
+            <Text style={styles.heroSub} numberOfLines={1}>
+              {details.fullName}
             </Text>
           </View>
 
-          {(profileQuery.error || restaurantQuery.error) && (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorText}>
-                {profileQuery.error?.message ||
-                  restaurantQuery.error?.message ||
-                  "Unable to load profile details"}
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.profileCard}>
-            <View style={styles.avatarBox}>
-              <Text style={styles.avatarText}>
-                {displayName.charAt(0).toUpperCase()}
-              </Text>
-            </View>
-            <View style={styles.activeBadge}>
-              <Text style={styles.activeBadgeText}>Active</Text>
-            </View>
-            <Text style={styles.profileEmail}>{displayEmail}</Text>
-            <Text style={styles.profileRole}>Admin Account</Text>
-
-            <View style={styles.metaBadgesRow}>
-              <View style={styles.metaBadgeGreen}>
-                <Ionicons
-                  name="shield-checkmark-outline"
-                  size={12}
-                  color="#05803E"
-                />
-                <Text style={styles.metaBadgeGreenText}>Admin Role</Text>
-              </View>
-              <View style={styles.metaBadgeBlue}>
-                <Ionicons name="checkmark-outline" size={12} color="#1D4ED8" />
-                <Text style={styles.metaBadgeBlueText}>Onboarded</Text>
-              </View>
-            </View>
+          <View style={styles.heroRolePill}>
+            <Text style={styles.heroRoleText}>{details.role}</Text>
           </View>
+        </View>
 
-          <View style={styles.infoCard}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={styles.sectionIconGreen}>
-                <Ionicons
-                  name="person-circle-outline"
-                  size={16}
-                  color="#FFFFFF"
-                />
-              </View>
-              <View style={styles.sectionTitleWrap}>
-                <Text style={styles.sectionTitle}>Account Information</Text>
-                <Text style={styles.sectionSubTitle}>
-                  Your admin account details
-                </Text>
-              </View>
-            </View>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Profile Details</Text>
 
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>EMAIL ADDRESS</Text>
-              <Text style={styles.detailValue}>{displayEmail}</Text>
-            </View>
+          <DetailRow label="Full Name" value={details.fullName} />
+          <DetailRow label="Admin ID" value={details.adminId} />
+          <DetailRow label="Role" value={details.role} />
+          <DetailRow label="Phone Number" value={details.phoneNumber} />
+          <DetailRow label="Email" value={details.email} />
+          <DetailRow
+            label="Assigned Area / Branch"
+            value={details.assignedAreaOrBranch}
+          />
+          <DetailRow label="Joined Date" value={details.joinedDate} />
+        </View>
 
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>PHONE NUMBER</Text>
-              <Text style={styles.detailValue}>{displayPhone}</Text>
-            </View>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Support & Legal</Text>
 
-            <View style={styles.detailRowNoBorder}>
-              <Text style={styles.detailLabel}>ACCOUNT STATUS</Text>
-              <Text style={styles.detailHint}>
-                {admin?.admin_status || "Not set"}
-              </Text>
-            </View>
-          </View>
+          <SupportItem
+            label="Help & Support"
+            onPress={() => openInAppWebView("Help & Support", HELP_AND_SUPPORT_URL)}
+          />
+          <SupportItem
+            label="Privacy Policy"
+            onPress={() => openInAppWebView("Privacy Policy", PRIVACY_POLICY_URL)}
+          />
+          <SupportItem
+            label="Terms & Conditions"
+            onPress={() =>
+              openInAppWebView("Terms & Conditions", TERMS_AND_CONDITIONS_URL)
+            }
+            isLast
+          />
+        </View>
+      </ScrollView>
 
-          <TouchableOpacity
-            style={styles.actionCard}
-            activeOpacity={0.75}
-            onPress={() => navigation.navigate("RestaurantDetail")}
-          >
-            <View style={styles.actionLeft}>
-              <View style={styles.sectionIconOrange}>
-                <Ionicons name="restaurant-outline" size={17} color="#FFFFFF" />
-              </View>
-              <View style={styles.actionTextWrap}>
-                <Text style={styles.actionTitle}>Restaurant Details</Text>
-                <Text style={styles.actionSubTitle} numberOfLines={1}>
-                  View and manage your restaurant profile, images and location
-                </Text>
-                {restaurant?.restaurant_name ? (
-                  <Text style={styles.restaurantMiniText} numberOfLines={1}>
-                    {restaurant.restaurant_name}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#98A2B3" />
-          </TouchableOpacity>
-
-          <View style={styles.securityCard}>
-            <View style={styles.actionLeft}>
-              <View style={styles.sectionIconGreen}>
-                <Ionicons
-                  name="lock-closed-outline"
-                  size={17}
-                  color="#FFFFFF"
-                />
-              </View>
-              <View style={styles.actionTextWrap}>
-                <Text style={styles.actionTitle}>Security</Text>
-                <Text style={styles.actionSubTitle}>Manage your password</Text>
-              </View>
-            </View>
-
-            <View style={styles.securityBottomRow}>
-              <View>
-                <Text style={styles.passwordLabel}>Password</Text>
-                <Text style={styles.passwordHidden}> (hidden)</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.changePasswordBtn}
-                onPress={() => navigation.navigate("AdminProfile")}
-              >
-                <Text style={styles.changePasswordText}>Change Password</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={styles.logoutBtn}
-            onPress={handleLogout}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="log-out-outline" size={18} color="#DC2626" />
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </Animated.View>
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={styles.logoutButton}
+          activeOpacity={0.85}
+          onPress={onLogoutPress}
+        >
+          <Text style={styles.logoutButtonText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
@@ -489,391 +288,193 @@ export default function Profile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "#EDFBF2",
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: "#EDFBF2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: "#475569",
+    fontWeight: "500",
+  },
+  bgOrbOne: {
+    position: "absolute",
+    top: -40,
+    right: -40,
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    backgroundColor: "#C5F5DA",
+    opacity: 0.7,
+  },
+  bgOrbTwo: {
+    position: "absolute",
+    top: 100,
+    left: -55,
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    backgroundColor: "#DDF8E9",
+    opacity: 0.75,
+  },
+  scrollView: {
+    flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 20,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 16,
+    gap: 14,
   },
-  headerWrap: {
-    paddingHorizontal: 4,
-    paddingTop: 8,
-    marginBottom: 10,
-  },
-  headerTitle: {
-    fontSize: 33,
-    lineHeight: 36,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: "#64748B",
-    marginTop: 2,
-  },
-  errorBanner: {
-    backgroundColor: "#FEF2F2",
-    borderWidth: 1,
-    borderColor: "#FECACA",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
-  },
-  errorText: {
-    color: "#B91C1C",
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  profileCard: {
+  heroCard: {
     backgroundColor: "#FFFFFF",
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  avatarBox: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    backgroundColor: "#07B95A",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarText: {
-    color: "#FFFFFF",
-    fontSize: 34,
-    fontWeight: "700",
-  },
-  activeBadge: {
-    marginTop: -6,
-    backgroundColor: "#B8F0D0",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-  },
-  activeBadgeText: {
-    color: "#047857",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  profileEmail: {
-    marginTop: 10,
-    fontSize: 26,
-    lineHeight: 30,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  profileRole: {
-    marginTop: 4,
-    color: "#94A3B8",
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  metaBadgesRow: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  metaBadgeGreen: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#EAF9F0",
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  metaBadgeGreenText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#05803E",
-  },
-  metaBadgeBlue: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#E6EEFF",
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  metaBadgeBlueText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#1D4ED8",
-  },
-  infoCard: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 16,
+    borderColor: "#E7ECF3",
     padding: 14,
-    marginBottom: 12,
-  },
-  sectionHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
   },
-  sectionIconGreen: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+  heroLogoWrap: {
+    width: 62,
+    height: 62,
+    borderRadius: 16,
+    backgroundColor: "#E2E8F0",
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#06C168",
   },
-  sectionIconOrange: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F97316",
+  heroLogo: {
+    width: "100%",
+    height: "100%",
   },
-  sectionTitleWrap: {
-    marginLeft: 10,
+  heroLogoFallback: {
+    fontSize: 26,
+    fontWeight: "700",
+    color: "#0F172A",
   },
-  sectionTitle: {
-    color: "#111827",
+  heroContent: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
+  heroKicker: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "600",
+  },
+  heroTitle: {
+    marginTop: 2,
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  heroSub: {
+    marginTop: 4,
+    fontSize: 13,
+    color: "#475569",
+    fontWeight: "500",
+  },
+  heroRolePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#DCFCE7",
+  },
+  heroRoleText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#166534",
+  },
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "#E5EAF1",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  cardTitle: {
     fontSize: 16,
     fontWeight: "700",
-  },
-  sectionSubTitle: {
-    color: "#6B7280",
-    fontSize: 12,
-    marginTop: 2,
+    color: "#0F172A",
+    marginBottom: 8,
   },
   detailRow: {
-    borderTopWidth: 1,
-    borderTopColor: "#EEF2F7",
     paddingVertical: 10,
-  },
-  detailRowNoBorder: {
-    borderTopWidth: 1,
-    borderTopColor: "#EEF2F7",
-    paddingTop: 10,
-    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F7",
   },
   detailLabel: {
-    color: "#94A3B8",
     fontSize: 12,
-    fontWeight: "700",
+    color: "#64748B",
+    fontWeight: "600",
+    marginBottom: 4,
+    letterSpacing: 0.2,
   },
   detailValue: {
-    marginTop: 4,
-    color: "#111827",
-    fontSize: 17,
-    fontWeight: "500",
-  },
-  detailHint: {
-    marginTop: 4,
-    color: "#9CA3AF",
-    fontSize: 17,
-    fontStyle: "italic",
-  },
-  actionCard: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  actionLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  actionTextWrap: {
-    marginLeft: 10,
-    flex: 1,
-  },
-  actionTitle: {
-    color: "#111827",
-    fontSize: 17,
+    fontSize: 15,
+    color: "#0F172A",
     fontWeight: "600",
   },
-  actionSubTitle: {
-    marginTop: 2,
-    color: "#64748B",
-    fontSize: 12,
-  },
-  restaurantMiniText: {
-    marginTop: 4,
-    color: "#06C168",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  securityCard: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
-  },
-  securityBottomRow: {
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#EEF2F7",
-    paddingTop: 12,
+  supportItem: {
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F7",
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
   },
-  passwordLabel: {
-    fontSize: 22,
-    fontWeight: "500",
-    color: "#111827",
+  supportItemLast: {
+    borderBottomWidth: 0,
+    paddingBottom: 4,
   },
-  passwordHidden: {
-    marginTop: 2,
+  supportText: {
+    fontSize: 15,
+    color: "#0F172A",
+    fontWeight: "600",
+  },
+  supportArrow: {
+    fontSize: 18,
+    lineHeight: 20,
     color: "#94A3B8",
-    fontSize: 14,
   },
-  changePasswordBtn: {
-    borderWidth: 1,
-    borderColor: "#B8F0D0",
-    borderRadius: 10,
-    backgroundColor: "#EAF9F0",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+  footer: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 0,
+    backgroundColor: "#EDFBF2",
   },
-  changePasswordText: {
-    color: "#05803E",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  logoutBtn: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#FECACA",
-    borderRadius: 12,
-    paddingVertical: 11,
-    flexDirection: "row",
+  logoutButton: {
+    backgroundColor: "#DC2626",
+    borderRadius: 14,
+    minHeight: 52,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    shadowColor: "#B91C1C",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 2,
   },
-  logoutText: {
-    color: "#DC2626",
-    fontSize: 14,
+  logoutButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
     fontWeight: "700",
-  },
-  skeletonLine: {
-    backgroundColor: "#E2E8F0",
-    borderRadius: 8,
-  },
-  skeletonHeaderTitle: {
-    width: 200,
-    height: 30,
-  },
-  skeletonHeaderSubtitle: {
-    width: 265,
-    height: 14,
-    marginTop: 8,
-  },
-  skeletonAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    backgroundColor: "#E2E8F0",
-  },
-  skeletonPill: {
-    width: 56,
-    height: 18,
-    borderRadius: 10,
-    backgroundColor: "#E2E8F0",
-    marginTop: 8,
-  },
-  skeletonProfileName: {
-    width: 220,
-    height: 30,
-    marginTop: 10,
-  },
-  skeletonProfileRole: {
-    width: 110,
-    height: 14,
-    marginTop: 8,
-  },
-  skeletonBadge: {
-    width: 82,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "#E2E8F0",
-  },
-  skeletonSectionIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: "#E2E8F0",
-  },
-  skeletonSectionTitle: {
-    width: 165,
-    height: 16,
-  },
-  skeletonSectionSubtitle: {
-    width: 145,
-    height: 12,
-    marginTop: 6,
-  },
-  skeletonDetailRow: {
-    borderTopWidth: 1,
-    borderTopColor: "#EEF2F7",
-    marginTop: 2,
-    height: 56,
-    backgroundColor: "#F8FAFC",
-    borderRadius: 8,
-  },
-  skeletonDetailRowShort: {
-    borderTopWidth: 1,
-    borderTopColor: "#EEF2F7",
-    marginTop: 2,
-    height: 50,
-    backgroundColor: "#F8FAFC",
-    borderRadius: 8,
-  },
-  skeletonActionTitle: {
-    width: 130,
-    height: 18,
-  },
-  skeletonActionSubtitle: {
-    width: 210,
-    height: 12,
-    marginTop: 8,
-  },
-  skeletonChevron: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: "#E2E8F0",
-  },
-  skeletonPasswordLabel: {
-    width: 90,
-    height: 20,
-  },
-  skeletonPasswordHidden: {
-    width: 120,
-    height: 14,
-    marginTop: 8,
-  },
-  skeletonChangePassword: {
-    width: 126,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "#E2E8F0",
-  },
-  skeletonLogout: {
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#E2E8F0",
+    letterSpacing: 0.3,
   },
 });

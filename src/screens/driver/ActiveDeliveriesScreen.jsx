@@ -33,8 +33,10 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../../app/providers/AuthProvider";
 import FreeMapView from "../../components/maps/FreeMapView";
 import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -322,6 +324,7 @@ const DeliveryCard = ({ delivery, index, isFirst, driverLocation }) => {
 
 export default function ActiveDeliveriesScreen({ navigation }) {
   const isFocused = useIsFocused();
+  const { logout } = useAuth();
   const isFocusedRef = useRef(true);
 
   useEffect(() => {
@@ -361,7 +364,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
   const initScreen = async () => {
     const role = await AsyncStorage.getItem("role");
     if (role !== "driver") {
-      navigation.replace("Login");
+      await logout();
       return;
     }
 
@@ -489,7 +492,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
     isFetchingRef.current = true;
 
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
 
       if (!location) {
         // Even without location, check for active deliveries (matching web)
@@ -600,7 +603,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
   // Fetch full route for developer overview
   const fetchFullRoute = async (location, pickupsList) => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const url = `${API_BASE_URL}/driver/deliveries/full-route?driver_latitude=${location.latitude}&driver_longitude=${location.longitude}`;
 
       const res = await rateLimitedFetch(url, {
@@ -657,7 +660,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
     isBackgroundRefresh = false,
   ) => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const url = `${API_BASE_URL}/driver/deliveries/deliveries-route?driver_latitude=${location.latitude}&driver_longitude=${location.longitude}`;
 
       const res = await rateLimitedFetch(url, {

@@ -77,6 +77,7 @@ const COOKING_STATUSES = new Set(["placed", "pending", "received", "preparing", 
 /** Statuses that show the live map (pending → on_the_way) */
 const MAP_STATUSES = new Set(["pending", "received", "preparing", "ready", "accepted", "driver_accepted", "driver_assigned", "picked_up", "on_the_way"]);
 const PREPARING_MAP_STATUSES = new Set(["pending", "received", "preparing"]);
+const ETA_VISIBLE_STATUSES = new Set(["accepted", "driver_accepted", "driver_assigned", "picked_up", "on_the_way"]);
 
 function createTopArcRoute(start, end, steps = 32) {
   const midLat = (start.latitude + end.latitude) / 2;
@@ -181,11 +182,11 @@ const STATUS_MESSAGES = {
 };
 
 const STATUS_SVG_PATHS = {
-  placed: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  placed: "M5 13l4 4L19 7",
   pending: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
   received: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
   preparing: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
-  ready: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  ready: "M5 13l4 4L19 7",
   accepted: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
   driver_accepted: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
   driver_assigned: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
@@ -196,16 +197,92 @@ const STATUS_SVG_PATHS = {
 
 const POLL_INTERVAL = 2000;
 
-/** Format ETA as clock time (e.g. "12:30 PM") */
-function getFormattedETA(minMinutes, maxMinutes) {
-  const now = new Date();
-  const avgMin = Math.round((minMinutes + maxMinutes) / 2);
-  const arrival = new Date(now.getTime() + avgMin * 60000);
-  let h = arrival.getHours();
-  const m = arrival.getMinutes();
+function normalizeStatus(status) {
+  const raw = String(status || "")
+    .trim()
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  const aliasMap = {
+    driveraccepted: "driver_accepted",
+    driver_accept: "driver_accepted",
+    accepted_by_driver: "driver_accepted",
+    driverassigned: "driver_assigned",
+    assigned_to_driver: "driver_assigned",
+    pickedup: "picked_up",
+    pickup: "picked_up",
+    ontheway: "on_the_way",
+    on_the_way_to_customer: "on_the_way",
+    order_placed: "placed",
+  };
+
+  return aliasMap[raw] || raw;
+}
+
+function formatDotClockTime(date) {
+  let h = date.getHours();
   const ampm = h >= 12 ? "PM" : "AM";
   h = h % 12 || 12;
-  return `${h}:${m.toString().padStart(2, "0")} ${ampm}`;
+  const m = date.getMinutes().toString().padStart(2, "0");
+  return `${h}.${m} ${ampm}`;
+}
+
+/** Format ETA range as clock window (e.g. "2.20-2.25") */
+function getFormattedETA(minMinutes, maxMinutes) {
+  const now = new Date();
+
+  const start = new Date(now.getTime() + Math.max(0, Number(minMinutes) || 0) * 60000);
+  const end = new Date(now.getTime() + Math.max(0, Number(maxMinutes) || 0) * 60000);
+
+  const startText = formatDotClockTime(start);
+  const endText = formatDotClockTime(end);
+  return startText === endText ? startText : `${startText}-${endText}`;
+}
+
+/** Format ETA as final expected clock time (max-minute based) */
+function getFinalExpectedETA(maxMinutes) {
+  const now = new Date();
+  const finalArrival = new Date(
+    now.getTime() + Math.max(0, Number(maxMinutes) || 0) * 60000,
+  );
+  return formatDotClockTime(finalArrival);
+}
+
+function getNextStepMessage(currentStatus) {
+  if (currentStatus === "placed") {
+    return "Please wait until the restaurant accepts your order.";
+  }
+
+  if (
+    currentStatus === "pending" ||
+    currentStatus === "received" ||
+    currentStatus === "preparing" ||
+    currentStatus === "ready"
+  ) {
+    return "Please wait until a driver accepts your delivery.";
+  }
+
+  if (
+    currentStatus === "accepted" ||
+    currentStatus === "driver_accepted" ||
+    currentStatus === "driver_assigned"
+  ) {
+    return "Driver will pick up your order soon.";
+  }
+
+  if (currentStatus === "delivered") {
+    return "This order is complete.";
+  }
+
+  const currentIndex = STEP_INDEX[currentStatus] ?? 0;
+  const nextStep = PROGRESS_STEPS[currentIndex + 1];
+  if (!nextStep) {
+    return "We are finalizing your order updates.";
+  }
+
+  const nextInfo = STATUS_TEXT[nextStep.key] || STATUS_TEXT.placed;
+  return `${nextInfo.title}. We will update this screen automatically.`;
 }
 
 // =============================================================================
@@ -268,7 +345,11 @@ const ProgressBar = React.memo(({ stepIndex }) => (
   <View style={st.progressContainer}>
     <View style={st.progressTrack}>
       {PROGRESS_STEPS.map((step, i) => (
-        <AnimatedSegment key={step.key} done={i < stepIndex} active={i === stepIndex} />
+        <AnimatedSegment
+          key={step.key}
+          done={i <= stepIndex}
+          active={stepIndex < PROGRESS_STEPS.length - 1 && i === stepIndex + 1}
+        />
       ))}
     </View>
     <View style={st.progressLabelRow}>
@@ -319,57 +400,15 @@ const FloatingFoodIcons = React.memo(() => {
   );
 });
 
-/* ─── Status Icon Bubble (white circle + SVG + 3 pulse rings, web-matching) ─── */
+/* ─── Status Icon Bubble (plain SVG icon, no circular shell) ─── */
 const StatusIconBubble = React.memo(({ status }) => {
-  const ring1 = useRef(new Animated.Value(0)).current;
-  const ring2 = useRef(new Animated.Value(0)).current;
-  const ring3 = useRef(new Animated.Value(0)).current;
-  const isDelivered = status === "delivered";
-
-  useEffect(() => {
-    if (isDelivered) return;
-    const makeRing = (anim, delay) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(anim, { toValue: 1, duration: 2000, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-          Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
-        ]),
-      );
-    makeRing(ring1, 0).start();
-    makeRing(ring2, 660).start();
-    makeRing(ring3, 1320).start();
-  }, [isDelivered]);
-
-  const ringStyle = (anim) => ({
-    position: "absolute",
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 2,
-    borderColor: "#06C168",
-    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] }) }],
-    opacity: anim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0.8, 0.2, 0] }),
-  });
-
   const svgPath = STATUS_SVG_PATHS[status] || STATUS_SVG_PATHS.placed;
 
   return (
     <View style={st.statusBubbleWrap}>
-      {isDelivered ? (
-        <View style={st.successRing} />
-      ) : (
-        <>
-          <Animated.View style={ringStyle(ring1)} />
-          <Animated.View style={ringStyle(ring2)} />
-          <Animated.View style={ringStyle(ring3)} />
-        </>
-      )}
-      <View style={[st.statusIconCircle, isDelivered && st.statusIconCircleSuccess]}>
-        <Svg width={40} height={40} viewBox="0 0 24 24" fill="none" stroke={isDelivered ? "#fff" : "#06C168"} strokeWidth="2">
-          <Path d={svgPath} strokeLinecap="round" strokeLinejoin="round" />
-        </Svg>
-      </View>
+      <Svg width={50} height={50} viewBox="0 0 24 24" fill="none" stroke="#06C168" strokeWidth="2.4">
+        <Path d={svgPath} strokeLinecap="round" strokeLinejoin="round" />
+      </Svg>
     </View>
   );
 });
@@ -479,7 +518,6 @@ const OrderSummaryCard = React.memo(({ data, expanded, onToggle }) => {
           {/* Ordered Items */}
           {items.length > 0 && (
             <View style={st.detailBlock}>
-              <Text style={st.detailBlockLabel}>ORDERED ITEMS</Text>
               <View style={st.detailItemsBox}>
                 {items.map((item, idx) => {
                   const itemName = item.food_name || item.name || item.menu_item_name || "Item";
@@ -849,6 +887,8 @@ const RatingSection = React.memo(({ rating, onRate, onSubmit, submitted }) => {
 export default function OrderTrackingScreen({ route, navigation }) {
   const params = route.params || {};
   const orderId = params.orderId;
+  const initialRouteStatus = normalizeStatus(params.status || "");
+  const keepInitialPlacedUI = initialRouteStatus === "placed";
 
   // Guard: if no orderId, this screen was opened without valid data — go back
   useEffect(() => {
@@ -871,7 +911,9 @@ export default function OrderTrackingScreen({ route, navigation }) {
 
   /* ── tracking state ── */
   const [currentStatus, setCurrentStatus] = useState(
-    (params.status || params.order?.status || params.order?.delivery_status || "placed").toLowerCase()
+    normalizeStatus(
+      params.status || params.order?.status || params.order?.delivery_status || "placed",
+    )
   );
   const [driverInfo, setDriverInfo] = useState(null);
   const [estimatedTime, setEstimatedTime] = useState("Calculating...");
@@ -902,6 +944,18 @@ export default function OrderTrackingScreen({ route, navigation }) {
   const isOTW = currentStatus === "on_the_way";
   const isDone = currentStatus === "delivered";
   const isPreparingMapStage = PREPARING_MAP_STATUSES.has(currentStatus);
+  const shouldShowEta = ETA_VISIBLE_STATUSES.has(currentStatus);
+  const nextStepMessage = useMemo(() => getNextStepMessage(currentStatus), [currentStatus]);
+  const shouldHideDeliveryAddress =
+    currentStatus === "accepted" ||
+    currentStatus === "driver_accepted" ||
+    currentStatus === "driver_assigned";
+
+  const statusEtaDisplay = useMemo(() => {
+    if (isDone) return "Delivered";
+    if (estimatedTime && estimatedTime !== "Calculating...") return estimatedTime;
+    return info.eta || estimatedTime;
+  }, [isDone, estimatedTime, info.eta]);
 
   // ===========================================================================
   // FETCH ORDER (if navigated from Orders list, not checkout)
@@ -930,8 +984,8 @@ export default function OrderTrackingScreen({ route, navigation }) {
       // Use params data for immediate display (optimistic UI)
       if (orderData.order) {
         const o = orderData.order;
-        const resolvedStatus = (o.effective_status || o.status || "").toLowerCase();
-        if (resolvedStatus) setCurrentStatus(resolvedStatus);
+        const resolvedStatus = normalizeStatus(o.effective_status || o.status || "");
+        if (resolvedStatus && !keepInitialPlacedUI) setCurrentStatus(resolvedStatus);
         if (o.restaurant_latitude && o.restaurant_longitude) {
           setRestaurantLocation({
             lat: parseFloat(o.restaurant_latitude),
@@ -968,8 +1022,8 @@ export default function OrderTrackingScreen({ route, navigation }) {
           if (!orderData.restaurantLogoUrl && !o.restaurant_logo_url) {
             fetchRestaurantLogo(o.restaurant_id || o.restaurant?.id);
           }
-          const resolvedFetchStatus = (o.effective_status || o.status || "").toLowerCase();
-          if (resolvedFetchStatus) setCurrentStatus(resolvedFetchStatus);
+          const resolvedFetchStatus = normalizeStatus(o.effective_status || o.status || "");
+          if (resolvedFetchStatus && !keepInitialPlacedUI) setCurrentStatus(resolvedFetchStatus);
 
           if (o.restaurant_latitude && o.restaurant_longitude) {
             setRestaurantLocation({
@@ -998,7 +1052,7 @@ export default function OrderTrackingScreen({ route, navigation }) {
     };
     if (orderId) fetchOrder();
     else setLoading(false);
-  }, [orderId]);
+  }, [orderId, keepInitialPlacedUI]);
 
   // ===========================================================================
   // ENTRANCE ANIMATION
@@ -1036,7 +1090,9 @@ export default function OrderTrackingScreen({ route, navigation }) {
         );
         if (!res.ok) return;
         const data = await res.json();
-        const newStatus = (data.effective_status || data.delivery_status || data.status || "").toLowerCase();
+        const newStatus = normalizeStatus(
+          data.effective_status || data.delivery_status || data.status || "",
+        );
 
         if (data.driver) setDriverInfo(data.driver);
 
@@ -1075,22 +1131,37 @@ export default function OrderTrackingScreen({ route, navigation }) {
 
         // ETA
         if (data.eta?.etaRangeMin != null && data.eta?.etaRangeMax != null) {
-          const otw =
-            data.eta.driverStatus === "on_the_way" ||
-            data.eta.driverStatus === "at_customer";
-          if (otw) {
+          const etaStatus = normalizeStatus(
+            newStatus || data.eta?.driverStatus || currentStatus || "",
+          );
+          const shouldShowFinalOnly =
+            etaStatus === "accepted" ||
+            etaStatus === "driver_accepted" ||
+            etaStatus === "driver_assigned";
+
+          if (shouldShowFinalOnly) {
+            setEstimatedTime(getFinalExpectedETA(data.eta.etaRangeMax));
+          } else {
             setEstimatedTime(
               getFormattedETA(data.eta.etaRangeMin, data.eta.etaRangeMax),
             );
-          } else {
-            setEstimatedTime(
-              `${Math.round(data.eta.etaRangeMin)}-${Math.round(data.eta.etaRangeMax)} mins`,
-            );
           }
         } else if (data.estimatedDuration) {
+          const shouldShowFinalOnly =
+            newStatus === "accepted" ||
+            newStatus === "driver_accepted" ||
+            newStatus === "driver_assigned" ||
+            currentStatus === "accepted" ||
+            currentStatus === "driver_accepted" ||
+            currentStatus === "driver_assigned";
+
+          if (shouldShowFinalOnly) {
+            setEstimatedTime(getFinalExpectedETA(data.estimatedDuration));
+          } else {
           setEstimatedTime(
             getFormattedETA(data.estimatedDuration, data.estimatedDuration),
           );
+          }
         }
 
         // Status transition
@@ -1293,14 +1364,14 @@ export default function OrderTrackingScreen({ route, navigation }) {
                 coordinate: { latitude: restaurantLocation.lat, longitude: restaurantLocation.lng },
                 type: "restaurant",
                 title: orderData.restaurantName || "Restaurant",
-                emoji: isPreparingMapStage ? "🍴" : "🍽️",
+                emoji: isPreparingMapStage ? "🏬" : "🏪",
               },
               {
                 id: "customer",
                 coordinate: { latitude: deliveryLocation.lat, longitude: deliveryLocation.lng },
                 type: isPreparingMapStage ? "restaurant" : "customer",
                 title: "Delivery",
-                emoji: isPreparingMapStage ? "🏡" : "🏠",
+                emoji: isPreparingMapStage ? "📍" : "⌂",
               },
             ]}
             polylines={
@@ -1375,13 +1446,8 @@ export default function OrderTrackingScreen({ route, navigation }) {
           {/* 1) Status title + ETA */}
           <Animated.View style={{ opacity: statusFade }}>
             <Text style={[st.title, isDone && st.titleSuccess]}>{info.title}</Text>
-            <Text style={st.statusEtaTxt}>
-              {isDone
-                ? "Delivered"
-                : estimatedTime === "Calculating..."
-                ? (info.eta || estimatedTime)
-                : estimatedTime}
-            </Text>
+            {shouldShowEta ? <Text style={st.statusEtaTxt}>{statusEtaDisplay}</Text> : null}
+            <Text style={st.statusNextTxt}>{nextStepMessage}</Text>
           </Animated.View>
 
           {/* 2) Segmented progress bar */}
@@ -1409,15 +1475,17 @@ export default function OrderTrackingScreen({ route, navigation }) {
           ) : (
             <>
               {/* 4) Delivery Address Card */}
-              <View style={st.deliveryAddressCard}>
-                <View style={st.deliveryAddressRow}>
-                  <Ionicons name="location" size={18} color="#06C168" />
-                  <View style={st.deliveryAddressContent}>
-                    <Text style={st.deliveryAddressLabel}>DELIVERY ADDRESS</Text>
-                    <Text style={st.deliveryAddressText} numberOfLines={2}>{orderData.address || "Your delivery address"}</Text>
+              {!shouldHideDeliveryAddress && (
+                <View style={st.deliveryAddressCard}>
+                  <View style={st.deliveryAddressRow}>
+                    <Ionicons name="location" size={18} color="#06C168" />
+                    <View style={st.deliveryAddressContent}>
+                      <Text style={st.deliveryAddressLabel}>DELIVERY ADDRESS</Text>
+                      <Text style={st.deliveryAddressText} numberOfLines={2}>{orderData.address || "Your delivery address"}</Text>
+                    </View>
                   </View>
                 </View>
-              </View>
+              )}
 
               {/* 5) Order Summary Card */}
               <OrderSummaryCard
@@ -1489,39 +1557,12 @@ const st = StyleSheet.create({
     fontSize: 32,
   },
 
-  /* ── status icon bubble (white circle + SVG + pulse rings) ── */
+  /* ── status icon area (icon only, no circle shell) ── */
   statusBubbleWrap: {
     alignItems: "center",
     justifyContent: "center",
-    width: 140,
-    height: 140,
-  },
-  statusIconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#fff",
-    justifyContent: "center",
-    alignItems: "center",
-    elevation: 8,
-    shadowColor: "rgba(34,197,94,0.4)",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 1,
-    shadowRadius: 20,
-    zIndex: 1,
-  },
-  statusIconCircleSuccess: {
-    backgroundColor: "#06C168",
-    borderWidth: 0,
-  },
-  successRing: {
-    position: "absolute",
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 3,
-    borderColor: "#06C168",
-    opacity: 0.5,
+    width: 72,
+    height: 72,
   },
 
   /* ── back button (light bg for light hero) ── */
@@ -1603,8 +1644,14 @@ const st = StyleSheet.create({
   statusEtaTxt: {
     fontSize: 13,
     color: "#6B7280",
-    marginBottom: 16,
+    marginBottom: 6,
     fontWeight: "400",
+  },
+  statusNextTxt: {
+    fontSize: 13,
+    color: "#4B5563",
+    marginBottom: 16,
+    fontWeight: "500",
   },
 
   /* ── 2) progress bar (6 segments + labels) ── */

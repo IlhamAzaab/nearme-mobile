@@ -30,8 +30,10 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../../app/providers/AuthProvider";
 import FreeMapView from "../../components/maps/FreeMapView";
 import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -91,6 +93,7 @@ const fetchOSRMRoute = async (fromLat, fromLng, toLat, toLng) => {
 // ============================================================================
 
 export default function DriverMapScreen({ route, navigation }) {
+  const { logout } = useAuth();
   const params = route.params || {};
   const deliveryId = params.deliveryId;
   const initialMode = params.mode || "pickup";
@@ -217,9 +220,9 @@ export default function DriverMapScreen({ route, navigation }) {
     isFetchingRef.current = true;
 
     try {
-      var token = await AsyncStorage.getItem("token");
+      var token = await getAccessToken();
       if (!token) {
-        navigation.replace("Login");
+        await logout();
         return;
       }
 
@@ -515,7 +518,7 @@ export default function DriverMapScreen({ route, navigation }) {
     if (now - lastBackendUpdateRef.current < 5000) return;
     lastBackendUpdateRef.current = now;
     try {
-      var token = await AsyncStorage.getItem("token");
+      var token = await getAccessToken();
       if (!token || !deliveryId) return;
       await fetch(
         API_BASE_URL + "/driver/deliveries/" + deliveryId + "/location",
@@ -544,7 +547,7 @@ export default function DriverMapScreen({ route, navigation }) {
     if (!currentTarget || updating) return;
     setUpdating(true);
     try {
-      var token = await AsyncStorage.getItem("token");
+      var token = await getAccessToken();
       var res = await fetch(
         API_BASE_URL +
           "/driver/deliveries/" +
@@ -594,7 +597,7 @@ export default function DriverMapScreen({ route, navigation }) {
     if (!currentTarget || updating) return;
     setUpdating(true);
     try {
-      var token = await AsyncStorage.getItem("token");
+      var token = await getAccessToken();
       var statusUrl =
         API_BASE_URL +
         "/driver/deliveries/" +

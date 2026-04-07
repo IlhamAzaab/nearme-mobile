@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
 import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 
 /* ── Distance & delivery fee helpers ── */
 async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
@@ -116,7 +117,7 @@ export default function CartScreen({ navigation, route }) {
       if (showLoading) setLoading(true);
       setError("");
 
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const role = await AsyncStorage.getItem("role");
 
       if (!token || token === "null" || token === "undefined") {
@@ -186,7 +187,7 @@ export default function CartScreen({ navigation, route }) {
 
   const syncQuantityToServer = useCallback(async (itemId, qty) => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const res = await fetch(`${API_BASE_URL}/cart/item/${itemId}`, {
         method: "PUT",
         headers: {
@@ -288,7 +289,7 @@ export default function CartScreen({ navigation, route }) {
           );
 
           try {
-            const token = await AsyncStorage.getItem("token");
+            const token = await getAccessToken();
             const res = await fetch(`${API_BASE_URL}/cart/item/${itemId}`, {
               method: "DELETE",
               headers: { Authorization: `Bearer ${token}` },
@@ -319,7 +320,7 @@ export default function CartScreen({ navigation, route }) {
           setSelectedCartId((prev) => (prev === cartId ? null : prev));
 
           try {
-            const token = await AsyncStorage.getItem("token");
+            const token = await getAccessToken();
             const res = await fetch(`${API_BASE_URL}/cart/${cartId}`, {
               method: "DELETE",
               headers: { Authorization: `Bearer ${token}` },
@@ -759,6 +760,7 @@ export default function CartScreen({ navigation, route }) {
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
             const count = item?.item_count || item?.items?.length || 0;
+            const cartTotal = Number(item?.cart_total) || 0;
             return (
               <View style={styles.restaurantCard}>
                 <View style={styles.restaurantCardRow}>
@@ -778,49 +780,47 @@ export default function CartScreen({ navigation, route }) {
 
                   {/* Info */}
                   <View style={styles.restaurantCardInfo}>
-                    <Text style={styles.restaurantCardName} numberOfLines={1}>
-                      {item?.restaurant?.restaurant_name}
-                    </Text>
-                    <View style={styles.locationRow}>
+                    <View style={styles.restaurantNameRow}>
+                      <Text style={styles.restaurantCardName} numberOfLines={1}>
+                        {item?.restaurant?.restaurant_name}
+                      </Text>
                       <Ionicons
-                        name="location-sharp"
-                        size={12}
-                        color="#94A3B8"
+                        name="checkmark-circle"
+                        size={18}
+                        color={PRIMARY}
+                        style={styles.activeDot}
                       />
+                    </View>
+                    <View style={styles.locationRow}>
                       <Text style={styles.restaurantCardCity}>
                         {item?.restaurant?.city || "Location"}
                       </Text>
                     </View>
                     <Text style={styles.restaurantCardMeta}>
-                      {count} item{count !== 1 ? "s" : ""} in basket
+                      {count} item{count !== 1 ? "s" : ""} • {formatPrice(cartTotal)}
                     </Text>
                   </View>
+                </View>
 
-                  {/* View Button */}
+                <View style={styles.restaurantActions}>
                   <Pressable
                     onPress={() => setSelectedCartId(item.id)}
                     style={({ pressed }) => [
-                      styles.viewBtn,
-                      pressed && { backgroundColor: PRIMARY },
+                      styles.viewItemsBtn,
+                      pressed && { opacity: 0.9 },
                     ]}
                   >
-                    {({ pressed }) => (
-                      <>
-                        <Text
-                          style={[
-                            styles.viewBtnText,
-                            pressed && { color: "#fff" },
-                          ]}
-                        >
-                          View
-                        </Text>
-                        <Ionicons
-                          name="chevron-forward"
-                          size={14}
-                          color={pressed ? "#fff" : PRIMARY}
-                        />
-                      </>
-                    )}
+                    <Text style={styles.viewItemsText}>View items</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => removeCart(item.id)}
+                    style={({ pressed }) => [
+                      styles.clearOutlineBtn,
+                      pressed && { backgroundColor: "rgba(16,185,129,0.08)" },
+                    ]}
+                  >
+                    <Text style={styles.clearOutlineText}>Clear</Text>
                   </Pressable>
                 </View>
               </View>
@@ -998,6 +998,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   restaurantCardRow: { flexDirection: "row", alignItems: "center" },
+  restaurantNameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   restaurantAvatar: {
     width: 56,
     height: 56,
@@ -1015,6 +1016,7 @@ const styles = StyleSheet.create({
   restaurantAvatarText: { color: "#fff", fontSize: 20, fontWeight: "800" },
   restaurantCardInfo: { flex: 1, marginLeft: 12 },
   restaurantCardName: { fontSize: 15, fontWeight: "700", color: TEXT_DARK },
+  activeDot: { marginTop: 1 },
   locationRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1027,6 +1029,46 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: PRIMARY,
     marginTop: 3,
+  },
+  restaurantActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 14,
+  },
+  viewItemsBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: 999,
+    backgroundColor: PRIMARY,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  viewItemsText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  clearOutlineBtn: {
+    minWidth: 92,
+    height: 52,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: PRIMARY,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    backgroundColor: "#fff",
+  },
+  clearOutlineText: {
+    color: PRIMARY,
+    fontSize: 16,
+    fontWeight: "600",
   },
   viewBtn: {
     flexDirection: "row",

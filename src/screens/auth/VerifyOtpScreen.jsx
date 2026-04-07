@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
-  Easing,
+  Dimensions,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,48 +13,70 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SvgXml } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
+import MeezoLogo from "../../components/common/MeezoLogo";
 import { useAuth } from "../../app/providers/AuthProvider";
-import { API_BASE_URL } from "../../constants/api";
+import supabase from "../../lib/supabaseClient";
 import pushNotificationService from "../../services/pushNotificationService";
+import { persistAuthSession } from "../../lib/authStorage";
+import { normalizeSriLankaPhone } from "../../utils/phone";
 
-// Inline the Meezo logo SVG XML (React Native can't import .svg directly without transformer)
-const MEEZO_LOGO_XML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080">
-  <defs><style>.cls-1{stroke-width:0px}</style></defs>
-  <path class="cls-1" d="m479.93,533.8c-5.66-4.11-12.91-3.11-15.85,2.16l-38.59,71.65c-8.87,16.46-26.12,26.28-46.17,26.28h-50.83c-4.86,0-8.58-5.46-6.43-9.46l52.16-96.82c14.72-27.34,52.16-32.66,81.25-11.56l12.97,9.42.93.67,10.55,7.66Z"/>
-  <path class="cls-1" d="m655.69,458.51l-29.01,56.61c-2.48,4.83-6.43,8.64-11.39,10.98-38.62,18.22-71.81,33.83-83.77,39.46-2.91,1.37-6.62.87-9.6-1.3l-18.42-13.37-21.13-15.32,65.6-30.91,104.6-49.29c1.81-.85,4.02,1.36,3.11,3.13Z"/>
-  <path class="cls-1" d="m547.98,504.67l-65.6,30.91-2.45-1.78-10.55-7.66-.93-.67-12.97-9.42c-29.09-21.1-66.53-15.78-81.25,11.56l27.3-50.7,3.78-7.02c14.36-26.65,50.87-31.84,79.22-11.27l15.25,11.07c12.16,8.83,24.33,17.65,36.49,26.48,3.9,2.83,7.81,5.66,11.71,8.5Z"/>
-  <path class="cls-1" d="m748.9,446.61c7.02,0,11.87,7.68,8.64,13.68l-35.51,65.94-5.29,9.82-38.59,71.65c-8.88,16.46-26.12,26.28-46.18,26.28h-50.83c-4.86,0-8.57-5.46-6.43-9.46l52.16-96.82,36.19-67.18c4.65-8.64,13.67-13.91,23.78-13.91h62.04Z"/>
-</svg>`;
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const IS_WEB = Platform.OS === "web";
+const WEB_CARD_MAX_WIDTH = 560;
+
+function maskPhone(phone) {
+  if (!phone) return "";
+  return `${phone.slice(0, 5)}*****${phone.slice(-2)}`;
+}
 
 export default function VerifyOtpScreen({ navigation, route }) {
-  const { refreshAuthState, applyAuthSession } = useAuth();
-  const { userId, phone } = route.params || {};
+  const { refreshAuthState } = useAuth();
+  const { userId, phone, prefillPhone, accessToken, nextScreen } =
+    route.params || {};
+  const normalizedPhone = normalizeSriLankaPhone(phone || prefillPhone || "");
 
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [otpDigits, setOtpDigits] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
   const [resending, setResending] = useState(false);
-  const [verified, setVerified] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
 
-  const normalizeAuthPayload = (payload = {}) => {
-    const root = payload && typeof payload === "object" ? payload : {};
-    const nestedData =
-      root?.data && typeof root.data === "object" ? root.data : null;
-    const nestedSession =
-      root?.session && typeof root.session === "object" ? root.session : null;
-    return nestedSession || nestedData || root;
+  const shakeX = useRef(new Animated.Value(0)).current;
+  const otpInputRefs = useRef([]);
+
+  const triggerShake = () => {
+    shakeX.setValue(0);
+    Animated.sequence([
+      Animated.timing(shakeX, {
+        toValue: -10,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 10,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: -8,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 8,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shakeX, {
+        toValue: 0,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+    ]).start();
   };
 
-  const inputRefs = useRef([]);
-
-  // Animated values for success overlay
-  const logoScale = useRef(new Animated.Value(0)).current;
-  const checkScale = useRef(new Animated.Value(0)).current;
-  const textOpacity = useRef(new Animated.Value(0)).current;
-
-  // Countdown timer for resend
   useEffect(() => {
     if (resendTimer <= 0) return;
     const interval = setInterval(() => {
@@ -63,73 +85,68 @@ export default function VerifyOtpScreen({ navigation, route }) {
     return () => clearInterval(interval);
   }, [resendTimer]);
 
-  // Auto-focus first input
   useEffect(() => {
-    setTimeout(() => inputRefs.current[0]?.focus(), 300);
-  }, []);
-
-  // Redirect if no userId
-  useEffect(() => {
-    if (!userId) {
-      navigation.navigate("Login");
+    if (!normalizedPhone) {
+      navigation.navigate("Signup");
     }
-  }, [userId, navigation]);
+  }, [navigation, normalizedPhone]);
 
-  // Success animation
-  useEffect(() => {
-    if (verified) {
-      Animated.stagger(200, [
-        Animated.spring(logoScale, {
-          toValue: 1,
-          friction: 4,
-          tension: 60,
-          useNativeDriver: true,
-        }),
-        Animated.spring(checkScale, {
-          toValue: 1,
-          friction: 4,
-          tension: 60,
-          useNativeDriver: true,
-        }),
-        Animated.timing(textOpacity, {
-          toValue: 1,
-          duration: 400,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]).start();
+  const handleOtpDigitChange = (index, value) => {
+    const onlyDigits = String(value || "").replace(/\D/g, "");
 
-      // Navigate home after animation
-      const timer = setTimeout(async () => {
-        await refreshAuthState();
-      }, 3000);
-      return () => clearTimeout(timer);
+    if (!onlyDigits) {
+      setOtpDigits((prev) => {
+        const next = [...prev];
+        next[index] = "";
+        return next;
+      });
+      setError("");
+      return;
     }
-  }, [verified]);
 
-  const handleChange = (index, value) => {
-    if (!/^\d*$/.test(value)) return;
+    if (onlyDigits.length > 1) {
+      const next = [...otpDigits];
+      for (let i = index; i < 6; i += 1) {
+        next[i] = onlyDigits[i - index] || "";
+      }
+      setOtpDigits(next);
+      setError("");
 
-    const newOtp = [...otp];
-    newOtp[index] = value.slice(-1);
-    setOtp(newOtp);
+      const nextIndex = Math.min(index + onlyDigits.length, 5);
+      otpInputRefs.current[nextIndex]?.focus?.();
+      return;
+    }
+
+    setOtpDigits((prev) => {
+      const next = [...prev];
+      next[index] = onlyDigits;
+      return next;
+    });
     setError("");
 
-    if (value && index < 5) {
-      inputRefs.current[index + 1]?.focus();
+    if (index < 5) {
+      otpInputRefs.current[index + 1]?.focus?.();
     }
   };
 
-  const handleKeyPress = (index, e) => {
-    if (e.nativeEvent.key === "Backspace" && !otp[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
-    }
+  const handleOtpKeyPress = (index, key) => {
+    if (key !== "Backspace") return;
+    if (otpDigits[index]) return;
+    if (index === 0) return;
+
+    setOtpDigits((prev) => {
+      const next = [...prev];
+      next[index - 1] = "";
+      return next;
+    });
+    otpInputRefs.current[index - 1]?.focus?.();
   };
 
   const handleVerify = async () => {
-    const otpString = otp.join("");
-    if (otpString.length !== 6) {
-      setError("Please enter the full 6-digit code");
+    const otpCode = otpDigits.join("").trim();
+    if (!/^\d{6}$/.test(otpCode)) {
+      setError("Enter the 6-digit OTP");
+      triggerShake();
       return;
     }
 
@@ -137,300 +154,357 @@ export default function VerifyOtpScreen({ navigation, route }) {
     setError("");
 
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-client-platform": "react-native",
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
+        phone: normalizedPhone,
+        token: otpCode,
+        type: "sms",
+      });
+
+      if (verifyError) {
+        setError(verifyError?.message || "OTP verification failed");
+        triggerShake();
+        setLoading(false);
+        return;
+      }
+
+      const resolvedToken = data?.session?.access_token || accessToken;
+      const authUser = data?.user || null;
+      const role = authUser?.user_metadata?.role || "customer";
+      const profileCompleted = Boolean(authUser?.user_metadata?.profile_completed);
+      const resolvedUserId = authUser?.id || userId || null;
+      const userName =
+        authUser?.user_metadata?.username || authUser?.user_metadata?.name || null;
+
+      if (!resolvedToken || !resolvedUserId) {
+        setError("Verification succeeded, but session is incomplete.");
+        setLoading(false);
+        return;
+      }
+
+      await persistAuthSession(
+        {
+          token: resolvedToken,
+          role,
+          userId: resolvedUserId,
+          userName,
         },
-        body: JSON.stringify({ userId, otp: otpString }),
-      });
+        {
+          userEmail: authUser?.email || null,
+          profileCompleted,
+        },
+      );
 
-      const data = await res.json().catch(() => ({}));
-      const session = normalizeAuthPayload(data);
-
-      if (!res.ok) {
-        setError(data.message || "Verification failed");
-        setLoading(false);
-        return;
-      }
-
-      const sessionApplied = await applyAuthSession(data, {
-        profileCompleted: true,
-      });
-
-      if (!sessionApplied?.ok) {
-        setError("Signed in, but redirect failed. Please login again.");
-        setLoading(false);
-        return;
-      }
-
-      // Initialize push notifications
-      const persistedToken = sessionApplied?.accessToken || null;
-      const authToken =
-        persistedToken ||
-        session?.token ||
-        session?.access_token ||
-        session?.accessToken ||
-        session?.authToken ||
-        null;
-      if (authToken) {
-        pushNotificationService.initialize(authToken).catch((err) => {
+      if (resolvedToken) {
+        pushNotificationService.initialize(resolvedToken).catch((err) => {
           console.warn("Push notification init error:", err);
         });
-      } else {
-        console.error(
-          "[AuthDebug] OTP verified but token missing in response",
-          {
-            payloadKeys:
-              data && typeof data === "object" ? Object.keys(data) : [],
-          },
-        );
       }
 
+      const shouldRouteToProfile =
+        role === "customer" ? !profileCompleted : nextScreen === "CompleteProfile";
+
       setLoading(false);
-      setVerified(true);
+      setIsTransitioning(true);
+
+      setTimeout(async () => {
+        if (shouldRouteToProfile) {
+          navigation.replace("CompleteProfile", {
+            userId: resolvedUserId,
+            accessToken: resolvedToken,
+            prefillPhone: normalizedPhone,
+          });
+          return;
+        }
+
+        await refreshAuthState();
+      }, 1200);
     } catch (err) {
       console.error("OTP verify error:", err);
       setError("Network error. Please try again.");
+      triggerShake();
       setLoading(false);
     }
   };
 
   const handleResend = async () => {
     if (resendTimer > 0 || resending) return;
-
     setResending(true);
     setError("");
 
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/send-otp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, phone }),
+      const { error: resendError } = await supabase.auth.signInWithOtp({
+        phone: normalizedPhone,
+        options: {
+          channel: "sms",
+        },
       });
 
-      const data = await res.json().catch(() => ({}));
-
-      if (res.ok) {
-        setResendTimer(60);
-        setOtp(["", "", "", "", "", ""]);
-        inputRefs.current[0]?.focus();
+      if (resendError) {
+        setError(resendError?.message || "Failed to resend OTP");
+        triggerShake();
       } else {
-        setError(data.message || "Failed to resend OTP");
+        setResendTimer(60);
+        setOtpDigits(["", "", "", "", "", ""]);
+        otpInputRefs.current[0]?.focus?.();
       }
     } catch {
       setError("Network error. Please try again.");
+      triggerShake();
     } finally {
       setResending(false);
     }
   };
 
-  // Mask phone for display
-  const maskedPhone = phone
-    ? phone.slice(0, 3) + "****" + phone.slice(-3)
-    : "your WhatsApp";
-
-  // Success Overlay
-  if (verified) {
-    return (
-      <LinearGradient
-        colors={["#f0fdf4", "#ffffff", "#ecfdf5"]}
-        style={styles.successOverlay}
-      >
-        <View style={styles.successContent}>
-          {/* Meezo Logo */}
-          <Animated.View
-            style={[
-              styles.logoContainer,
-              { transform: [{ scale: logoScale }] },
-            ]}
-          >
-            <SvgXml xml={MEEZO_LOGO_XML} width={80} height={80} />
-          </Animated.View>
-
-          {/* Green Checkmark */}
-          <Animated.View
-            style={[styles.checkCircle, { transform: [{ scale: checkScale }] }]}
-          >
-            <Text style={styles.checkMark}>✓</Text>
-          </Animated.View>
-
-          {/* Text */}
-          <Animated.View style={{ opacity: textOpacity, alignItems: "center" }}>
-            <Text style={styles.verifiedTitle}>Verified!</Text>
-            <Text style={styles.verifiedSubtitle}>
-              Your phone has been verified successfully
-            </Text>
-          </Animated.View>
-        </View>
-      </LinearGradient>
-    );
-  }
-
   return (
-    <LinearGradient
-      colors={["#123321", "#1db95b", "#0a1f14"]}
-      style={styles.container}
-    >
+    <View style={styles.pageContainer}>
       <KeyboardAvoidingView
-        style={styles.container}
+        style={styles.pageContainer}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
+        {isTransitioning && (
+          <View style={styles.transitionOverlay}>
+            <View style={styles.successCircle}>
+              <Text style={styles.successTick}>✓</Text>
+            </View>
+            <Text style={styles.successTitle}>OTP Verified!</Text>
+            <Text style={styles.successSub}>Redirecting...</Text>
+          </View>
+        )}
+
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            IS_WEB && styles.scrollContentWeb,
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           bounces={false}
         >
-          <View style={styles.content}>
-            {/* Header */}
-            <View style={styles.headerWrap}>
-              <View style={styles.headerCircle}>
-                <Text style={styles.headerIcon}>📱</Text>
+          <Animated.View
+            style={[
+              styles.loginShell,
+              IS_WEB && styles.loginShellWeb,
+              { transform: [{ translateX: shakeX }] },
+            ]}
+          >
+            <LinearGradient
+              colors={["#04753E", "#059B52", "#06C168"]}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={[styles.greenSection, IS_WEB && styles.greenSectionWeb]}
+            >
+              <View style={styles.bgCircle1} />
+              <View style={styles.bgCircle2} />
+              <View style={styles.logoWrap}>
+                <MeezoLogo size={IS_WEB ? 350 : 280} />
               </View>
-              <Text style={styles.appTitle}>Verify Your Phone</Text>
-              <Text style={styles.appSubtitle}>
-                Enter the 6-digit code sent to {maskedPhone}
-              </Text>
-            </View>
+              <Text style={styles.appSubtitle}>Secure OTP verification</Text>
+            </LinearGradient>
 
-            {/* Card */}
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>WhatsApp OTP 💬</Text>
-              <Text style={styles.cardSub}>
-                We sent a verification code via WhatsApp
-              </Text>
-
-              {/* Error */}
-              {!!error && (
-                <View style={styles.errorBox}>
-                  <Text style={styles.errorText}>{error}</Text>
-                </View>
-              )}
-
-              {/* OTP Inputs */}
-              <View style={styles.otpRow}>
-                {otp.map((digit, index) => (
-                  <TextInput
-                    key={index}
-                    ref={(ref) => (inputRefs.current[index] = ref)}
-                    value={digit}
-                    onChangeText={(v) => handleChange(index, v)}
-                    onKeyPress={(e) => handleKeyPress(index, e)}
-                    keyboardType="number-pad"
-                    maxLength={1}
-                    style={[
-                      styles.otpInput,
-                      digit ? styles.otpInputFilled : null,
-                    ]}
-                    selectionColor="#1db95b"
-                  />
-                ))}
-              </View>
-
-              {/* Verify Button */}
-              <Pressable
-                onPress={handleVerify}
-                disabled={loading}
-                style={({ pressed }) => [
-                  styles.primaryBtn,
-                  { marginTop: 18 },
-                  (pressed || loading) && styles.pressed,
-                  loading && { opacity: 0.75 },
-                ]}
+            <View style={styles.waveContainer}>
+              <Svg
+                width={SCREEN_WIDTH}
+                height={46}
+                viewBox={`0 0 ${SCREEN_WIDTH} 46`}
+                style={styles.waveSvg}
               >
-                {loading ? (
-                  <View style={styles.loadingRow}>
-                    <ActivityIndicator color="#fff" />
-                    <Text style={styles.primaryBtnText}>Verifying...</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.primaryBtnText}>Verify OTP</Text>
-                )}
-              </Pressable>
+                <Path
+                  d={`M0,0 L0,20 Q${SCREEN_WIDTH * 0.25},46 ${SCREEN_WIDTH * 0.5},20 Q${SCREEN_WIDTH * 0.75},-2 ${SCREEN_WIDTH},20 L${SCREEN_WIDTH},0 Z`}
+                  fill="#06C168"
+                />
+              </Svg>
+            </View>
 
-              {/* Resend */}
-              <View style={styles.resendWrap}>
-                {resendTimer > 0 ? (
-                  <Text style={styles.resendTimer}>
-                    Resend code in {resendTimer}s
-                  </Text>
-                ) : (
-                  <Pressable onPress={handleResend} disabled={resending}>
-                    <Text style={styles.resendLink}>
-                      {resending ? "Sending..." : "Resend Code"}
-                    </Text>
-                  </Pressable>
+            <View style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}>
+              <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
+                <Text style={styles.cardTitle}>Verify OTP</Text>
+                <Text style={styles.cardSub}>
+                  Enter 6-digit OTP sent to {maskPhone(normalizedPhone)}
+                </Text>
+
+                {!!error && (
+                  <View style={styles.errorBox}>
+                    <Text style={styles.errorText}>{error}</Text>
+                  </View>
                 )}
+
+                <View style={styles.otpRow}>
+                  {otpDigits.map((digit, index) => (
+                    <View
+                      key={`otp-${index}`}
+                      style={[
+                        styles.otpDigitWrap,
+                        digit ? styles.otpDigitWrapFilled : null,
+                      ]}
+                    >
+                      <TextInput
+                        ref={(ref) => {
+                          otpInputRefs.current[index] = ref;
+                        }}
+                        value={digit}
+                        onChangeText={(v) => handleOtpDigitChange(index, v)}
+                        onKeyPress={({ nativeEvent }) =>
+                          handleOtpKeyPress(index, nativeEvent?.key)
+                        }
+                        keyboardType="number-pad"
+                        textContentType={index === 0 ? "oneTimeCode" : "none"}
+                        maxLength={6}
+                        style={styles.otpDigitInput}
+                      />
+                    </View>
+                  ))}
+                </View>
+
+                <Pressable
+                  onPress={handleVerify}
+                  disabled={loading}
+                  style={({ pressed }) => [
+                    styles.loginBtn,
+                    (pressed || loading) && {
+                      opacity: 0.88,
+                      transform: [{ scale: 0.985 }],
+                    },
+                  ]}
+                >
+                  <LinearGradient
+                    colors={["#06C168", "#059B52", "#04753E"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.loginBtnGradient}
+                  >
+                    {loading ? (
+                      <View style={styles.loadingRow}>
+                        <ActivityIndicator color="#fff" />
+                        <Text style={styles.loginBtnText}>Verifying...</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.loginBtnText}>Verify OTP</Text>
+                    )}
+                  </LinearGradient>
+                </Pressable>
+
+                <View style={styles.footerRow}>
+                  {resendTimer > 0 ? (
+                    <Text style={styles.footerText}>Resend OTP in {resendTimer}s</Text>
+                  ) : (
+                    <Pressable onPress={handleResend} disabled={resending}>
+                      <Text style={styles.footerLink}>
+                        {resending ? "Resending..." : "Resend OTP"}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
               </View>
             </View>
-          </View>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scrollContent: { flexGrow: 1 },
-  content: {
+  pageContainer: {
     flex: 1,
-    paddingHorizontal: 18,
-    justifyContent: "center",
-    gap: 16,
+    backgroundColor: "#EEF4EF",
   },
-
-  headerWrap: { alignItems: "center", marginBottom: 10 },
-  headerCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.95)",
+  scrollContent: { flexGrow: 1 },
+  scrollContentWeb: {
+    justifyContent: "center",
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+  },
+  loginShell: {
+    width: "100%",
+    flex: 1,
+  },
+  loginShellWeb: {
+    width: "100%",
+    maxWidth: WEB_CARD_MAX_WIDTH,
+    alignSelf: "center",
+    borderRadius: 28,
+    overflow: "hidden",
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#0B3B1E",
+    shadowOpacity: 0.16,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 10,
+  },
+  greenSection: {
+    paddingTop: Platform.OS === "ios" ? 60 : 48,
+    paddingBottom: 12,
     alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.22,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
-    marginBottom: 10,
+    overflow: "hidden",
   },
-  headerIcon: { fontSize: 34 },
-  appTitle: { color: "#fff", fontSize: 24, fontWeight: "900" },
+  greenSectionWeb: {
+    paddingTop: 34,
+    paddingBottom: 8,
+  },
+  bgCircle1: {
+    position: "absolute",
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    top: -40,
+    right: -60,
+  },
+  bgCircle2: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    bottom: 10,
+    left: -50,
+  },
+  logoWrap: {
+    alignItems: "center",
+  },
   appSubtitle: {
     color: "rgba(255,255,255,0.85)",
-    marginTop: 4,
-    fontSize: 13,
-    textAlign: "center",
-    paddingHorizontal: 20,
+    marginTop: -6,
+    fontSize: 15,
+    fontWeight: "500",
+    letterSpacing: 0.5,
   },
-
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 24,
-    padding: 18,
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 6,
+  waveContainer: {
+    marginTop: -2,
+    backgroundColor: "#FFFFFF",
+  },
+  waveSvg: { display: "flex" },
+  whiteSection: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+  },
+  whiteSectionWeb: {
+    paddingHorizontal: 30,
+    paddingBottom: 30,
+  },
+  formWrap: { paddingTop: 8 },
+  formWrapWeb: {
+    width: "100%",
+    maxWidth: 440,
+    alignSelf: "center",
   },
   cardTitle: {
-    fontSize: 20,
-    fontWeight: "900",
+    fontSize: 26,
+    fontWeight: "800",
     color: "#111827",
     textAlign: "center",
+    letterSpacing: -0.3,
   },
   cardSub: {
-    fontSize: 13,
+    fontSize: 14,
     color: "#6B7280",
     textAlign: "center",
-    marginTop: 6,
-    marginBottom: 14,
+    marginTop: 8,
+    marginBottom: 18,
+    fontWeight: "400",
   },
-
   errorBox: {
     backgroundColor: "#FEF2F2",
     borderColor: "#FECACA",
@@ -441,107 +515,92 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   errorText: { color: "#DC2626", fontWeight: "700", fontSize: 13 },
-
   otpRow: {
+    marginTop: 6,
     flexDirection: "row",
-    justifyContent: "center",
-    gap: 10,
-    marginVertical: 8,
+    justifyContent: "space-between",
+    gap: 8,
   },
-  otpInput: {
+  otpDigitWrap: {
     width: 48,
     height: 56,
     borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "#E5E7EB",
-    backgroundColor: "#F9FAFB",
-    fontSize: 24,
-    fontWeight: "900",
+    borderWidth: 1.5,
+    borderColor: "#E8ECF0",
+    backgroundColor: "#F7F8FA",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  otpDigitWrapFilled: {
+    borderColor: "#06C168",
+    backgroundColor: "#F1FCF5",
+  },
+  otpDigitInput: {
+    width: "100%",
+    height: "100%",
     textAlign: "center",
     color: "#111827",
+    fontSize: 22,
+    fontWeight: "700",
   },
-  otpInputFilled: {
-    borderColor: "#1db95b",
-    backgroundColor: "#f0fdf4",
-  },
-
-  primaryBtn: {
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: "#1db95b",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#1db95b",
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 4,
-  },
-  primaryBtnText: { color: "#fff", fontWeight: "900", fontSize: 16 },
-  loadingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-
-  resendWrap: { alignItems: "center", marginTop: 16 },
-  resendTimer: { color: "#9CA3AF", fontSize: 13 },
-  resendLink: {
-    color: "#1db95b",
-    fontWeight: "800",
-    fontSize: 14,
-    textDecorationLine: "underline",
-  },
-
-  pressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
-
-  // Success overlay
-  successOverlay: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  successContent: {
-    alignItems: "center",
-    gap: 20,
-  },
-  logoContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#22c55e",
+  loginBtn: {
+    marginTop: 24,
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#06C168",
     shadowOpacity: 0.3,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 8,
-  },
-  checkCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "#22c55e",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#22c55e",
-    shadowOpacity: 0.4,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
     elevation: 6,
   },
-  checkMark: {
-    color: "#fff",
-    fontSize: 32,
-    fontWeight: "900",
+  loginBtnGradient: {
+    height: 56,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  verifiedTitle: {
-    fontSize: 32,
-    fontWeight: "900",
-    color: "#111827",
-    marginTop: 8,
+  loginBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 17,
+    letterSpacing: 0.5,
   },
-  verifiedSubtitle: {
-    fontSize: 15,
+  loadingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  footerRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 24,
+    alignItems: "center",
+  },
+  footerText: {
     color: "#6B7280",
-    marginTop: 4,
-    textAlign: "center",
+    fontSize: 14,
+    fontWeight: "400",
   },
+  footerLink: {
+    color: "#06C168",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  transitionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+    padding: 24,
+  },
+  successCircle: {
+    width: 110,
+    height: 110,
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  successTick: { fontSize: 56, color: "#fff", fontWeight: "900" },
+  successTitle: { color: "#fff", fontSize: 28, fontWeight: "900" },
+  successSub: { color: "rgba(255,255,255,0.85)", marginTop: 6 },
 });

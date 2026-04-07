@@ -1,7 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { StyleSheet, Text, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useEffect, useState } from "react";
+import { DeviceEventEmitter, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import CartScreen from "../screens/customer/CartScreen";
@@ -16,6 +19,8 @@ import AddressPickerScreen from "../screens/customer/AddressPickerScreen";
 import FavouritesScreen from "../screens/customer/FavouritesScreen";
 import RestaurantFoodsScreen from "../screens/customer/RestaurantFoodsScreen";
 import WebViewScreen from "../screens/common/WebViewScreen";
+import { API_BASE_URL } from "../constants/api";
+import { getAccessToken } from "../lib/authStorage";
 
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
@@ -96,15 +101,22 @@ function ProfileStackScreen() {
   );
 }
 
-function TabIcon({ label, iconName, focused }) {
+function TabIcon({ label, iconName, focused, badge = 0 }) {
   return (
     <View style={styles.tabIconContainer}>
-      <Ionicons
-        name={iconName}
-        size={24}
-        color={focused ? "#06C168" : "#9ca3af"}
-        style={styles.tabIcon}
-      />
+      <View style={styles.tabIconWrap}>
+        <Ionicons
+          name={iconName}
+          size={24}
+          color={focused ? "#06C168" : "#9ca3af"}
+          style={styles.tabIcon}
+        />
+        {badge > 0 ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{badge > 99 ? "99+" : badge}</Text>
+          </View>
+        ) : null}
+      </View>
       <Text style={[styles.tabLabel, focused && styles.tabLabelFocused]}>
         {label}
       </Text>
@@ -114,6 +126,55 @@ function TabIcon({ label, iconName, focused }) {
 
 export default function CustomerTabs() {
   const insets = useSafeAreaInsets();
+  const [cartCount, setCartCount] = useState(0);
+
+  const fetchCartCount = useCallback(async () => {
+    try {
+      const [token, role] = await Promise.all([
+        getAccessToken(),
+        AsyncStorage.getItem("role"),
+      ]);
+
+      if (!token || role !== "customer") {
+        setCartCount(0);
+        return;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/cart`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCartCount(0);
+        return;
+      }
+
+      const total = (data.carts || []).reduce(
+        (sum, cart) =>
+          sum +
+          (cart.items || []).reduce((s, item) => s + (item.quantity || 0), 0),
+        0,
+      );
+      setCartCount(total);
+    } catch {
+      // Keep existing badge if request fails.
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchCartCount();
+    }, [fetchCartCount]),
+  );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener("cart:changed", () => {
+      fetchCartCount();
+    });
+
+    return () => subscription.remove();
+  }, [fetchCartCount]);
 
   return (
     <Tab.Navigator
@@ -138,7 +199,7 @@ export default function CustomerTabs() {
           tabBarIcon: ({ focused }) => (
             <TabIcon
               label="Home"
-              iconName={focused ? "home" : "home-outline"}
+              iconName="home-outline"
               focused={focused}
             />
           ),
@@ -151,7 +212,7 @@ export default function CustomerTabs() {
           tabBarIcon: ({ focused }) => (
             <TabIcon
               label="Orders"
-              iconName={focused ? "receipt" : "receipt-outline"}
+              iconName="receipt-outline"
               focused={focused}
             />
           ),
@@ -171,8 +232,9 @@ export default function CustomerTabs() {
           tabBarIcon: ({ focused }) => (
             <TabIcon
               label="Cart"
-              iconName={focused ? "cart" : "cart-outline"}
+              iconName="cart-outline"
               focused={focused}
+              badge={cartCount}
             />
           ),
         }}
@@ -184,7 +246,7 @@ export default function CustomerTabs() {
           tabBarIcon: ({ focused }) => (
             <TabIcon
               label="Profile"
-              iconName={focused ? "person" : "person-outline"}
+              iconName="person-outline"
               focused={focused}
             />
           ),
@@ -213,6 +275,32 @@ const styles = StyleSheet.create({
   },
   tabIcon: {
     marginBottom: 4,
+  },
+  tabIconWrap: {
+    position: "relative",
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badge: {
+    position: "absolute",
+    top: -6,
+    right: -12,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#06C168",
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+  },
+  badgeText: {
+    fontSize: 10,
+    color: "#FFFFFF",
+    fontWeight: "800",
   },
   tabLabel: {
     fontSize: 11,

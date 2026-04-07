@@ -106,13 +106,10 @@ export default function OrderPlacedBackground() {
       {/* Layer 4 — sparkle twinkle stars */}
       <Sparkles />
 
-      {/* Layer 5 — pulse ring */}
-      <PulseRings />
-
-      {/* Layer 6 — dancing MEEZO letters */}
+      {/* Layer 5 — dancing MEEZO letters */}
       <DancingLetters />
 
-      {/* Layer 7 — status icon */}
+      {/* Layer 6 — status icon */}
       <StatusCheckIcon />
     </View>
   );
@@ -470,65 +467,6 @@ const ConfettiDots = React.memo(() => {
   );
 });
 
-/* ─── Pulse rings radiating out from center ─── */
-const PulseRings = React.memo(() => {
-  const ring1 = useRef(new Animated.Value(0)).current;
-  const ring2 = useRef(new Animated.Value(0)).current;
-  const ring3 = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const makeRing = (anim, delay) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(anim, {
-            toValue: 1,
-            duration: 2200,
-            easing: Easing.out(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(anim, {
-            toValue: 0,
-            duration: 0,
-            useNativeDriver: true,
-          }),
-        ]),
-      );
-    makeRing(ring1, 0).start();
-    makeRing(ring2, 730).start();
-    makeRing(ring3, 1460).start();
-  }, []);
-
-  const ringStyle = (anim) => ({
-    position: "absolute",
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 2.5,
-    borderColor: "#fff",
-    transform: [
-      {
-        scale: anim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0.6, 2],
-        }),
-      },
-    ],
-    opacity: anim.interpolate({
-      inputRange: [0, 0.4, 1],
-      outputRange: [0.6, 0.15, 0],
-    }),
-  });
-
-  return (
-    <View style={styles.pulseWrap}>
-      <Animated.View style={ringStyle(ring1)} />
-      <Animated.View style={ringStyle(ring2)} />
-      <Animated.View style={ringStyle(ring3)} />
-    </View>
-  );
-});
-
 /* ─── Central status check icon ─── */
 const StatusCheckIcon = React.memo(() => {
   const pop = useRef(new Animated.Value(0)).current;
@@ -574,7 +512,7 @@ const StatusCheckIcon = React.memo(() => {
   return (
     <Animated.View
       style={[
-        styles.statusCircle,
+        styles.statusIconGlyph,
         { transform: [{ scale }, { rotate: rotateZ }] },
       ]}
     >
@@ -587,7 +525,7 @@ const StatusCheckIcon = React.memo(() => {
         strokeWidth="2.5"
       >
         <Path
-          d="M9 12l2 2 4-4M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          d="M5 13l4 4L19 7"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -674,25 +612,9 @@ const styles = StyleSheet.create({
     top: -10,
   },
 
-  /* ── pulse rings ── */
-  pulseWrap: {
-    position: "absolute",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
   /* ── status check icon ── */
-  statusCircle: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
-    backgroundColor: "#fff",
+  statusIconGlyph: {
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 8,
   },
 });

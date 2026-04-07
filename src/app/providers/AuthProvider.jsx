@@ -1,26 +1,16 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
-import { API_URL } from "../../config/env";
-import {
-  clearAuthSession,
-  getAccessToken,
-  persistAuthSession,
-} from "../../lib/authStorage";
-import orderTrackingService from "../../services/orderTrackingService";
-import pushNotificationService from "../../services/pushNotificationService";
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '../../config/env';
+import orderTrackingService from '../../services/orderTrackingService';
+import pushNotificationService from '../../services/pushNotificationService';
+import { clearAuthSession, getAccessToken } from '../../lib/authStorage';
 
 const AuthContext = createContext(null);
 
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 }
@@ -31,68 +21,13 @@ export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
   const [profileCompleted, setProfileCompleted] = useState(false);
-
+  
   // Admin-specific state
   const [adminStatus, setAdminStatus] = useState(null); // 'pending', 'active', 'suspended'
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [adminStatusLoading, setAdminStatusLoading] = useState(false);
-
-  const normalizeRole = (value) => {
-    if (!value) return null;
-    return String(value).trim().toLowerCase();
-  };
-
-  const getSessionCandidates = (session = {}) => {
-    const root = session && typeof session === "object" ? session : {};
-    const candidates = [root];
-
-    const nested = [
-      root?.data,
-      root?.session,
-      root?.payload,
-      root?.result,
-      root?.auth,
-    ];
-
-    nested.forEach((entry) => {
-      if (entry && typeof entry === "object") {
-        candidates.push(entry);
-      }
-    });
-
-    return candidates;
-  };
-
-  const resolveSessionRole = (session = {}) => {
-    const candidates = getSessionCandidates(session);
-    for (const candidate of candidates) {
-      const role = normalizeRole(
-        candidate?.role ??
-          candidate?.userRole ??
-          candidate?.user?.role ??
-          candidate?.profile?.role,
-      );
-      if (role) return role;
-    }
-    return null;
-  };
-
-  const resolveSessionToken = (session = {}) => {
-    const candidates = getSessionCandidates(session);
-    for (const candidate of candidates) {
-      const token =
-        candidate?.token ||
-        candidate?.access_token ||
-        candidate?.accessToken ||
-        candidate?.authToken ||
-        candidate?.jwt ||
-        null;
-      if (token) return token;
-    }
-    return null;
-  };
 
   useEffect(() => {
     checkAuthState();
@@ -101,18 +36,17 @@ export function AuthProvider({ children }) {
   const checkAuthState = async () => {
     try {
       const token = await getAccessToken();
-      const storedRole = await AsyncStorage.getItem("role");
-      const role = storedRole ? String(storedRole).trim().toLowerCase() : null;
-      const userName = await AsyncStorage.getItem("userName");
-      const userEmail = await AsyncStorage.getItem("userEmail");
-      const userId = await AsyncStorage.getItem("userId");
-      const profileDone = await AsyncStorage.getItem("profileCompleted");
-
+      const role = await AsyncStorage.getItem('role');
+      const userName = await AsyncStorage.getItem('userName');
+      const userEmail = await AsyncStorage.getItem('userEmail');
+      const userId = await AsyncStorage.getItem('userId');
+      const profileDone = await AsyncStorage.getItem('profileCompleted');
+      
       if (token && role) {
         setUser({ id: userId, email: userEmail, name: userName, role });
         setUserRole(role);
         setIsAuthenticated(true);
-        setProfileCompleted(profileDone === "true");
+        setProfileCompleted(profileDone === 'true');
       } else {
         setIsAuthenticated(false);
         setUserRole(null);
@@ -120,7 +54,7 @@ export function AuthProvider({ children }) {
         setProfileCompleted(false);
       }
     } catch (error) {
-      console.error("Auth check failed:", error);
+      console.error('Auth check failed:', error);
       setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
@@ -132,62 +66,12 @@ export function AuthProvider({ children }) {
     await checkAuthState();
   }, []);
 
-  // Persist session + immediately update memory state for navigation switch.
-  const applyAuthSession = useCallback(async (session = {}, options = {}) => {
-    await persistAuthSession(session, options);
-
-    const token = resolveSessionToken(session) || (await getAccessToken());
-    const role = resolveSessionRole(session);
-
-    if (!token || !role) {
-      console.warn("applyAuthSession: missing token or role after login", {
-        hasToken: Boolean(token),
-        role,
-        payloadKeys:
-          session && typeof session === "object" ? Object.keys(session) : [],
-        nestedDataKeys:
-          session?.data && typeof session.data === "object"
-            ? Object.keys(session.data)
-            : [],
-      });
-      await checkAuthState();
-      return { ok: false, role, accessToken: token || null };
-    }
-
-    const userId =
-      session?.userId ?? session?.user_id ?? session?.user?.id ?? null;
-    const userEmail =
-      options?.userEmail ?? session?.email ?? session?.user?.email ?? null;
-    const userName =
-      session?.userName ?? session?.username ?? session?.user?.name ?? null;
-    const done =
-      options?.profileCompleted != null
-        ? Boolean(options.profileCompleted)
-        : Boolean(session?.profileCompleted);
-
-    setUser({ id: userId, email: userEmail, name: userName, role });
-    setUserRole(role);
-    setIsAuthenticated(true);
-    setProfileCompleted(done);
-
-    if (role === "admin") {
-      setOnboardingCompleted(done);
-      setAdminStatus(done ? "active" : "pending");
-      setOnboardingStep(done ? 4 : 1);
-    }
-
-    setIsLoading(false);
-
-    return { ok: true, role, accessToken: token };
-  }, []);
-
   // Fetch admin status from API (for admin role only)
   const fetchAdminStatus = useCallback(async () => {
     const token = await getAccessToken();
-    const rawRole = await AsyncStorage.getItem("role");
-    const role = normalizeRole(rawRole);
-
-    if (!token || role !== "admin") {
+    const role = await AsyncStorage.getItem('role');
+    
+    if (!token || role !== 'admin') {
       return null;
     }
 
@@ -204,30 +88,26 @@ export function AuthProvider({ children }) {
       clearTimeout(timeoutId);
 
       if (!res.ok) {
-        console.warn("Admin status check failed:", res.status);
+        console.warn('Admin status check failed:', res.status);
         return null;
       }
 
       const data = await res.json();
-
+      
       // Update admin-specific state
       setForcePasswordChange(data.force_password_change || false);
       setOnboardingCompleted(data.onboarding_completed || false);
       setOnboardingStep(data.onboarding_step || 1);
-      setAdminStatus(data.admin_status || "pending");
-
+      setAdminStatus(data.admin_status || 'pending');
+      
       // Also update profileCompleted based on onboarding
-      const completed =
-        data.onboarding_completed && data.admin_status === "active";
+      const completed = data.onboarding_completed && data.admin_status === 'active';
       setProfileCompleted(completed);
-      await AsyncStorage.setItem(
-        "profileCompleted",
-        completed ? "true" : "false",
-      );
+      await AsyncStorage.setItem('profileCompleted', completed ? 'true' : 'false');
 
       return data;
     } catch (error) {
-      console.error("Admin status fetch error:", error);
+      console.error('Admin status fetch error:', error);
       return null;
     } finally {
       setAdminStatusLoading(false);
@@ -238,12 +118,12 @@ export function AuthProvider({ children }) {
     setIsLoading(true);
     try {
       // TODO: Implement login API call
-      const mockUser = { id: 1, email, name: "User", role: "customer" };
-      await AsyncStorage.setItem("token", "mock-token");
-      await AsyncStorage.setItem("role", "customer");
-      await AsyncStorage.setItem("userEmail", email);
+      const mockUser = { id: 1, email, name: 'User', role: 'customer' };
+      await AsyncStorage.setItem('token', 'mock-token');
+      await AsyncStorage.setItem('role', 'customer');
+      await AsyncStorage.setItem('userEmail', email);
       setUser(mockUser);
-      setUserRole("customer");
+      setUserRole('customer');
       setIsAuthenticated(true);
     } finally {
       setIsLoading(false);
@@ -254,23 +134,23 @@ export function AuthProvider({ children }) {
     setIsLoading(true);
     try {
       // TODO: Implement signup API call
-      console.log("Signup:", { email, name });
+      console.log('Signup:', { email, name });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     // Unregister push notification token before logout
     const token = await getAccessToken();
     if (token) {
       await pushNotificationService.unregisterToken(token);
       pushNotificationService.cleanup();
     }
-
+    
     // Clear displayed orders tracking
     await orderTrackingService.clearAll();
-
+    
     await clearAuthSession();
     setUser(null);
     setUserRole(null);
@@ -281,10 +161,10 @@ export function AuthProvider({ children }) {
     setForcePasswordChange(false);
     setOnboardingCompleted(false);
     setOnboardingStep(1);
-  };
+  }, []);
 
   const markProfileCompleted = async () => {
-    await AsyncStorage.setItem("profileCompleted", "true");
+    await AsyncStorage.setItem('profileCompleted', 'true');
     setProfileCompleted(true);
   };
 
@@ -292,45 +172,42 @@ export function AuthProvider({ children }) {
   const initializePushNotifications = useCallback(async (navigationRef) => {
     const token = await getAccessToken();
     if (token) {
-      console.log("🔔 AuthProvider: Initializing push notifications...");
+      console.log('🔔 AuthProvider: Initializing push notifications...');
       if (navigationRef) {
         pushNotificationService.setNavigationRef(navigationRef);
       }
       const result = await pushNotificationService.initialize(token);
-      console.log("Push notifications initialized:", result.success);
+      console.log('Push notifications initialized:', result.success);
       return result;
     }
     return { success: false };
   }, []);
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isLoading,
-        isAuthenticated,
-        userRole,
-        profileCompleted,
-        // Admin-specific
-        adminStatus,
-        forcePasswordChange,
-        onboardingCompleted,
-        onboardingStep,
-        adminStatusLoading,
-        // Methods
-        login,
-        signup,
-        logout,
-        applyAuthSession,
-        refreshAuthState,
-        markProfileCompleted,
-        fetchAdminStatus,
-        setOnboardingStep,
-        setOnboardingCompleted,
-        setAdminStatus,
-        initializePushNotifications,
-      }}
-    >
+    <AuthContext.Provider value={{ 
+      user, 
+      isLoading, 
+      isAuthenticated, 
+      userRole,
+      profileCompleted,
+      // Admin-specific
+      adminStatus,
+      forcePasswordChange,
+      onboardingCompleted,
+      onboardingStep,
+      adminStatusLoading,
+      // Methods
+      login, 
+      signup, 
+      logout,
+      refreshAuthState,
+      markProfileCompleted,
+      fetchAdminStatus,
+      setOnboardingStep,
+      setOnboardingCompleted,
+      setAdminStatus,
+      initializePushNotifications,
+    }}>
       {children}
     </AuthContext.Provider>
   );
