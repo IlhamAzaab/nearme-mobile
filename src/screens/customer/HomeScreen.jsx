@@ -139,7 +139,7 @@ export default function HomeScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState("restaurant"); // restaurant | food
   const [selectedCategory, setSelectedCategory] = useState(null);
 
-  const { unreadCount, markAllReadForCustomer } = useNotifications();
+  const { unreadCount, refreshUnreadCount } = useNotifications();
   const [cartCount, setCartCount] = useState(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [launchPromo, setLaunchPromo] = useState(null);
@@ -253,8 +253,9 @@ export default function HomeScreen({ navigation }) {
     useCallback(() => {
       if (isLoggedIn) {
         fetchCartCount();
+        refreshUnreadCount({ force: true });
       }
-    }, [isLoggedIn]),
+    }, [isLoggedIn, refreshUnreadCount]),
   );
 
   useFocusEffect(
@@ -463,8 +464,6 @@ export default function HomeScreen({ navigation }) {
           {/* Notifications */}
           <Pressable
             onPress={() => {
-              // Fire-and-forget: immediately acknowledge and sync seen IDs.
-              markAllReadForCustomer();
               navigation.navigate("Notifications");
             }}
             style={({ pressed }) => [

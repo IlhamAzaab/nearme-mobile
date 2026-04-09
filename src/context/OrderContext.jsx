@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useRef, useEff
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../constants/api";
 import supabase from "../services/supabaseClient";
+import { getAccessToken } from "../lib/authStorage";
 
 const OrderContext = createContext(null);
 
@@ -9,19 +10,58 @@ const OrderContext = createContext(null);
 export const ACTIVE_STATUSES = [
   "placed", "pending", "accepted", "preparing", "ready", "picked_up", "on_the_way",
   "driver_accepted", "driver_assigned", "received",
-  "PLACED", "PENDING", "DRIVER_ACCEPTED", "DRIVER_ASSIGNED", "RECEIVED", "ACCEPTED", "PREPARING", "READY", "PICKED_UP", "ON_THE_WAY",
 ];
 export const PAST_STATUSES = [
   "delivered", "cancelled", "rejected", "failed",
-  "DELIVERED", "CANCELLED", "REJECTED", "FAILED",
 ];
 
 // Helper to get the displayable status from an order object
 // Priority: effective_status > delivery_status > status (normalised to lowercase)
 export const getOrderStatus = (order) => {
-  const raw = order?.effective_status || order?.delivery_status || order?.status || "placed";
-  return typeof raw === "string" ? raw.toLowerCase() : "placed";
+  const normalize = (value) =>
+    typeof value === "string" ? value.trim().toLowerCase().replace(/\s+/g, "_") : "";
+
+  const raw = normalize(
+    order?.effective_status ||
+      order?.delivery_status ||
+      order?.status ||
+      order?.delivery?.status,
+  );
+
+  // Timestamp flags are the strongest source for historical orders.
+  if (order?.cancelled_at || order?.cancellation_reason) return "cancelled";
+  if (order?.delivered_at) return "delivered";
+
+  if (raw) {
+    const aliasMap = {
+      accepted_by_driver: "driver_accepted",
+      driveraccepted: "driver_accepted",
+      on_theway: "on_the_way",
+      onway: "on_the_way",
+      pickedup: "picked_up",
+      complete: "delivered",
+      completed: "delivered",
+      done: "delivered",
+    };
+    return aliasMap[raw] || raw;
+  }
+
+  // If backend omits explicit status, infer active states from payment_status.
+  const paymentStatus = normalize(order?.payment_status);
+  if (paymentStatus === "pending") return "pending";
+  if (paymentStatus === "paid") return "accepted";
+
+  return "placed";
 };
+
+function extractOrdersFromResponse(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.orders)) return data.orders;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.data?.orders)) return data.data.orders;
+  if (Array.isArray(data?.results)) return data.results;
+  return [];
+}
 
 export function OrderProvider({ children }) {
   const [orders, setOrders] = useState([]);
@@ -39,59 +79,92 @@ export function OrderProvider({ children }) {
       if (mode === "refresh") setRefreshing(true);
       else if (mode === "initial") setLoading(true);
 
-      const token = await AsyncStorage.getItem("token");
+      const token = (await getAccessToken()) || (await AsyncStorage.getItem("token"));
       if (!token || token === "null") return false;
 
-      const res = await fetch(`${API_BASE_URL}/orders/my-orders`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
+      // Fetch active + past explicitly so heavy active traffic does not hide history.
+      const [activeRes, pastRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/orders/my-orders?status=active&limit=200&offset=0`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API_BASE_URL}/orders/my-orders?status=past&limit=200&offset=0`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
 
-      if (res.ok) {
-        const list = data.orders || data || [];
-        const orderList = Array.isArray(list) ? list : [];
+      const [activeData, pastData] = await Promise.all([
+        activeRes.json().catch(() => ({})),
+        pastRes.json().catch(() => ({})),
+      ]);
 
-        // For active orders, also fetch /delivery-status to get effective_status
-        const activeIds = orderList
-          .filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o)))
-          .map((o) => o.id)
-          .slice(0, 10); // cap at 10 to avoid too many requests
+      // Fallback to legacy endpoint if filtered endpoints fail.
+      let orderList = [];
+      if (activeRes.ok || pastRes.ok) {
+        const merged = [
+          ...extractOrdersFromResponse(activeData),
+          ...extractOrdersFromResponse(pastData),
+        ];
 
-        if (activeIds.length > 0) {
-          const results = await Promise.allSettled(
-            activeIds.map(async (id) => {
-              try {
-                const r = await fetch(`${API_BASE_URL}/orders/${id}/delivery-status`, {
-                  headers: { Authorization: `Bearer ${token}` },
-                });
-                if (!r.ok) return null;
-                const d = await r.json().catch(() => null);
-                if (!d) return null;
-                return { id, effective_status: d.effective_status || d.delivery_status || d.status || null };
-              } catch { return null; }
-            }),
-          );
-          // Merge effective_status back into the order objects
-          const statusMap = {};
-          results.forEach((r) => {
-            if (r.status === "fulfilled" && r.value?.effective_status) {
-              statusMap[r.value.id] = r.value.effective_status;
-            }
-          });
-          orderList.forEach((o) => {
-            if (statusMap[o.id]) o.effective_status = statusMap[o.id];
-          });
-        }
-
-        setOrders(orderList);
-
-        // Update badge count (active orders)
-        const activeCount = orderList.filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))).length;
-        setOrdersBadgeCount(activeCount);
-
-        return true;
+        const deduped = new Map();
+        merged.forEach((order) => {
+          if (order?.id) deduped.set(order.id, order);
+        });
+        orderList = Array.from(deduped.values());
+      } else {
+        const res = await fetch(`${API_BASE_URL}/orders/my-orders?limit=400&offset=0`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return false;
+        orderList = extractOrdersFromResponse(data);
       }
-      return false;
+
+      // For active orders, also fetch /delivery-status to get effective_status
+      const activeIds = orderList
+        .filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o)))
+        .map((o) => o.id)
+        .slice(0, 10); // cap at 10 to avoid too many requests
+
+      if (activeIds.length > 0) {
+        const results = await Promise.allSettled(
+          activeIds.map(async (id) => {
+            try {
+              const r = await fetch(`${API_BASE_URL}/orders/${id}/delivery-status`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!r.ok) return null;
+              const d = await r.json().catch(() => null);
+              if (!d) return null;
+              return { id, effective_status: d.effective_status || d.delivery_status || d.status || null };
+            } catch { return null; }
+          }),
+        );
+        // Merge effective_status back into the order objects
+        const statusMap = {};
+        results.forEach((r) => {
+          if (r.status === "fulfilled" && r.value?.effective_status) {
+            statusMap[r.value.id] = r.value.effective_status;
+          }
+        });
+        orderList.forEach((o) => {
+          if (statusMap[o.id]) o.effective_status = statusMap[o.id];
+        });
+      }
+
+      // Keep latest orders first to match customer expectation.
+      orderList.sort((a, b) => {
+        const aTime = new Date(a?.placed_at || a?.created_at || 0).getTime();
+        const bTime = new Date(b?.placed_at || b?.created_at || 0).getTime();
+        return bTime - aTime;
+      });
+
+      setOrders(orderList);
+
+      // Update badge count (active orders)
+      const activeCount = orderList.filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))).length;
+      setOrdersBadgeCount(activeCount);
+
+      return true;
     } catch (e) {
       console.log("OrderContext fetchOrders error:", e);
       return false;

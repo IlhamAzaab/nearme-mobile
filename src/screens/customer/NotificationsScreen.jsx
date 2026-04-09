@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   ActivityIndicator,
@@ -149,12 +149,18 @@ function buildItemsFromPayload(payload = {}) {
   return [];
 }
 
-export default function NotificationsScreen({ navigation }) {
+export default function NotificationsScreen({ navigation, route }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
-  const { markAllReadForCustomer } = useNotifications();
+  const {
+    notifications: inAppNotifications,
+    markAsRead,
+    unreadCount,
+    refreshUnreadCount,
+    fetchCustomerNotifications,
+  } = useNotifications();
 
   useFocusEffect(
     useCallback(() => {
@@ -162,9 +168,10 @@ export default function NotificationsScreen({ navigation }) {
 
       const run = async () => {
         setLoading(true);
-        const list = await markAllReadForCustomer();
+        const list = await fetchCustomerNotifications();
         if (active) {
           setNotifications(Array.isArray(list) ? list : []);
+          refreshUnreadCount({ force: true });
           setLoading(false);
         }
       };
@@ -174,13 +181,24 @@ export default function NotificationsScreen({ navigation }) {
       return () => {
         active = false;
       };
-    }, [markAllReadForCustomer]),
+    }, [fetchCustomerNotifications, refreshUnreadCount]),
   );
 
-  const markSingleAsRead = async (notificationId) => {
+  const markSingleAsRead = useCallback(async (notificationId) => {
+    if (!notificationId) return;
+    markAsRead(notificationId);
+    setNotifications((prev) =>
+      prev.map((n) =>
+        String(n.id) === String(notificationId) ? { ...n, is_read: true } : n,
+      ),
+    );
+
     try {
       const token = (await getAccessToken()) || (await AsyncStorage.getItem("token"));
-      if (!token) return;
+      if (!token) {
+        refreshUnreadCount({ force: true });
+        return;
+      }
       await fetch(
         `${API_BASE_URL}/customer/notifications/${notificationId}/read`,
         {
@@ -188,16 +206,12 @@ export default function NotificationsScreen({ navigation }) {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
-      // Update local state
-      setNotifications((prev) =>
-        prev.map((n) =>
-          n.id === notificationId ? { ...n, is_read: true } : n,
-        ),
-      );
     } catch (error) {
       console.log("Error marking notification as read:", error);
+    } finally {
+      refreshUnreadCount({ force: true });
     }
-  };
+  }, [markAsRead, refreshUnreadCount]);
 
   const fetchOrderDetails = useCallback(async (orderId) => {
     const token = (await getAccessToken()) || (await AsyncStorage.getItem("token"));
@@ -227,7 +241,9 @@ export default function NotificationsScreen({ navigation }) {
         order: null,
       });
 
-      await markSingleAsRead(item.id);
+      if (item?.id && !item?._transient && !item?.is_read) {
+        await markSingleAsRead(item.id);
+      }
 
       if (!orderId) return;
 
@@ -243,13 +259,80 @@ export default function NotificationsScreen({ navigation }) {
       );
       setDetailsLoading(false);
     },
-    [fetchOrderDetails],
+    [fetchOrderDetails, markSingleAsRead],
   );
 
   const closeNotificationDetails = useCallback(() => {
     setSelectedNotification(null);
     setDetailsLoading(false);
   }, []);
+
+  useEffect(() => {
+    const shouldOpenFromPush = !!route?.params?.openFromPush;
+    const incoming = route?.params?.notification;
+    if (!shouldOpenFromPush || !incoming) return;
+
+    const incomingId = incoming?.id ? String(incoming.id) : "";
+    const selectedId = selectedNotification?.item?.id
+      ? String(selectedNotification.item.id)
+      : "";
+    if (incomingId && incomingId === selectedId) {
+      return;
+    }
+
+    openNotificationDetails(incoming);
+    navigation.setParams({
+      openFromPush: false,
+      notification: null,
+    });
+  }, [
+    navigation,
+    openNotificationDetails,
+    route?.params?.notification,
+    route?.params?.openFromPush,
+    selectedNotification?.item?.id,
+  ]);
+
+  const mergedNotifications = useMemo(() => {
+    const byId = new Map();
+    const merged = [
+      ...(Array.isArray(notifications) ? notifications : []),
+      ...(Array.isArray(inAppNotifications) ? inAppNotifications : []),
+    ];
+
+    merged.forEach((n) => {
+      if (!n) return;
+      const key = String(
+        n.id ||
+          n.notification_id ||
+          n.notificationId ||
+          `${n.title || ""}-${n.message || ""}-${n.created_at || n.createdAt || ""}`,
+      );
+
+      if (!byId.has(key)) {
+        byId.set(key, { ...n, id: key });
+        return;
+      }
+
+      const existing = byId.get(key);
+      byId.set(key, {
+        ...existing,
+        ...n,
+        id: key,
+        // Keep unread if at least one source says unread.
+        is_read: Boolean(existing?.is_read && n?.is_read),
+      });
+    });
+
+    return Array.from(byId.values()).sort((a, b) => {
+      const aTime = new Date(a?.created_at || a?.createdAt || 0).getTime();
+      const bTime = new Date(b?.created_at || b?.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
+  }, [inAppNotifications, notifications]);
+
+  const unreadInList = mergedNotifications.filter((n) => !n.is_read).length;
+  const effectiveUnreadCount = Math.max(unreadCount || 0, unreadInList);
 
   if (loading) {
     return (
@@ -287,14 +370,34 @@ export default function NotificationsScreen({ navigation }) {
         <View style={st.headerCenter}>
           <Text style={st.headerTitle}>Notifications</Text>
         </View>
-        <View style={{ width: 40 }} />
+        {effectiveUnreadCount > 0 ? (
+          <View style={st.badge}>
+            <Text style={st.badgeText}>
+              {effectiveUnreadCount > 99 ? "99+" : effectiveUnreadCount}
+            </Text>
+          </View>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
       </View>
 
       <FlatList
-        data={notifications}
+        data={mergedNotifications}
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={st.listContent}
         showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          effectiveUnreadCount > 0 ? (
+            <View style={st.listIntroCard}>
+              <Text style={st.listIntroTitle}>
+                {effectiveUnreadCount} new notification{effectiveUnreadCount > 1 ? "s" : ""}
+              </Text>
+              <Text style={st.listIntroSub}>
+                Tap any item to view full report and details.
+              </Text>
+            </View>
+          ) : null
+        }
         renderItem={({ item }) => {
           const isUnread = !item.is_read;
           return (
@@ -354,43 +457,88 @@ export default function NotificationsScreen({ navigation }) {
               {selectedNotification?.item?.title || "Notification Details"}
             </Text>
 
-            <Text style={st.modalMessage}>
-              {selectedNotification?.item?.message || "No message available."}
-            </Text>
+            <View style={st.reportMessageBox}>
+              <Text style={st.reportMessageLabel}>MESSAGE</Text>
+              <Text style={st.reportMessageText}>
+                {selectedNotification?.item?.message || "No message available."}
+              </Text>
+            </View>
 
             <View style={st.metaBox}>
-              <Text style={st.metaLabel}>Time</Text>
-              <Text style={st.metaValue}>
-                {selectedNotification?.item?.created_at
-                  ? new Date(selectedNotification.item.created_at).toLocaleString()
-                  : "-"}
-              </Text>
+              <View style={st.reportPill}>
+                <Text style={st.reportPillText}>Notification Report</Text>
+              </View>
+
+              <View style={st.reportRow}>
+                <Text style={st.reportLabel}>Received</Text>
+                <Text style={st.reportValue}>
+                  {selectedNotification?.item?.created_at
+                    ? new Date(selectedNotification.item.created_at).toLocaleString()
+                    : "-"}
+                </Text>
+              </View>
+
+              <View style={st.reportDivider} />
+
+              <View style={st.reportRow}>
+                <Text style={st.reportLabel}>Type</Text>
+                <Text style={st.reportValue}>
+                  {humanizeStatus(
+                    selectedNotification?.item?.type ||
+                      selectedNotification?.payload?.type ||
+                      "general",
+                  )}
+                </Text>
+              </View>
+
+              <View style={st.reportDivider} />
+
+              <View style={st.reportRow}>
+                <Text style={st.reportLabel}>Status</Text>
+                <Text style={st.reportValue}>
+                  {humanizeStatus(
+                    selectedNotification?.order?.status ||
+                      selectedNotification?.payload?.status ||
+                      selectedNotification?.item?.status,
+                  )}
+                </Text>
+              </View>
 
               {selectedNotification?.orderId ? (
                 <>
-                  <Text style={st.metaLabel}>Order ID</Text>
-                  <Text style={st.metaValue}>{selectedNotification.orderId}</Text>
+                  <View style={st.reportDivider} />
+                  <View style={st.reportRow}>
+                    <Text style={st.reportLabel}>Order ID</Text>
+                    <Text style={st.reportValue}>{selectedNotification.orderId}</Text>
+                  </View>
                 </>
               ) : null}
 
-              <Text style={st.metaLabel}>Status</Text>
-              <Text style={st.metaValue}>
-                {humanizeStatus(
-                  selectedNotification?.order?.status ||
-                    selectedNotification?.payload?.status ||
-                    selectedNotification?.item?.status,
-                )}
-              </Text>
+              <View style={st.reportDivider} />
 
-              <Text style={st.metaLabel}>Driver</Text>
-              <Text style={st.metaValue}>
-                {selectedNotification?.order?.driver_name ||
-                  selectedNotification?.order?.driverName ||
-                  selectedNotification?.order?.driver?.name ||
-                  selectedNotification?.payload?.driverName ||
-                  selectedNotification?.payload?.driver_name ||
-                  "Not assigned yet"}
-              </Text>
+              <View style={st.reportRow}>
+                <Text style={st.reportLabel}>Driver</Text>
+                <Text style={st.reportValue}>
+                  {selectedNotification?.order?.driver_name ||
+                    selectedNotification?.order?.driverName ||
+                    selectedNotification?.order?.driver?.name ||
+                    selectedNotification?.payload?.driverName ||
+                    selectedNotification?.payload?.driver_name ||
+                    "Not assigned yet"}
+                </Text>
+              </View>
+
+              {selectedNotification?.order?.total_amount != null ? (
+                <>
+                  <View style={st.reportDivider} />
+                  <View style={st.reportRow}>
+                    <Text style={st.reportLabel}>Order Total</Text>
+                    <Text style={st.reportValueStrong}>
+                      LKR {Number(selectedNotification.order.total_amount || 0).toFixed(2)}
+                    </Text>
+                  </View>
+                </>
+              ) : null}
             </View>
 
             {detailsLoading ? (
@@ -520,6 +668,26 @@ const st = StyleSheet.create({
   listContent: {
     padding: 16,
     paddingBottom: 32,
+  },
+  listIntroCard: {
+    backgroundColor: "#ECFDF3",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  listIntroTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#065F46",
+  },
+  listIntroSub: {
+    marginTop: 2,
+    fontSize: 12,
+    color: "#047857",
+    fontWeight: "500",
   },
 
   /* ── Card ── */
@@ -663,6 +831,28 @@ const st = StyleSheet.create({
     lineHeight: 21,
     color: "#374151",
   },
+  reportMessageBox: {
+    marginTop: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#D1FAE5",
+    backgroundColor: "#F0FDF4",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  reportMessageLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#047857",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  reportMessageText: {
+    fontSize: 14,
+    color: "#065F46",
+    lineHeight: 20,
+    fontWeight: "600",
+  },
   metaBox: {
     marginTop: 14,
     borderRadius: 12,
@@ -671,6 +861,52 @@ const st = StyleSheet.create({
     borderColor: "#E5E7EB",
     padding: 12,
     gap: 3,
+  },
+  reportPill: {
+    alignSelf: "flex-start",
+    backgroundColor: "#DCFCE7",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
+  reportPillText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#065F46",
+    letterSpacing: 0.4,
+  },
+  reportRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingVertical: 8,
+  },
+  reportLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#6B7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.35,
+  },
+  reportValue: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  reportValueStrong: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#06C168",
+  },
+  reportDivider: {
+    height: 1,
+    backgroundColor: "#E5E7EB",
   },
   metaLabel: {
     marginTop: 8,

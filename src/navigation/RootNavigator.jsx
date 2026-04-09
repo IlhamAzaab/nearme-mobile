@@ -1,27 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import AuthNavigator from './AuthNavigator';
 import CustomerStack from './CustomerStack';
 import DriverNavigator from './DriverNavigator';
 import ManagerNavigator from './ManagerNavigator';
 import AdminNavigator from './AdminNavigator';
-import SplashScreen from '../screens/SplashScreen';
 import { useAuth } from '../app/providers/AuthProvider';
 
-const SPLASH_MIN_MS = 2200; // show splash for at least 2.2s (covers animation)
-
 export default function RootNavigator() {
-  const { isAuthenticated, userRole, isLoading } = useAuth();
-  const [splashDone, setSplashDone] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setSplashDone(true), SPLASH_MIN_MS);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Show splash while auth is loading OR minimum time hasn't elapsed
-  if (isLoading || !splashDone) {
-    return <SplashScreen />;
-  }
+  const { isAuthenticated, userRole } = useAuth();
 
   // Handle routing based on authentication and user role
   if (isAuthenticated) {

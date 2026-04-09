@@ -24,6 +24,19 @@ const LEAFLET_HTML = `
       justify-content: center;
       font-size: 16px;
     }
+    .icon-only-marker {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      line-height: 1;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      padding: 0;
+    }
     .driver-marker, .restaurant-marker, .customer-marker, .pickup-marker {
       border-radius: 50%; padding: 4px; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
       width: 28px; height: 28px;
@@ -77,20 +90,24 @@ const LEAFLET_HTML = `
       });
     }
 
-    function createIcon(type, emoji) {
+    function createIcon(type, emoji, iconOnly, customHtml) {
+      const markerClass = iconOnly ? 'icon-only-marker' : (type + '-marker');
+      const hasCustomHtml = !!customHtml;
+      const iconSize = hasCustomHtml ? [44, 44] : (iconOnly ? [24, 24] : [28, 28]);
+      const iconAnchor = hasCustomHtml ? [22, 22] : (iconOnly ? [12, 12] : [14, 14]);
       return L.divIcon({
         className: 'custom-marker',
-        html: '<div class="' + type + '-marker">' + emoji + '</div>',
-        iconSize: [28, 28],
-        iconAnchor: [14, 14]
+        html: customHtml || ('<div class="' + markerClass + '">' + emoji + '</div>'),
+        iconSize,
+        iconAnchor,
       });
     }
 
-    function addMarker(id, lat, lng, type, title, emoji) {
+    function addMarker(id, lat, lng, type, title, emoji, iconOnly, customHtml) {
       if (markers[id]) {
         map.removeLayer(markers[id]);
       }
-      const icon = createIcon(type, emoji || getDefaultEmoji(type));
+      const icon = createIcon(type, emoji || getDefaultEmoji(type), !!iconOnly, customHtml);
       markers[id] = L.marker([lat, lng], { icon: icon })
         .addTo(map);
       if (title) {
@@ -98,11 +115,11 @@ const LEAFLET_HTML = `
       }
     }
 
-    function smoothMoveMarker(id, lat, lng, type, title, emoji) {
+    function smoothMoveMarker(id, lat, lng, type, title, emoji, iconOnly, customHtml) {
       if (markers[id]) {
         markers[id].setLatLng([lat, lng]);
       } else {
-        addMarker(id, lat, lng, type, title, emoji);
+        addMarker(id, lat, lng, type, title, emoji, iconOnly, customHtml);
       }
     }
 
@@ -228,6 +245,8 @@ const OSMMapView = forwardRef(({
 }, ref) => {
   const webViewRef = useRef(null);
   const [isReady, setIsReady] = useState(false);
+  const syncedMarkerIdsRef = useRef(new Set());
+  const syncedPolylineIdsRef = useRef(new Set());
 
   const defaultRegion = {
     latitude: 7.8731,
@@ -321,28 +340,59 @@ const OSMMapView = forwardRef(({
 
   // Update markers
   useEffect(() => {
-    if (webViewRef.current && isReady && markersProp.length > 0) {
-      markersProp.forEach((marker, index) => {
-        const id = marker.id || index;
-        const fn = marker.smooth ? 'smoothMoveMarker' : 'addMarker';
+    if (!webViewRef.current || !isReady) return;
+
+    const nextIds = new Set();
+    markersProp.forEach((marker, index) => {
+      const id = String(marker.id || index);
+      nextIds.add(id);
+      const fn = marker.smooth ? 'smoothMoveMarker' : 'addMarker';
+      const markerType = JSON.stringify(marker.type || 'customer');
+      const markerTitle = JSON.stringify(marker.title || '');
+      const markerEmoji = JSON.stringify(marker.emoji || '');
+      const markerCustomHtml = marker.customHtml ? JSON.stringify(marker.customHtml) : 'null';
+      webViewRef.current.injectJavaScript(`
+        ${fn}(${JSON.stringify(id)}, ${marker.coordinate.latitude}, ${marker.coordinate.longitude}, ${markerType}, ${markerTitle}, ${markerEmoji}, ${marker.iconOnly ? "true" : "false"}, ${markerCustomHtml});
+        true;
+      `);
+    });
+
+    syncedMarkerIdsRef.current.forEach((id) => {
+      if (!nextIds.has(id)) {
         webViewRef.current.injectJavaScript(`
-          ${fn}('${id}', ${marker.coordinate.latitude}, ${marker.coordinate.longitude}, '${marker.type || 'customer'}', '${marker.title || ''}', '${marker.emoji || ''}');
+          removeMarker(${JSON.stringify(id)});
           true;
         `);
-      });
-    }
+      }
+    });
+
+    syncedMarkerIdsRef.current = nextIds;
   }, [isReady, markersProp]);
 
   // Update polylines
   useEffect(() => {
-    if (webViewRef.current && isReady && polylinesProp.length > 0) {
-      polylinesProp.forEach((polyline, index) => {
+    if (!webViewRef.current || !isReady) return;
+
+    const nextIds = new Set();
+    polylinesProp.forEach((polyline, index) => {
+      const id = String(polyline.id || index);
+      nextIds.add(id);
+      webViewRef.current.injectJavaScript(`
+        addPolyline(${JSON.stringify(id)}, ${JSON.stringify(polyline.coordinates)}, '${polyline.strokeColor || '#3B82F6'}', ${polyline.strokeWidth || 4}, '${polyline.dashArray || ""}');
+        true;
+      `);
+    });
+
+    syncedPolylineIdsRef.current.forEach((id) => {
+      if (!nextIds.has(id)) {
         webViewRef.current.injectJavaScript(`
-          addPolyline('${polyline.id || index}', ${JSON.stringify(polyline.coordinates)}, '${polyline.strokeColor || '#3B82F6'}', ${polyline.strokeWidth || 4}, '${polyline.dashArray || ""}');
+          removePolyline(${JSON.stringify(id)});
           true;
         `);
-      });
-    }
+      }
+    });
+
+    syncedPolylineIdsRef.current = nextIds;
   }, [isReady, polylinesProp]);
 
   // Show user location
@@ -412,12 +462,13 @@ OSMMapView.displayName = "OSMMapView";
 // ============================================================================
 
 // Add marker helper - call this from parent to add markers
-export const createMarker = (id, coordinate, type = 'customer', title = '', emoji = '') => ({
+export const createMarker = (id, coordinate, type = 'customer', title = '', emoji = '', customHtml = null) => ({
   id,
   coordinate,
   type,
   title,
   emoji,
+  customHtml,
 });
 
 // Add polyline helper

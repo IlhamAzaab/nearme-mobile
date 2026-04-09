@@ -21,6 +21,13 @@ import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const CHECKOUT_ADDRESS_PIN_HTML =
+  "<div style='width:44px;height:44px;display:flex;align-items:center;justify-content:center;'>" +
+  "<svg width='30' height='30' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' aria-label='delivery pin'>" +
+  "<path d='M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z' fill='#E11D48'/>" +
+  "<circle cx='12' cy='9' r='3' fill='#FFFFFF'/>" +
+  "</svg>" +
+  "</div>";
 
 // ============================================================================
 // OSRM route distance
@@ -546,7 +553,9 @@ export default function CheckoutScreen({ route, navigation }) {
                 coordinate: position,
                 type: "customer",
                 title: "Delivery Location",
-                emoji: "📍",
+                emoji: "",
+                customHtml: CHECKOUT_ADDRESS_PIN_HTML,
+                iconOnly: true,
               },
             ]}
           />
@@ -700,7 +709,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
           <Row label="Subtotal" value={formatPrice(subtotal)} />
           <Row
-            label={`Delivery fee${routeInfo ? ` (${routeInfo.distance.toFixed(1)} km)` : ""}`}
+            label="Delivery fee"
             value={routeLoading ? "..." : deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
           />
           <Row label="Service fee" value={formatPrice(serviceFee)} />

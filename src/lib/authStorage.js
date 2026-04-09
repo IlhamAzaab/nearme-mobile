@@ -1,11 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 let SecureStore = null;
+let secureStoreModuleLoadErrorMessage = null;
 try {
   SecureStore = require("expo-secure-store");
-} catch {
+} catch (error) {
   // Native module may be missing in stale dev-client builds.
   SecureStore = null;
+  secureStoreModuleLoadErrorMessage =
+    error?.message || "expo-secure-store module is unavailable";
 }
 
 const ACCESS_TOKEN_KEY = "token";
@@ -15,6 +18,10 @@ const USER_ID_KEY = "userId";
 const USER_NAME_KEY = "userName";
 const USER_EMAIL_KEY = "userEmail";
 const PROFILE_COMPLETED_KEY = "profileCompleted";
+
+let secureStoreAvailabilityChecked = false;
+let authStorageShimInstalled = false;
+let secureStoreInitErrorMessage = null;
 
 function getSecureStoreApi() {
   if (!SecureStore) return null;
@@ -28,6 +35,34 @@ function getSecureStoreApi() {
   }
 
   return SecureStore;
+}
+
+export function initializeAuthStorage() {
+  secureStoreAvailabilityChecked = true;
+
+  const secureStore = getSecureStoreApi();
+  if (secureStore) {
+    authStorageShimInstalled = false;
+    secureStoreInitErrorMessage = null;
+    return;
+  }
+
+  // Fallback mode: AsyncStorage-only token storage.
+  authStorageShimInstalled = true;
+  secureStoreInitErrorMessage =
+    secureStoreModuleLoadErrorMessage ||
+    "SecureStore API unavailable in current native build";
+}
+
+export function getAuthStorageDiagnostics() {
+  const secureStore = getSecureStoreApi();
+
+  return {
+    secureStoreAvailable: !!secureStore,
+    secureStoreAvailabilityChecked,
+    authStorageShimInstalled,
+    secureStoreInitErrorMessage,
+  };
 }
 
 export async function getAccessToken() {

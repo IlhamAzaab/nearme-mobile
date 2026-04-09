@@ -40,6 +40,59 @@ const NOTIFICATION_ROLE_MAP = {
   driver_approval: "driver",
   order_update: "customer",
 };
+
+const PUSH_REGISTER_RETRY_AT_KEY = "pushRegisterRetryAt";
+const PUSH_REGISTER_COOLDOWN_MS = 5 * 60 * 1000;
+const PUSH_REGISTER_TIMEOUT_MS = 12000;
+const RETRYABLE_PUSH_STATUSES = new Set([
+  408, 429, 500, 502, 503, 504,
+  520, 521, 522, 523, 524, 525, 526,
+]);
+
+function isRetryablePushStatus(status) {
+  return RETRYABLE_PUSH_STATUSES.has(Number(status));
+}
+
+function normalizeBaseUrl(url) {
+  return String(url || "").trim().replace(/\/+$/, "");
+}
+
+function getPushRegisterUrls(baseUrl) {
+  const normalized = normalizeBaseUrl(baseUrl);
+  const urls = [
+    `${normalized}/push/register-token`,
+  ];
+
+  if (!/\/api(?:$|\/)/i.test(normalized)) {
+    urls.push(`${normalized}/api/push/register-token`);
+  }
+
+  return Array.from(new Set(urls));
+}
+
+function toAppNotification({ title, body, data, createdAt }) {
+  const d = data || {};
+  const notificationId =
+    d.notificationId ||
+    d.notification_id ||
+    d.id ||
+    `push:${d.type || 'general'}:${d.orderId || d.order_id || ''}:${title || ''}:${body || ''}`;
+
+  return {
+    id: String(notificationId),
+    title: title || 'Notification',
+    message: body || d.message || '',
+    created_at: createdAt || new Date().toISOString(),
+    is_read: false,
+    type: d.type || 'info',
+    order_id: d.orderId || d.order_id,
+    data: {
+      ...d,
+      orderId: d.orderId || d.order_id,
+    },
+    _transient: !(d.notificationId || d.notification_id || d.id),
+  };
+}
 // ─── FOREGROUND HANDLER ───────────────────────────────────────
 // Controls what happens when a notification arrives while app is OPEN.
 // Alarm pulse notifications (isAlarm=true) suppress the banner so the
@@ -189,6 +242,8 @@ class PushNotificationService {
     this._userRole = null; // stored on initialize
 
     this._onUrgentNotification = null; // callback for in-app modal
+    this._onNotificationReceived = null; // callback for provider badge/list updates
+    this._onNotificationOpened = null; // callback for tap-open updates
   }
 
   /**
@@ -217,6 +272,14 @@ class PushNotificationService {
    */
   onUrgentNotification(callback) {
     this._onUrgentNotification = callback;
+  }
+
+  onNotificationReceived(callback) {
+    this._onNotificationReceived = typeof callback === 'function' ? callback : null;
+  }
+
+  onNotificationOpened(callback) {
+    this._onNotificationOpened = typeof callback === 'function' ? callback : null;
   }
 
   // ─── PERSISTENT RINGING ───────────────────────────────────────
@@ -393,6 +456,19 @@ class PushNotificationService {
    */
   async registerToken(authToken) {
     try {
+      if (!authToken) {
+        console.log("[Push] Skipping register: missing auth token");
+        return false;
+      }
+
+      const retryAtRaw = await AsyncStorage.getItem(PUSH_REGISTER_RETRY_AT_KEY);
+      const retryAt = Number(retryAtRaw || 0);
+      if (retryAt > Date.now()) {
+        const waitSec = Math.ceil((retryAt - Date.now()) / 1000);
+        console.log(`[Push] Register cooldown active, retrying in ${waitSec}s`);
+        return false;
+      }
+
       const hasPermission = await this.requestPermission();
       if (!hasPermission) return false;
 
@@ -407,32 +483,85 @@ class PushNotificationService {
 
       // Use rateLimitedFetch with retry on 429 to handle rate limits
       const { rateLimitedFetch } = require("../utils/rateLimitedFetch");
-      const response = await rateLimitedFetch(
-        `${API_URL}/push/register-token`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${authToken}`,
-          },
-          body: JSON.stringify({
-            expoPushToken,
-            deviceType: Platform.OS,
-            deviceId,
-          }),
-        },
-        { deduplicate: false },
-      );
+      const registerUrls = getPushRegisterUrls(API_URL);
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log("[Push] Registered!", data);
-        return true;
-      } else {
-        const err = await response.json().catch(() => ({}));
-        console.error("[Push] Register failed:", response.status, err);
-        return false;
+      for (let i = 0; i < registerUrls.length; i += 1) {
+        const url = registerUrls[i];
+        let timeoutId;
+        try {
+          const controller = new AbortController();
+          timeoutId = setTimeout(() => controller.abort(), PUSH_REGISTER_TIMEOUT_MS);
+
+          const response = await rateLimitedFetch(
+            url,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${authToken}`,
+              },
+              body: JSON.stringify({
+                expoPushToken,
+                deviceType: Platform.OS,
+                deviceId,
+              }),
+              signal: controller.signal,
+            },
+            { deduplicate: false },
+          );
+
+          if (response.ok) {
+            const data = await response.json().catch(() => ({}));
+            await AsyncStorage.removeItem(PUSH_REGISTER_RETRY_AT_KEY);
+            console.log("[Push] Registered!", data);
+            return true;
+          }
+
+          const err = await response.json().catch(() => ({}));
+          const isRetryable = isRetryablePushStatus(response.status);
+
+          if (isRetryable) {
+            await AsyncStorage.setItem(
+              PUSH_REGISTER_RETRY_AT_KEY,
+              String(Date.now() + PUSH_REGISTER_COOLDOWN_MS),
+            );
+            console.warn(
+              "[Push] Register temporarily unavailable:",
+              response.status,
+              err,
+            );
+            return false;
+          }
+
+          // Non-retryable errors (401/403/404 etc) should not be suppressed.
+          console.error("[Push] Register failed:", response.status, err);
+          return false;
+        } catch (endpointError) {
+          const isAbort = endpointError?.name === "AbortError";
+          const canTryNext = i < registerUrls.length - 1;
+
+          if (canTryNext) {
+            console.warn(`[Push] Register endpoint failed, trying fallback: ${url}`);
+            continue;
+          }
+
+          await AsyncStorage.setItem(
+            PUSH_REGISTER_RETRY_AT_KEY,
+            String(Date.now() + PUSH_REGISTER_COOLDOWN_MS),
+          );
+
+          if (isAbort) {
+            console.warn("[Push] Register timed out, will retry later");
+            return false;
+          }
+
+          throw endpointError;
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+        }
       }
+
+      return false;
     } catch (error) {
       console.error("[Push] Register error:", error);
       return false;
@@ -499,6 +628,17 @@ class PushNotificationService {
           return;
         }
 
+        if (this._onNotificationReceived) {
+          this._onNotificationReceived(
+            toAppNotification({
+              title,
+              body,
+              data,
+              createdAt: new Date().toISOString(),
+            }),
+          );
+        }
+
         // Check if this is a persistent/urgent notification
         const isPersistent =
           data?.persistent === "true" || data?.persistent === true;
@@ -533,6 +673,12 @@ class PushNotificationService {
         console.log("[Push] Tapped notification");
         const content = response.notification.request.content;
         const notifData = content.data || {};
+        const tapPayload = {
+          ...notifData,
+          _notificationTitle: content.title,
+          _notificationBody: content.body,
+          _notificationCreatedAt: new Date().toISOString(),
+        };
 
         // Role-based filtering: ignore notifications not meant for this user
         if (!this._isNotificationForCurrentRole(notifData)) {
@@ -542,8 +688,19 @@ class PushNotificationService {
           return;
         }
 
+        if (this._onNotificationOpened) {
+          this._onNotificationOpened(
+            toAppNotification({
+              title: content.title,
+              body: content.body,
+              data: notifData,
+              createdAt: new Date().toISOString(),
+            }),
+          );
+        }
+
         // Navigate based on notification type
-        this.handleNotificationPress(notifData);
+        this.handleNotificationPress(tapPayload);
 
         // If urgent notification tapped from background/locked screen, show modal
         const isPersistent =
@@ -574,6 +731,12 @@ class PushNotificationService {
       console.log("[Push] App opened from notification");
       const content = response.notification.request.content;
       const notifData = content.data || {};
+      const openPayload = {
+        ...notifData,
+        _notificationTitle: content.title,
+        _notificationBody: content.body,
+        _notificationCreatedAt: new Date().toISOString(),
+      };
 
       // Extra delay — navigation ref and modal callback must be ready
       setTimeout(async () => {
@@ -585,7 +748,18 @@ class PushNotificationService {
           return;
         }
 
-        this.handleNotificationPress(notifData);
+        if (this._onNotificationOpened) {
+          this._onNotificationOpened(
+            toAppNotification({
+              title: content.title,
+              body: content.body,
+              data: notifData,
+              createdAt: new Date().toISOString(),
+            }),
+          );
+        }
+
+        this.handleNotificationPress(openPayload);
 
         // If urgent notification, show modal (even when app was killed)
         const isPersistent =
@@ -626,7 +800,36 @@ class PushNotificationService {
         nav.reset({ index: 0, routes: [{ name: "DriverMain" }] });
         break;
       case "order_update":
-        if (orderId) nav.navigate("OrderDetails", { orderId });
+        nav.navigate("MainTabs", {
+          screen: "Home",
+          params: {
+            screen: "Notifications",
+            params: {
+              openFromPush: true,
+              notification: {
+                id: String(
+                  data?.notificationId ||
+                    data?.notification_id ||
+                    `push-${Date.now()}`,
+                ),
+                title: data?._notificationTitle || "Order Update",
+                message:
+                  data?._notificationBody ||
+                  data?.message ||
+                  "You have a new order update.",
+                created_at:
+                  data?._notificationCreatedAt || new Date().toISOString(),
+                is_read: false,
+                order_id: orderId || data?.order_id,
+                data: {
+                  ...data,
+                  orderId: orderId || data?.order_id,
+                },
+                _transient: !(data?.notificationId || data?.notification_id),
+              },
+            },
+          },
+        });
         break;
       case "new_order":
       case "order_reminder":
@@ -721,6 +924,8 @@ class PushNotificationService {
       this.responseSubscription = null;
     }
     this._onUrgentNotification = null;
+    this._onNotificationReceived = null;
+    this._onNotificationOpened = null;
     this._userRole = null;
     this.isInitialized = false;
   }

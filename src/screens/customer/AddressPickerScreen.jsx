@@ -1,20 +1,161 @@
-import React, { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SafeAreaView, Platform } from "react-native";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import colors from "../../constants/colors";
 import OSMMapView from "../../components/maps/OSMMapView";
 
+const GEOCODE_DEBOUNCE_MS = 700;
+const GEOCODE_TIMEOUT_MS = 6500;
+const MIN_GEOCODE_DISTANCE_METERS = 20;
+
+function getDistanceMeters(lat1, lng1, lat2, lng2) {
+  const toRad = (v) => (v * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 export default function AddressPickerScreen({ navigation }) {
   const mapRef = useRef(null);
+  const geocodeTimerRef = useRef(null);
+  const lastGeocodePointRef = useRef(null);
+  const geocodeRequestIdRef = useRef(0);
+  const geocodeCacheRef = useRef(new Map());
+  const addressLabelRef = useRef("Loading address...");
   const [initialRegion, setInitialRegion] = useState(null);
   const [currentCoordinate, setCurrentCoordinate] = useState(null);
   const [addressLabel, setAddressLabel] = useState("Loading address...");
   const [addressCity, setAddressCity] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [fetchingLocation, setFetchingLocation] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
+
+  useEffect(() => {
+    addressLabelRef.current = addressLabel;
+  }, [addressLabel]);
+
+  const reverseGeocode = useCallback(async (latitude, longitude, options = {}) => {
+    const { force = false, showLoading = false } = options;
+    const cacheKey = `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+
+    const cached = geocodeCacheRef.current.get(cacheKey);
+    if (cached) {
+      setAddressLabel(cached.label);
+      setAddressCity(cached.city);
+      return;
+    }
+
+    const lastPoint = lastGeocodePointRef.current;
+    if (!force && lastPoint) {
+      const moved = getDistanceMeters(lastPoint.latitude, lastPoint.longitude, latitude, longitude);
+      if (moved < MIN_GEOCODE_DISTANCE_METERS) {
+        return;
+      }
+    }
+
+    const requestId = ++geocodeRequestIdRef.current;
+    if (showLoading) {
+      setAddressLabel("Loading address...");
+    }
+
+    try {
+      const geocodePromise = Location.reverseGeocodeAsync({ latitude, longitude });
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("reverse_geocode_timeout")), GEOCODE_TIMEOUT_MS);
+      });
+
+      const geocode = await Promise.race([geocodePromise, timeoutPromise]);
+
+      if (requestId !== geocodeRequestIdRef.current) {
+        return;
+      }
+
+      if (Array.isArray(geocode) && geocode.length > 0) {
+        const place = geocode[0];
+        const formattedAddress = `${place.name ? `${place.name}, ` : ""}${place.street || ""}, ${place.city || ""}`;
+        const label = formattedAddress.trim().replace(/^,|,$/g, "") || "Selected Location";
+        const city = place.city || place.subregion || place.region || "";
+
+        setAddressLabel(label);
+        setAddressCity(city);
+        lastGeocodePointRef.current = { latitude, longitude };
+
+        geocodeCacheRef.current.set(cacheKey, { label, city });
+        if (geocodeCacheRef.current.size > 50) {
+          const firstKey = geocodeCacheRef.current.keys().next().value;
+          geocodeCacheRef.current.delete(firstKey);
+        }
+      } else {
+        setAddressLabel("Unknown location");
+        setAddressCity("");
+      }
+    } catch (error) {
+      if (requestId !== geocodeRequestIdRef.current) {
+        return;
+      }
+
+      const message = String(error?.message || error || "");
+      const isTimeout = /timeout|TimeoutException|reverse_geocode_timeout/i.test(message);
+      if (isTimeout) {
+        console.warn("Reverse geocode timed out, keeping previous address");
+      } else {
+        console.error("Reverse Geocode error:", error);
+      }
+      if (!addressLabelRef.current || addressLabelRef.current === "Loading address...") {
+        setAddressLabel("Could not get address details");
+        setAddressCity("");
+      }
+    }
+  }, []);
+
+  const scheduleReverseGeocode = useCallback((latitude, longitude, options = {}) => {
+    if (geocodeTimerRef.current) {
+      clearTimeout(geocodeTimerRef.current);
+    }
+    geocodeTimerRef.current = setTimeout(() => {
+      reverseGeocode(latitude, longitude, options);
+    }, GEOCODE_DEBOUNCE_MS);
+  }, [reverseGeocode]);
+
+  const getBestCurrentLocation = useCallback(async () => {
+    try {
+      const live = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Highest,
+        mayShowUserSettingsDialog: true,
+      });
+      if (live?.coords?.latitude && live?.coords?.longitude) {
+        return {
+          latitude: live.coords.latitude,
+          longitude: live.coords.longitude,
+        };
+      }
+    } catch (error) {
+      console.log("High accuracy location failed:", error);
+    }
+
+    const lastKnown = await Location.getLastKnownPositionAsync({
+      maxAge: 15000,
+      requiredAccuracy: 100,
+    });
+    if (lastKnown?.coords?.latitude && lastKnown?.coords?.longitude) {
+      return {
+        latitude: lastKnown.coords.latitude,
+        longitude: lastKnown.coords.longitude,
+      };
+    }
+
+    throw new Error("Unable to detect current location");
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -39,12 +180,8 @@ export default function AddressPickerScreen({ navigation }) {
           setAddressLabel(savedAddress.label || "Selected Location");
           setAddressCity(savedAddress.city || "");
         } else {
-          let location = await Location.getCurrentPositionAsync({});
-          startLocation = {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-          };
-          reverseGeocode(startLocation.latitude, startLocation.longitude);
+          startLocation = await getBestCurrentLocation();
+          reverseGeocode(startLocation.latitude, startLocation.longitude, { force: true, showLoading: true });
         }
 
         const region = {
@@ -65,32 +202,18 @@ export default function AddressPickerScreen({ navigation }) {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [getBestCurrentLocation, reverseGeocode]);
 
-  const reverseGeocode = async (latitude, longitude) => {
-    try {
-      setAddressLabel("Loading address...");
-      let geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
-      if (geocode.length > 0) {
-        const place = geocode[0];
-        const formattedAddress = `${place.name ? place.name + ", " : ""}${place.street || ""}, ${place.city || ""}`;
-        setAddressLabel(formattedAddress.trim().replace(/^,|,$/g, ""));
-        setAddressCity(place.city || place.subregion || place.region || "");
-      } else {
-        setAddressLabel("Unknown location");
-        setAddressCity("");
-      }
-    } catch (error) {
-      console.error("Reverse Geocode error:", error);
-      setAddressLabel("Could not get address details");
-      setAddressCity("");
+  useEffect(() => () => {
+    if (geocodeTimerRef.current) {
+      clearTimeout(geocodeTimerRef.current);
     }
-  };
+  }, []);
 
   const handleRegionChangeComplete = (region) => {
     if (!region) return;
     setCurrentCoordinate({ latitude: region.latitude, longitude: region.longitude });
-    reverseGeocode(region.latitude, region.longitude);
+    scheduleReverseGeocode(region.latitude, region.longitude);
   };
 
   const saveLocation = async () => {
@@ -114,12 +237,10 @@ export default function AddressPickerScreen({ navigation }) {
 
   const centerOnUser = async () => {
     try {
-      let location = await Location.getCurrentPositionAsync({});
-      const coords = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      };
+      setFetchingLocation(true);
+      const coords = await getBestCurrentLocation();
       setUserLocation(coords);
+      setCurrentCoordinate(coords);
 
       if (mapRef.current?.animateToRegion) {
         mapRef.current.animateToRegion({
@@ -130,8 +251,12 @@ export default function AddressPickerScreen({ navigation }) {
       } else if (mapRef.current?.panTo) {
         mapRef.current.panTo(coords.latitude, coords.longitude, 16);
       }
+      scheduleReverseGeocode(coords.latitude, coords.longitude, { force: true, showLoading: true });
     } catch (error) {
       console.error("Error centering user:", error);
+      setAddressLabel("Could not fetch current location");
+    } finally {
+      setFetchingLocation(false);
     }
   };
 
@@ -172,8 +297,15 @@ export default function AddressPickerScreen({ navigation }) {
         </View>
 
         {/* Floating precise location button */}
-        <TouchableOpacity style={styles.myLocationButton} onPress={centerOnUser}>
-          <Ionicons name="locate" size={24} color="#06C168" />
+        <TouchableOpacity style={styles.myLocationButton} onPress={centerOnUser} disabled={fetchingLocation}>
+          {fetchingLocation ? (
+            <ActivityIndicator size="small" color="#06C168" />
+          ) : (
+            <>
+              <Ionicons name="locate" size={18} color="#06C168" />
+              <Text style={styles.myLocationButtonText}>Find My Area</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -271,13 +403,24 @@ const styles = StyleSheet.create({
     bottom: 20,
     right: 20,
     backgroundColor: colors.white,
-    padding: 12,
-    borderRadius: 30,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    minWidth: 128,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     elevation: 4,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
+  },
+  myLocationButtonText: {
+    color: "#06C168",
+    fontWeight: "700",
+    fontSize: 13,
   },
   bottomPanel: {
     flex: 1,
