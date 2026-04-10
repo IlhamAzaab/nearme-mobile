@@ -1,53 +1,31 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SvgXml } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import StepProgress from "../../../components/driver/StepProgress";
 import { API_URL } from "../../../config/env";
+import { NEARME_LOGO_ARTBOARD5_XML } from "../../../assets/NearMeLogoArtboard5Xml";
 
 export default function OnboardingStep5Screen({ navigation }) {
-  const [contractHtml, setContractHtml] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [confirmRead, setConfirmRead] = useState(false);
+  const [contractHtml] = useState(DEFAULT_CONTRACT);
   const [contractAccepted, setContractAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const token = await AsyncStorage.getItem("token");
-        const res = await fetch(`${API_URL}/onboarding/status`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (data.contractHtml) setContractHtml(data.contractHtml);
-        else setContractHtml(DEFAULT_CONTRACT);
-      } catch {
-        setContractHtml(DEFAULT_CONTRACT);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetch_();
-  }, []);
-
   const handleSubmit = async () => {
-    if (!confirmRead)
+    if (!contractAccepted)
       return Alert.alert(
         "Error",
-        "Please confirm that you have read the contract",
+        "Please read and accept the terms and conditions",
       );
-    if (!contractAccepted)
-      return Alert.alert("Error", "Please accept the contract to continue");
     setSubmitting(true);
     try {
       const token = await AsyncStorage.getItem("token");
@@ -60,7 +38,8 @@ export default function OnboardingStep5Screen({ navigation }) {
         body: JSON.stringify({
           contractAccepted: true,
           contractVersion: "1.0.0",
-          userAgent: "NearMe Mobile App",
+          userAgent: "Meezo Mobile App",
+          contractHtml,
         }),
       });
       const data = await res.json();
@@ -80,23 +59,14 @@ export default function OnboardingStep5Screen({ navigation }) {
     }
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={s.container}>
-        <ActivityIndicator
-          size="large"
-          color="#fff"
-          style={{ marginTop: 40 }}
-        />
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={s.container}>
       <ScrollView contentContainerStyle={s.scroll}>
         <StepProgress currentStep={5} />
-        <Text style={s.title}>Driver Agreement</Text>
+        <View style={s.logoWrap}>
+          <SvgXml xml={NEARME_LOGO_ARTBOARD5_XML} width={152} height={152} />
+        </View>
+        <Text style={s.title}>Delivery Partner Agreement</Text>
         <Text style={s.subtitle}>
           Step 5 of 5 Review and accept the contract
         </Text>
@@ -106,36 +76,26 @@ export default function OnboardingStep5Screen({ navigation }) {
             <Text style={s.contractText}>{contractHtml}</Text>
           </ScrollView>
           <View style={s.divider} />
-          <View style={s.checkRow}>
-            <Switch
-              value={confirmRead}
-              onValueChange={setConfirmRead}
-              trackColor={{ false: "#d1d5db", true: "#6EDE9A" }}
-              thumbColor={confirmRead ? "#06C168" : "#f4f4f5"}
-            />
+          <TouchableOpacity
+            style={[s.acceptRow, contractAccepted && s.acceptRowActive]}
+            onPress={() => setContractAccepted((prev) => !prev)}
+            activeOpacity={0.8}
+          >
+            <View style={[s.acceptBox, contractAccepted && s.acceptBoxActive]}>
+              {contractAccepted ? <Text style={s.acceptTick}>âœ“</Text> : null}
+            </View>
             <Text style={s.checkLabel}>
-              I have read and understood the entire contract
+              I have read, understood, and accept Meezo Delivery Partner Terms
+              and Conditions.
             </Text>
-          </View>
-          <View style={s.checkRow}>
-            <Switch
-              value={contractAccepted}
-              onValueChange={setContractAccepted}
-              trackColor={{ false: "#d1d5db", true: "#6EDE9A" }}
-              thumbColor={contractAccepted ? "#06C168" : "#f4f4f5"}
-            />
-            <Text style={s.checkLabel}>
-              I agree to the terms and conditions of the driver agreement
-            </Text>
-          </View>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[
               s.submitBtn,
-              (!confirmRead || !contractAccepted || submitting) &&
-                s.btnDisabled,
+              (!contractAccepted || submitting) && s.btnDisabled,
             ]}
             onPress={handleSubmit}
-            disabled={!confirmRead || !contractAccepted || submitting}
+            disabled={!contractAccepted || submitting}
           >
             {submitting ? (
               <ActivityIndicator size="small" color="#fff" />
@@ -156,90 +116,70 @@ export default function OnboardingStep5Screen({ navigation }) {
 }
 
 const DEFAULT_CONTRACT = `
-Driver Partnership Agreement
+Meezo Delivery Partner Terms and Conditions
 
 Version 1.0.0 - Effective Date: ${new Date().toLocaleDateString()}
 
-1. Introduction
-This Driver Partnership Agreement ("Agreement") is entered into between NearMe Platform ("Company") and you ("Driver"). By accepting this agreement, you agree to provide transportation and delivery services through the NearMe platform.
+1. Service Scope
+This agreement is between Meezo Platform ("Manager") and you ("Delivery Partner"). Meezo is a food delivery service platform. By accepting these terms, you agree to provide food pickup and delivery services through Meezo.
 
-2. Driver Requirements
-• Must be at least 21 years of age
-• Possess a valid Sri Lankan driving license
-• Maintain valid vehicle insurance and revenue license
-• Vehicle must pass safety and quality standards
-• Must pass background verification checks
+2. Pickup Distance and Earnings (Partner to Restaurant)
+- You will receive upto LKR 30 for travel from your location to the restaurant, up to 1 km.
+- If this pickup distance exceeds 1 km, no additional pickup earning is paid for the excess distance.
+- You can accept such orders if you want.
 
-3. Driver Responsibilities
-• Provide safe, courteous, and professional delivery services
-• Maintain vehicle in good working condition
-• Comply with all traffic laws and regulations
-• Keep all documents valid and up to date
-• Accept delivery requests within reasonable timeframes
-• Treat customers with respect and professionalism
-• Report any incidents or accidents immediately
+3. Delivery Distance Earnings (Restaurant to Customer)
+- You will receive full earnings based on total delivery distance from restaurant to customer.
+- Meezo pays LKR 35-50 per km depending on operating conditions; default base rate is LKR 40 per km.
 
-4. Payment Terms
-• Company will collect payment from customers on behalf of Driver
-• Driver will receive weekly payment transfers to registered bank account
-• Platform commission: 15% of total fare
-• Driver receives 85% of total fare after commission
-• Payment processing time: 2-3 business days
-• Minimum payout threshold: LKR 1,000
+4. Multi-Order Trip Bonuses
+- Meezo will pay a bonus for you when accepting additional deliveries in the same trip.
+- Second accepted delivery bonus: LKR 10-20.
+- Third and more accepted deliveries bonus: LKR 15-30 each.
+- You can accept up to 5 active deliveries in one trip.
 
-5. Insurance and Liability
-• Driver must maintain comprehensive vehicle insurance
-• Driver is responsible for any damages or injuries during service
-• Company is not liable for accidents during delivery
-• Driver must report all incidents within 24 hours
+5. Active Delivery Commitment
+- Once you start delivering food to customers, you must complete all active deliveries in that trip.
+- New order notifications are sent after all active deliveries are completed.
 
-6. Data and Privacy
-• Company will collect and store Driver's personal and vehicle information
-• Data will be used for verification, payment, and service improvement
-• Driver information will not be shared with third parties without consent
-• Customer data must be kept confidential
+6. Order Collection and Responsibility
+- At the restaurant, request each order using the order number shown in the app.
+- You must verify all listed food items are packed correctly before pickup.
+- After pickup, you are responsible for the order and associated cash-handling obligations.
 
-7. Account Suspension and Termination
-• Company may suspend account for policy violations
-• Repeated customer complaints may lead to deactivation
-• Either party may terminate with 7 days notice
-• Fraudulent activity results in immediate termination
-• Outstanding payments will be settled within 30 days of termination
+7. Cash on Delivery and Settlement Rules
+- All payments are handled as Cash on Delivery (COD).
+- You must collect the exact payable amount from the customer as shown in the delivery page .
+- You must settle the full collected amount to Meezo daily, either by bank transfer or direct payment to a manager.
+- Daily settlement must be completed before 12:00 AM (midnight).
 
-8. Quality Standards
-• Maintain minimum 4.0 star rating
-• Accept at least 80% of delivery requests
-• Complete deliveries without cancellations
-• Vehicle must be clean and presentable
-• Driver must dress professionally
+8. Tips and Priority Orders
+- Platform tip amounts may be added to delivery details based on order conditions.
+- If a tip appears in the delivery details, the order should be treated as priority.
+- You may also receive additional direct tips from customers.
+- Platform tip range is LKR 20-200, including weight-based allocations where applicable.
 
-9. Code of Conduct
-• No discrimination based on race, religion, gender, or disability
-• No harassment or inappropriate behavior
-• No unauthorized use of customer information
-• No driving under influence of alcohol or drugs
-• No smoking in vehicle during service
+9. Fair Earnings for Extra Active Deliveries
+- For extra active deliveries in the same trip, base delivery earnings will pay based on the additional travel-time factors to maintain fairness.
 
-10. Dispute Resolution
-• Any disputes will first be resolved through mediation
-• Unresolved disputes will be handled under Sri Lankan law
-• Jurisdiction: Courts of Colombo, Sri Lanka
+10. Restaurant Queue Priority
+- Delivery partners are assigned a dedicated service queue and are not required to wait in the regular customer queue.
 
-11. Updates to Agreement
-Company reserves the right to update this agreement. Drivers will be notified of changes 30 days in advance. Continued use of the platform constitutes acceptance of updated terms.
+11. Compliance and Conduct
+- You must follow applicable traffic, safety, and platform rules while delivering.
+- Repeated violations, settlement delays, misconduct, or fraudulent behavior may result in account suspension or termination.
 
-12. Contact Information
-For questions or concerns about this agreement:
-Email: support@nearme.lk
-Phone: +94 11 234 5678
-Address: 123 Main Street, Colombo 00100, Sri Lanka
+12. Updates to Terms
+Meezo may update these terms when required for operations, legal compliance, or safety. Continued use of the platform after updates constitutes acceptance of revised terms.
 
-By clicking "Submit Application", you acknowledge that you have read, understood, and agree to all terms and conditions of this Driver Partnership Agreement.
+13. Acceptance
+By selecting the acceptance option below, you confirm that you have read, understood, and accepted these Meezo Delivery Partner Terms and Conditions.
 `;
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#06C168" },
   scroll: { flexGrow: 1, padding: 20 },
+  logoWrap: { alignItems: "center", marginBottom: 8 },
   title: {
     fontSize: 26,
     fontWeight: "800",
@@ -280,16 +220,58 @@ const s = StyleSheet.create({
     gap: 12,
     marginBottom: 16,
   },
+  acceptRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#fde68a",
+    backgroundColor: "#fefce8",
+    borderRadius: 12,
+    padding: 12,
+  },
+  acceptRowActive: {
+    borderColor: "#86efac",
+    backgroundColor: "#f0fdf4",
+  },
+  acceptBox: {
+    width: 20,
+    height: 20,
+    borderWidth: 1.5,
+    borderColor: "#9ca3af",
+    borderRadius: 4,
+    marginTop: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  acceptBoxActive: {
+    borderColor: "#06C168",
+    backgroundColor: "#06C168",
+  },
+  acceptTick: {
+    color: "#fff",
+    fontWeight: "900",
+    lineHeight: 16,
+    fontSize: 13,
+  },
   checkLabel: { flex: 1, fontSize: 13, color: "#374151", lineHeight: 18 },
   submitBtn: {
     backgroundColor: "#06C168",
-    borderRadius: 12,
+    borderRadius: 999,
     paddingVertical: 15,
     alignItems: "center",
     marginTop: 8,
   },
   btnDisabled: { opacity: 0.5 },
   submitBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
-  backBtn: { marginTop: 10, alignItems: "center", paddingVertical: 10 },
+  backBtn: {
+    marginTop: 10,
+    alignItems: "center",
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: "#e5e7eb",
+  },
   backBtnText: { fontSize: 14, color: "#6b7280" },
 });

@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Feather } from "@expo/vector-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Image,
-  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -13,7 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
 
@@ -30,10 +30,31 @@ const DEFAULT_SUMMARY = {
 };
 
 const SKELETON_LOOP_MS = 900;
+const parseStoredLocalDate = (dateStr) => {
+  if (!dateStr) return null;
+
+  const matched = String(dateStr).match(
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/,
+  );
+
+  if (matched) {
+    return new Date(`${matched[1]}T${matched[2]}`);
+  }
+
+  const fallback = new Date(dateStr);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+};
 
 export default function AdminWithdrawals() {
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [selectedPayment, setSelectedPayment] = useState(null);
+  const [receiptViewer, setReceiptViewer] = useState({
+    open: false,
+    url: "",
+    type: "image",
+  });
+  const [receiptZoom, setReceiptZoom] = useState(1);
 
   const modalTranslateY = useRef(new Animated.Value(280)).current;
   const skeletonOpacity = useRef(new Animated.Value(0.55)).current;
@@ -139,8 +160,10 @@ export default function AdminWithdrawals() {
   };
 
   const formatDate = (dateStr) => {
-    if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleDateString("en-US", {
+    const localDate = parseStoredLocalDate(dateStr);
+    if (!localDate) return "-";
+
+    return localDate.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -148,18 +171,62 @@ export default function AdminWithdrawals() {
   };
 
   const formatTime = (dateStr) => {
-    if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleTimeString("en-US", {
+    const localDate = parseStoredLocalDate(dateStr);
+    if (!localDate) return "-";
+
+    return localDate.toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
     });
   };
 
-  const openProofUrl = (url) => {
-    if (url) {
-      Linking.openURL(url);
+  const getReceiptImageUrl = (proofUrl, proofType) => {
+    if (!proofUrl) return "";
+
+    const isPdfProof = proofType === "pdf" || /\.pdf(\?|$)/i.test(proofUrl);
+    if (!isPdfProof) return proofUrl;
+
+    let imageUrl = proofUrl;
+    if (imageUrl.includes("/raw/upload/")) {
+      imageUrl = imageUrl.replace("/raw/upload/", "/image/upload/");
     }
+    if (imageUrl.includes("/upload/")) {
+      imageUrl = imageUrl.replace(
+        "/upload/",
+        "/upload/f_jpg,pg_1,q_auto/",
+      );
+    }
+
+    // Keep PDF source extension so Cloudinary can render page-1 as image.
+    if (!/\.pdf(\?|$)/i.test(imageUrl)) {
+      imageUrl = `${imageUrl}.pdf`;
+    }
+
+    return imageUrl;
+  };
+
+  const openReceiptViewer = (url, type) => {
+    if (!url) return;
+    setReceiptZoom(1);
+    setReceiptViewer({
+      open: true,
+      url,
+      type: type === "pdf" ? "pdf" : "image",
+    });
+  };
+
+  const closeReceiptViewer = () => {
+    setReceiptZoom(1);
+    setReceiptViewer({ open: false, url: "", type: "image" });
+  };
+
+  const handleZoomIn = () => {
+    setReceiptZoom((z) => Math.min(4, Number((z + 0.25).toFixed(2))));
+  };
+
+  const handleZoomOut = () => {
+    setReceiptZoom((z) => Math.max(1, Number((z - 0.25).toFixed(2))));
   };
 
   const animatedSkeletonStyle = { opacity: skeletonOpacity };
@@ -358,12 +425,12 @@ export default function AdminWithdrawals() {
         }
       >
         <View style={styles.header}>
-          <View>
+          <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>Withdrawals</Text>
             <View style={styles.headerUnderline} />
           </View>
           <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
-            <Text style={styles.refreshIcon}>R</Text>
+            <Feather name="refresh-cw" size={16} color="#06C168" />
           </TouchableOpacity>
         </View>
 
@@ -416,10 +483,10 @@ export default function AdminWithdrawals() {
               </Text>
             </View>
             <View style={styles.statCell}>
+              <Text style={styles.statLabel}>RECEIVE</Text>
               <Text style={[styles.statValue, styles.statValueGreen]}>
                 Rs.{Number(summary.last_30_days_withdrawals || 0).toFixed(2)}
               </Text>
-              <Text style={styles.statLabel}>RECEIVE</Text>
             </View>
           </View>
         </View>
@@ -435,7 +502,7 @@ export default function AdminWithdrawals() {
           {payments.length === 0 ? (
             <View style={styles.emptyState}>
               <View style={styles.emptyIconContainer}>
-                <Text style={styles.emptyIcon}>[]</Text>
+                <Feather name="file-text" size={20} color="#9ca3af" />
               </View>
               <Text style={styles.emptyTitle}>No withdrawals yet</Text>
               <Text style={styles.emptySubtitle}>
@@ -452,7 +519,7 @@ export default function AdminWithdrawals() {
                   activeOpacity={0.85}
                 >
                   <View style={styles.paymentIconContainer}>
-                    <Text style={styles.paymentIcon}>OK</Text>
+                    <Feather name="check-circle" size={16} color="#06C168" />
                   </View>
                   <View style={styles.paymentInfo}>
                     <Text style={styles.paymentAmount}>
@@ -462,6 +529,9 @@ export default function AdminWithdrawals() {
                       {formatDate(payment.created_at)} at{" "}
                       {formatTime(payment.created_at)}
                     </Text>
+                    <Text style={styles.paymentTxnId}>
+                      Transfer ID: {payment?.id?.substring(0, 12).toUpperCase()}
+                    </Text>
                     {payment.note ? (
                       <Text style={styles.paymentNote} numberOfLines={1}>
                         {payment.note}
@@ -470,7 +540,7 @@ export default function AdminWithdrawals() {
                   </View>
                   <View style={styles.paymentArrow}>
                     <Text style={styles.paymentViewText}>View</Text>
-                    <Text style={styles.paymentArrowIcon}>{">"}</Text>
+                    <Feather name="chevron-right" size={16} color="#9ca3af" />
                   </View>
                 </TouchableOpacity>
               ))}
@@ -483,11 +553,17 @@ export default function AdminWithdrawals() {
         visible={!!selectedPayment}
         transparent
         animationType="fade"
-        onRequestClose={() => setSelectedPayment(null)}
+        onRequestClose={() => {
+          setSelectedPayment(null);
+          closeReceiptViewer();
+        }}
       >
         <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setSelectedPayment(null)}
+          style={[styles.modalOverlay, { paddingBottom: 66 + insets.bottom }]}
+          onPress={() => {
+            setSelectedPayment(null);
+            closeReceiptViewer();
+          }}
         >
           <Animated.View
             style={[
@@ -504,9 +580,12 @@ export default function AdminWithdrawals() {
                 <Text style={styles.modalTitle}>Payment Details</Text>
                 <TouchableOpacity
                   style={styles.modalCloseBtn}
-                  onPress={() => setSelectedPayment(null)}
+                  onPress={() => {
+                    setSelectedPayment(null);
+                    closeReceiptViewer();
+                  }}
                 >
-                  <Text style={styles.modalCloseIcon}>X</Text>
+                  <Feather name="x" size={18} color="#9ca3af" />
                 </TouchableOpacity>
               </View>
 
@@ -565,46 +644,87 @@ export default function AdminWithdrawals() {
               {selectedPayment?.proof_url ? (
                 <View style={styles.proofSection}>
                   <Text style={styles.proofLabel}>TRANSFER RECEIPT</Text>
-                  {selectedPayment.proof_type === "pdf" ? (
-                    <TouchableOpacity
-                      style={styles.proofPdfCard}
-                      onPress={() => openProofUrl(selectedPayment.proof_url)}
-                    >
-                      <View style={styles.proofPdfIcon}>
-                        <Text style={styles.proofPdfEmoji}>PDF</Text>
-                      </View>
-                      <View style={styles.proofPdfInfo}>
-                        <Text style={styles.proofPdfTitle}>
-                          View PDF Receipt
-                        </Text>
-                        <Text style={styles.proofPdfSubtitle}>
-                          Tap to open in browser
-                        </Text>
-                      </View>
-                      <Text style={styles.proofPdfArrow}>Open</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.proofImageContainer}
-                      onPress={() => openProofUrl(selectedPayment.proof_url)}
-                    >
-                      <Image
-                        source={{ uri: selectedPayment.proof_url }}
-                        style={styles.proofImage}
-                        resizeMode="contain"
-                      />
-                      <View style={styles.proofImageFooter}>
-                        <Text style={styles.proofImageHint}>
-                          Tap image to view full size
-                        </Text>
-                        <Text style={styles.proofImageOpen}>Open</Text>
-                      </View>
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={styles.proofImageContainer}
+                    onPress={() =>
+                      openReceiptViewer(
+                        getReceiptImageUrl(
+                          selectedPayment.proof_url,
+                          selectedPayment.proof_type,
+                        ),
+                        "image",
+                      )
+                    }
+                  >
+                    <Image
+                      source={{
+                        uri: getReceiptImageUrl(
+                          selectedPayment.proof_url,
+                          selectedPayment.proof_type,
+                        ),
+                      }}
+                      style={styles.proofImage}
+                      resizeMode="contain"
+                    />
+                    <View style={styles.proofImageFooter}>
+                      <Text style={styles.proofImageHint}>
+                        Tap image to view full size
+                      </Text>
+                      <Text style={styles.proofImageOpen}>Open</Text>
+                    </View>
+                  </TouchableOpacity>
                 </View>
               ) : null}
             </Pressable>
           </Animated.View>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={receiptViewer.open}
+        transparent
+        animationType="fade"
+        onRequestClose={closeReceiptViewer}
+      >
+        <Pressable
+          style={[styles.previewOverlay, { paddingBottom: 66 + insets.bottom }]}
+          onPress={closeReceiptViewer}
+        >
+          <Pressable
+            style={[styles.previewContent, styles.previewContentImage]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.previewHeader}>
+              <Text style={styles.previewTitle}>Receipt Preview</Text>
+              <View style={styles.previewHeaderActions}>
+                <TouchableOpacity onPress={handleZoomOut} style={styles.previewZoomBtn}>
+                  <Feather name="minus" size={16} color="#6b7280" />
+                </TouchableOpacity>
+                <Text style={styles.previewZoomValue}>
+                  {Math.round(receiptZoom * 100)}%
+                </Text>
+                <TouchableOpacity onPress={handleZoomIn} style={styles.previewZoomBtn}>
+                  <Feather name="plus" size={16} color="#6b7280" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={closeReceiptViewer} style={styles.previewCloseBtn}>
+                  <Feather name="x" size={18} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView
+              style={styles.previewImageScroll}
+              contentContainerStyle={styles.previewImageScrollContent}
+              maximumZoomScale={3}
+              minimumZoomScale={1}
+            >
+              <Image
+                source={{ uri: receiptViewer.url }}
+                style={[styles.previewImage, { transform: [{ scale: receiptZoom }] }]}
+                resizeMode="contain"
+              />
+            </ScrollView>
+          </Pressable>
         </Pressable>
       </Modal>
     </SafeAreaView>
@@ -630,6 +750,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 14,
   },
+  headerTitleWrap: {
+    alignItems: "flex-end",
+  },
   headerTitle: {
     fontSize: 30,
     fontWeight: "700",
@@ -653,12 +776,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  refreshIcon: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#16a34a",
-  },
-
   heroCard: {
     backgroundColor: "#E6F9F1",
     borderRadius: 14,
@@ -703,11 +820,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E5E7EB",
     marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
   },
   cardHeading: {
     fontSize: 11,
@@ -789,11 +901,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 12,
   },
-  emptyIcon: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#9ca3af",
-  },
   emptyTitle: {
     fontSize: 15,
     fontWeight: "700",
@@ -817,11 +924,6 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
   },
   paymentIconContainer: {
     width: 36,
@@ -830,11 +932,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#E6F9F1",
     alignItems: "center",
     justifyContent: "center",
-  },
-  paymentIcon: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#06C168",
   },
   paymentInfo: {
     flex: 1,
@@ -850,6 +947,13 @@ const styles = StyleSheet.create({
     color: "#9ca3af",
     marginTop: 1,
     fontWeight: "500",
+  },
+  paymentTxnId: {
+    fontSize: 10,
+    color: "#4b5563",
+    marginTop: 2,
+    fontFamily: "monospace",
+    fontWeight: "700",
   },
   paymentNote: {
     marginTop: 3,
@@ -867,12 +971,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#6b7280",
   },
-  paymentArrowIcon: {
-    fontSize: 16,
-    color: "#9ca3af",
-    marginTop: -1,
-  },
-
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -908,11 +1006,6 @@ const styles = StyleSheet.create({
   },
   modalCloseBtn: {
     padding: 4,
-  },
-  modalCloseIcon: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#9ca3af",
   },
   modalAmountSection: {
     alignItems: "center",
@@ -988,48 +1081,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     marginBottom: 10,
   },
-  proofPdfCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f9fafb",
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  proofPdfIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: "#FEE2E2",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  proofPdfEmoji: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#ef4444",
-  },
-  proofPdfInfo: {
-    flex: 1,
-    marginLeft: 10,
-  },
-  proofPdfTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  proofPdfSubtitle: {
-    fontSize: 11,
-    color: "#9ca3af",
-    marginTop: 1,
-    fontWeight: "500",
-  },
-  proofPdfArrow: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#9ca3af",
-  },
   proofImageContainer: {
     borderRadius: 10,
     overflow: "hidden",
@@ -1057,6 +1108,79 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     color: "#06C168",
+  },
+
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 14,
+  },
+  previewContent: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  previewContentImage: {
+    maxWidth: 460,
+    maxHeight: "88%",
+  },
+  previewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+    backgroundColor: "#fff",
+  },
+  previewTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1f2937",
+  },
+  previewHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  previewZoomBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f3f4f6",
+  },
+  previewZoomValue: {
+    width: 42,
+    textAlign: "center",
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#4b5563",
+  },
+  previewCloseBtn: {
+    padding: 4,
+  },
+  previewImageScroll: {
+    backgroundColor: "#f3f4f6",
+  },
+  previewImageScrollContent: {
+    padding: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  previewImage: {
+    width: 360,
+    height: 520,
+    maxWidth: "100%",
+    borderRadius: 10,
+    backgroundColor: "#fff",
   },
 
   skeletonHeader: {

@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
-import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -28,61 +29,61 @@ const MANAGER_COUNT = 2;
 
 export default function ManagerAccountScreen() {
   const navigation = useNavigation();
+  const queryClient = useQueryClient();
   const { user, logout } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [earningsLoading, setEarningsLoading] = useState(true);
   const [period, setPeriod] = useState("daily");
-  const [earnings, setEarnings] = useState(null);
-  const [managerInfo, setManagerInfo] = useState(null);
 
-  // Fetch manager profile
-  useEffect(() => {
-    (async () => {
-      try {
-        const token = await AsyncStorage.getItem("token");
-        if (!token) return;
-        const res = await fetch(`${API_URL}/manager/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (res.ok && data?.manager) {
-          setManagerInfo(data.manager);
-        }
-      } catch (_) {}
-      setLoading(false);
-    })();
-  }, []);
+  const profileQuery = useQuery({
+    queryKey: ["manager", "me"],
+    queryFn: async () => {
+      const token = await AsyncStorage.getItem("token");
+      const res = await fetch(`${API_URL}/manager/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
 
-  // Fetch earnings summary
-  const fetchEarnings = useCallback(
-    async (showRefresh = false) => {
-      if (showRefresh) setRefreshing(true);
-      setEarningsLoading(true);
-      try {
-        const token = await AsyncStorage.getItem("token");
-        if (!token) return;
-        const res = await fetch(
-          `${API_URL}/manager/earnings/summary?period=${period}`,
-          { headers: { Authorization: `Bearer ${token}` } },
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setEarnings(data.summary || null);
-        }
-      } catch (err) {
-        console.error("Failed to fetch earnings:", err);
-      } finally {
-        setEarningsLoading(false);
-        setRefreshing(false);
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to load manager profile");
       }
-    },
-    [period],
-  );
 
-  useEffect(() => {
-    fetchEarnings();
-  }, [fetchEarnings]);
+      return data?.manager || null;
+    },
+    staleTime: 2 * 60 * 1000,
+    initialData: () => queryClient.getQueryData(["manager", "me"]),
+    placeholderData: (previousData) => previousData,
+    refetchOnMount: false,
+  });
+
+  const earningsQuery = useQuery({
+    queryKey: ["manager", "earnings-summary", period],
+    queryFn: async () => {
+      const token = await AsyncStorage.getItem("token");
+      const res = await fetch(
+        `${API_URL}/manager/earnings/summary?period=${period}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to load manager earnings");
+      }
+
+      return data.summary || null;
+    },
+    staleTime: 60 * 1000,
+    initialData: () =>
+      queryClient.getQueryData(["manager", "earnings-summary", period]),
+    placeholderData: (previousData) => previousData,
+    refetchOnMount: false,
+  });
+
+  const loading = profileQuery.isLoading && !profileQuery.data;
+  const earningsLoading = earningsQuery.isLoading && !earningsQuery.data;
+  const refreshing =
+    profileQuery.isFetching || (earningsQuery.isFetching && !earningsLoading);
+
+  const managerInfo = profileQuery.data;
+  const earnings = earningsQuery.data;
 
   const handleLogout = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
@@ -110,7 +111,9 @@ export default function ManagerAccountScreen() {
       <ManagerHeader
         title="My Account"
         showBack
-        onRefresh={() => fetchEarnings(true)}
+        onRefresh={async () => {
+          await Promise.all([profileQuery.refetch(), earningsQuery.refetch()]);
+        }}
       />
 
       <ScrollView
@@ -118,7 +121,14 @@ export default function ManagerAccountScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => fetchEarnings(true)}
+            onRefresh={async () => {
+              await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ["manager", "me"] }),
+                queryClient.invalidateQueries({
+                  queryKey: ["manager", "earnings-summary", period],
+                }),
+              ]);
+            }}
             colors={["#06C168"]}
           />
         }

@@ -2,7 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { useIsFocused } from "@react-navigation/native";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ActivityIndicator,
   Alert,
@@ -18,54 +19,68 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DriverDashboardLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
 import { API_URL } from "../../config/env";
 
 export default function DriverDepositsScreen({ navigation }) {
   const isFocused = useIsFocused();
-  const isFocusedRef = useRef(true);
-
-  useEffect(() => {
-    isFocusedRef.current = isFocused;
-  }, [isFocused]);
-
-  const [balance, setBalance] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [amount, setAmount] = useState("");
   const [proofFile, setProofFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    try {
+  const depositsQuery = useQuery({
+    queryKey: ["driver", "deposits", "overview"],
+    queryFn: async () => {
       const token = await AsyncStorage.getItem("token");
+      if (!token) throw new Error("No authentication token");
+
       const headers = { Authorization: `Bearer ${token}` };
-      const [bRes, hRes] = await Promise.all([
+      const [bRes, hRes, mRes] = await Promise.all([
         fetch(`${API_URL}/driver/deposits/balance`, { headers }),
         fetch(`${API_URL}/driver/deposits/history`, { headers }),
+        fetch(`${API_URL}/driver/deposits/manager-bank-details`, { headers }),
       ]);
-      const bData = await bRes.json();
-      if (bData.success) setBalance(bData.balance || {});
-      const hData = await hRes.json();
-      if (hData.success) setHistory(hData.deposits || []);
-    } catch (e) {
-      console.error(e);
+
+      const [bData, hData, mData] = await Promise.all([
+        bRes.json().catch(() => ({})),
+        hRes.json().catch(() => ({})),
+        mRes.json().catch(() => ({})),
+      ]);
+
+      return {
+        balance: bData?.success ? bData.balance || {} : {},
+        history: hData?.success ? hData.deposits || [] : [],
+        managerBank: mData?.success ? mData.bankDetails || null : null,
+      };
+    },
+    initialData: () =>
+      queryClient.getQueryData(["driver", "deposits", "overview"]),
+    staleTime: 60 * 1000,
+    refetchInterval: isFocused ? 60 * 1000 : false,
+    placeholderData: (previousData) => previousData,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const balance = depositsQuery.data?.balance || {};
+  const history = depositsQuery.data?.history || [];
+  const managerBank = depositsQuery.data?.managerBank || null;
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({
+        queryKey: ["driver", "deposits", "overview"],
+      });
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-    // Poll every 60 seconds (was 30s), only when screen is focused
-    const interval = setInterval(() => {
-      if (isFocusedRef.current) fetchData();
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+  };
 
   const pickProof = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -112,7 +127,9 @@ export default function DriverDepositsScreen({ navigation }) {
         setShowModal(false);
         setAmount("");
         setProofFile(null);
-        fetchData();
+        await queryClient.invalidateQueries({
+          queryKey: ["driver", "deposits", "overview"],
+        });
       } else {
         Alert.alert("Error", data.message || "Failed to submit deposit");
       }
@@ -136,135 +153,170 @@ export default function DriverDepositsScreen({ navigation }) {
     }
   };
 
+  const loading = depositsQuery.isLoading && !depositsQuery.data;
+
   if (loading)
     return (
-      <SafeAreaView style={s.container}>
-        <ActivityIndicator
-          size="large"
-          color="#06C168"
-          style={{ marginTop: 40 }}
-        />
+      <SafeAreaView style={s.container} edges={["left", "right", "bottom"]}>
+        <DriverDashboardLoadingSkeleton />
       </SafeAreaView>
     );
 
   return (
-    <SafeAreaView style={s.container}>
-      <DriverScreenHeader
-        title="Remittance History"
-        rightIcon="refresh"
-        onBackPress={() => navigation.goBack()}
-        onRightPress={() => {
-          setRefreshing(true);
-          fetchData();
-        }}
-      />
-      <ScrollView
-        contentContainerStyle={s.scroll}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              fetchData();
-            }}
-            colors={["#06C168"]}
+    <SafeAreaView style={s.container} edges={["left", "right", "bottom"]}>
+      <View style={{ flex: 1 }}>
+        <DriverScreenSection screenKey="DriverDeposits" sectionIndex={0}>
+          <DriverScreenHeader
+            title="Deposit to Meezo"
+            rightIcon="refresh"
+            onBackPress={() => navigation.goBack()}
+            onRightPress={onRefresh}
           />
-        }
-      >
-        {/* Balance Card */}
-        <View style={s.balanceCard}>
-          <Text style={s.balanceLabel}>Pending Deposit (Owed to Manager)</Text>
-          <Text style={s.balanceAmount}>
-            ?{Number(balance?.pending_deposit || 0).toFixed(2)}
-          </Text>
-          <Text style={s.balanceSubtext}>LKR</Text>
-
-          {/* In Process & Available Breakdown */}
-          <View style={s.breakdownBox}>
-            <View style={s.breakdownRow}>
-              <Text style={s.breakdownLabel}>In Process:</Text>
-              <Text style={s.breakdownAmount}>
-                ?
-                {history
-                  .filter((d) => d.status === "pending")
-                  .reduce((sum, d) => sum + Number(d.amount || 0), 0)
-                  .toFixed(2)}
-              </Text>
-            </View>
-            <View style={s.breakdownRow}>
-              <Text style={s.breakdownLabel}>Available to Submit:</Text>
-              <Text style={s.breakdownAmount}>
-                ?
-                {(
-                  Number(balance?.pending_deposit || 0) -
-                  history
-                    .filter((d) => d.status === "pending")
-                    .reduce((sum, d) => sum + Number(d.amount || 0), 0)
-                ).toFixed(2)}
-              </Text>
-            </View>
-          </View>
-
-          {/* Status */}
-          <View style={s.statusSection}>
-            <Text style={s.statusText}>
-              {history.filter((d) => d.status === "pending").length} transfer(s)
-              in process
-            </Text>
-            <Text style={s.statusSubtext}>Waiting for manager approval</Text>
-          </View>
-
-          {/* New Transfer Button */}
-          <TouchableOpacity
-            style={s.newTransferBtn}
-            onPress={() => setShowModal(true)}
+        </DriverScreenSection>
+        <DriverScreenSection
+          screenKey="DriverDeposits"
+          sectionIndex={1}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            contentContainerStyle={s.scroll}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={["#06C168"]}
+              />
+            }
           >
-            <Text style={s.newTransferBtnText}>+ New Transfer</Text>
-          </TouchableOpacity>
-        </View>
+            {/* Balance Card */}
+            <View style={s.balanceCard}>
+              <Text style={s.balanceLabel}>Pending Deposit</Text>
+              <Text style={s.balanceAmount}>
+                Rs {Number(balance?.pending_deposit || 0).toFixed(2)}
+              </Text>
 
-        {/* History */}
-        <Text style={s.sectionTitle}>Recent Transfers</Text>
-        {history.length === 0 ? (
-          <View style={s.empty}>
-            <Ionicons
-              name="document"
-              size={40}
-              color="#d1d5db"
-              style={{ marginBottom: 12 }}
-            />
-            <Text style={s.emptyText}>No transfer history</Text>
-          </View>
-        ) : (
-          history.map((item) => {
-            const sc = getStatusColors(item.status);
-            return (
-              <View key={item.id} style={s.historyItem}>
-                <View style={[s.historyIcon, { backgroundColor: sc.bg }]}>
-                  <Ionicons name="arrow-up" size={20} color="#fff" />
-                </View>
-                <View style={s.historyContent}>
-                  <Text style={s.historyAmount}>
-                    ?{Number(item.amount).toFixed(2)}
-                  </Text>
-                  <Text style={s.historyDate}>
-                    {new Date(item.created_at).toLocaleDateString()} at{" "}
-                    {new Date(item.created_at).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+              {/* In Process & Available Breakdown */}
+              <View style={s.breakdownBox}>
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>In Process:</Text>
+                  <Text style={s.breakdownAmount}>
+                    Rs
+                    {history
+                      .filter((d) => d.status === "pending")
+                      .reduce((sum, d) => sum + Number(d.amount || 0), 0)
+                      .toFixed(2)}
                   </Text>
                 </View>
-                <View style={[s.statusBadge, { backgroundColor: sc.bg }]}>
-                  <Text style={[s.statusText, { color: sc.text }]}>
-                    {item.status.toUpperCase()}
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>Available to Submit:</Text>
+                  <Text style={s.breakdownAmount}>
+                    Rs
+                    {(
+                      Number(balance?.pending_deposit || 0) -
+                      history
+                        .filter((d) => d.status === "pending")
+                        .reduce((sum, d) => sum + Number(d.amount || 0), 0)
+                    ).toFixed(2)}
                   </Text>
                 </View>
               </View>
-            );
-          })
-        )}
-      </ScrollView>
+
+              {/* New Transfer Button */}
+              <TouchableOpacity
+                style={s.newTransferBtn}
+                onPress={() => setShowModal(true)}
+              >
+                <Text style={s.newTransferBtnText}>+ New Transfer</Text>
+              </TouchableOpacity>
+            </View>
+
+            {managerBank ? (
+              <View style={s.bankCard}>
+                <View style={s.bankHeaderRow}>
+                  <Ionicons name="menu" size={16} color="#2563eb" />
+                  <Text style={s.bankHeaderTitle}>Deposit to This Account</Text>
+                </View>
+
+                <View style={s.bankBody}>
+                  <View>
+                    <Text style={s.bankLabel}>Account Number</Text>
+                    <Text style={s.bankAccountNumber}>
+                      {managerBank.account_number || "-"}
+                    </Text>
+                  </View>
+
+                  <View style={s.bankDivider} />
+
+                  <View style={s.bankGrid}>
+                    <View style={s.bankCell}>
+                      <Text style={s.bankLabel}>Account Holder</Text>
+                      <Text style={s.bankValue}>
+                        {managerBank.account_holder_name || "-"}
+                      </Text>
+                    </View>
+
+                    <View style={s.bankCell}>
+                      <Text style={s.bankLabel}>Bank Name</Text>
+                      <Text style={s.bankValue}>
+                        {managerBank.bank_name || "-"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {managerBank.branch_name ? (
+                    <View style={s.bankBranchWrap}>
+                      <Text style={s.bankLabel}>Branch</Text>
+                      <Text style={s.bankValue}>{managerBank.branch_name}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+
+            {/* History */}
+            <Text style={s.sectionTitle}>Recent Transfers</Text>
+            {history.length === 0 ? (
+              <View style={s.empty}>
+                <Ionicons
+                  name="document"
+                  size={40}
+                  color="#d1d5db"
+                  style={{ marginBottom: 12 }}
+                />
+                <Text style={s.emptyText}>No transfer history</Text>
+              </View>
+            ) : (
+              history.map((item) => {
+                const sc = getStatusColors(item.status);
+                return (
+                  <View key={item.id} style={s.historyItem}>
+                    <View style={[s.historyIcon, { backgroundColor: sc.bg }]}>
+                      <Ionicons name="arrow-up" size={20} color="#fff" />
+                    </View>
+                    <View style={s.historyContent}>
+                      <Text style={s.historyAmount}>
+                        Rs {Number(item.amount).toFixed(2)}
+                      </Text>
+                      <Text style={s.historyDate}>
+                        {new Date(item.created_at).toLocaleDateString()} at{" "}
+                        {new Date(item.created_at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </Text>
+                    </View>
+                    <View style={[s.statusBadge, { backgroundColor: sc.bg }]}>
+                      <Text style={[s.statusText, { color: sc.text }]}>
+                        {item.status.toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        </DriverScreenSection>
+      </View>
 
       {/* Submit Modal with Keyboard Handling */}
       <Modal visible={showModal} transparent animationType="slide">
@@ -300,7 +352,7 @@ export default function DriverDepositsScreen({ navigation }) {
                       setProofFile(null);
                     }}
                   >
-                    <Text style={s.modalClose}>?</Text>
+                    <Text style={s.modalClose}>x</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -314,7 +366,7 @@ export default function DriverDepositsScreen({ navigation }) {
                   <View style={s.infoRow}>
                     <Text style={s.infoLabel}>Total Owed:</Text>
                     <Text style={s.infoValue}>
-                      ?{Number(balance?.pending_deposit || 0).toFixed(2)}
+                      Rs {Number(balance?.pending_deposit || 0).toFixed(2)}
                     </Text>
                   </View>
                   <View style={s.infoRow}>
@@ -322,7 +374,7 @@ export default function DriverDepositsScreen({ navigation }) {
                       In Process:
                     </Text>
                     <Text style={[s.infoValue, { color: "#ca8a04" }]}>
-                      ?
+                      Rs
                       {history
                         .filter((d) => d.status === "pending")
                         .reduce((sum, d) => sum + Number(d.amount || 0), 0)
@@ -334,7 +386,7 @@ export default function DriverDepositsScreen({ navigation }) {
                       Available to Submit:
                     </Text>
                     <Text style={[s.infoValue, { color: "#06C168" }]}>
-                      ?
+                      Rs
                       {(
                         Number(balance?.pending_deposit || 0) -
                         history
@@ -414,15 +466,15 @@ const s = StyleSheet.create({
   },
   balanceLabel: {
     fontSize: 12,
-    color: "#618968",
-    fontWeight: "600",
+    color: "#168C068",
+    fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    marginBottom: 8,
+    marginBottom: 0,
   },
   balanceAmount: {
     fontSize: 40,
-    fontWeight: "800",
+    fontWeight: "600",
     color: "#111816",
     marginBottom: 4,
   },
@@ -472,7 +524,7 @@ const s = StyleSheet.create({
   },
   newTransferBtn: {
     backgroundColor: "#13ecb9",
-    borderRadius: 12,
+    borderRadius: 25,
     paddingVertical: 12,
     alignItems: "center",
     marginTop: 4,
@@ -480,6 +532,66 @@ const s = StyleSheet.create({
   newTransferBtnText: {
     fontSize: 15,
     fontWeight: "700",
+    color: "#111816",
+  },
+  bankCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    overflow: "hidden",
+    backgroundColor: "#eff6ff",
+    marginBottom: 16,
+  },
+  bankHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "#dbeafe",
+    borderBottomWidth: 1,
+    borderBottomColor: "#bfdbfe",
+  },
+  bankHeaderTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1d4ed8",
+  },
+  bankBody: {
+    padding: 10,
+    gap: 5,
+  },
+  bankDivider: {
+    height: 1,
+    backgroundColor: "#bfdbfe",
+  },
+  bankGrid: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  bankCell: {
+    flex: 1,
+  },
+  bankBranchWrap: {
+    marginTop: 2,
+  },
+  bankLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    color: "#3b82f6",
+    marginBottom: 2,
+  },
+  bankAccountNumber: {
+    fontSize: 31,
+    fontWeight: "700",
+    color: "#111816",
+    letterSpacing: 0.8,
+  },
+  bankValue: {
+    fontSize: 18,
+    fontWeight: "600",
     color: "#111816",
   },
   sectionTitle: {

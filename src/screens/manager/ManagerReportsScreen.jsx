@@ -12,6 +12,11 @@ import ManagerDrawer from "../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../components/manager/ManagerHeader";
 
 const REPORT_DRAWER_ITEMS = [
+  {
+    route: "SendNotification",
+    label: "Send Notification",
+    icon: "megaphone-outline",
+  },
   { route: "SalesReports", label: "Sales", icon: "trending-up-outline" },
   { route: "DeliveryReports", label: "Delivery", icon: "car-outline" },
   {
@@ -34,6 +39,14 @@ const ManagerReportsScreen = ({ navigation }) => {
       iconBg: "#B8F0D0",
       iconColor: "#06C168",
       screen: "OperationsConfig",
+    },
+    {
+      icon: "megaphone-outline",
+      title: "Send Notification",
+      desc: "Broadcast announcements to customers, admins, and drivers",
+      iconBg: "#E2E8F0",
+      iconColor: "#111816",
+      screen: "SendNotification",
     },
     {
       icon: "bicycle-outline",
@@ -81,8 +94,8 @@ const ManagerReportsScreen = ({ navigation }) => {
     },
     {
       icon: "people-outline",
-      title: "Customer Reports",
-      desc: "Understand customer behavior and order patterns",
+      title: "Customer Management",
+      desc: "Manage customer accounts, suspension, and order-based views",
       iconBg: "#FEE2E2",
       iconColor: "#DC2626",
       screen: "CustomerReports",

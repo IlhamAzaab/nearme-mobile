@@ -22,6 +22,10 @@ import { API_URL } from "../../../config/env";
 import { getAccessToken } from "../../../lib/authStorage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const KINNIYA_BUHARI_JUNCTION = {
+  latitude: 8.5017,
+  longitude: 81.186,
+};
 
 // Step Progress Bar Component
 function StepProgress({ currentStep, totalSteps }) {
@@ -326,11 +330,6 @@ const timePickerStyles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#e5e7eb",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
     zIndex: 100,
     maxHeight: 200,
   },
@@ -373,8 +372,8 @@ export default function Step2() {
 
   const [position, setPosition] = useState(null);
   const [mapRegion, setMapRegion] = useState({
-    latitude: 7.8731,
-    longitude: 80.7718,
+    latitude: KINNIYA_BUHARI_JUNCTION.latitude,
+    longitude: KINNIYA_BUHARI_JUNCTION.longitude,
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   });
@@ -395,7 +394,7 @@ export default function Step2() {
   // Set default position
   useEffect(() => {
     if (!position) {
-      setPosition({ latitude: 7.8731, longitude: 80.7718 });
+      setPosition(KINNIYA_BUHARI_JUNCTION);
     }
   }, []);
 
@@ -572,11 +571,6 @@ export default function Step2() {
       return;
     }
 
-    if (!files.coverImage) {
-      Alert.alert("Validation Error", "Cover image is required");
-      return;
-    }
-
     setLoading(true);
 
     try {
@@ -599,14 +593,21 @@ export default function Step2() {
         uploadPromises.push(Promise.resolve(null));
       }
 
-      uploadPromises.push(
-        (async () => {
-          setUploading((prev) => ({ ...prev, coverImage: true }));
-          const url = await uploadToCloudinary(files.coverImage, "cover_image");
-          setUploading((prev) => ({ ...prev, coverImage: false }));
-          return url;
-        })(),
-      );
+      if (files.coverImage) {
+        uploadPromises.push(
+          (async () => {
+            setUploading((prev) => ({ ...prev, coverImage: true }));
+            const url = await uploadToCloudinary(
+              files.coverImage,
+              "cover_image",
+            );
+            setUploading((prev) => ({ ...prev, coverImage: false }));
+            return url;
+          })(),
+        );
+      } else {
+        uploadPromises.push(Promise.resolve(null));
+      }
 
       const [uploadedLogoUrl, coverImageUrl] =
         await Promise.all(uploadPromises);
@@ -638,7 +639,7 @@ export default function Step2() {
       console.error("Step2 submit error", err);
       Alert.alert(
         "Error",
-        err.message || "Failed to upload images. Please try again.",
+        err.message || "Failed to save restaurant details. Please try again.",
       );
     } finally {
       setLoading(false);
@@ -789,7 +790,10 @@ export default function Step2() {
             {/* Map Section */}
             <View style={styles.mapSection}>
               <Text style={styles.inputLabel}>Restaurant Location</Text>
-              <Text style={styles.mapHint}>Tap on map to select location</Text>
+              <Text style={styles.mapHint}>
+                Default location is Kinniya Buhari Junction. Tap on map to
+                select location.
+              </Text>
 
               <View style={styles.mapContainer}>
                 <FreeMapView
@@ -858,7 +862,7 @@ export default function Step2() {
 
             {/* Image Uploads */}
             {renderImageUploader("Restaurant Logo (Optional)", "logo", false)}
-            {renderImageUploader("Cover Image", "coverImage", true)}
+            {renderImageUploader("Cover Image (Optional)", "coverImage", false)}
 
             {/* Action Buttons */}
             <View style={styles.buttonRow}>
@@ -943,11 +947,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
   },
   headerIconText: {
     fontSize: 32,
@@ -967,11 +966,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderRadius: 20,
     padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 4,
   },
   inputGroup: {
     marginBottom: 20,
@@ -1037,7 +1031,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   locationButtonDisabled: {
-    backgroundColor: "#6EDE9A",
+    backgroundColor: "#34D399",
   },
   locationButtonIcon: {
     fontSize: 16,
@@ -1135,7 +1129,7 @@ const styles = StyleSheet.create({
   backButton: {
     flex: 1,
     backgroundColor: "#e5e7eb",
-    borderRadius: 12,
+    borderRadius: 999,
     paddingVertical: 16,
     alignItems: "center",
   },
@@ -1147,17 +1141,11 @@ const styles = StyleSheet.create({
   submitButton: {
     flex: 2,
     backgroundColor: "#06C168",
-    borderRadius: 12,
+    borderRadius: 999,
     paddingVertical: 16,
-    shadowColor: "#06C168",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: "#6EDE9A",
-    shadowOpacity: 0.1,
+    backgroundColor: "#34D399",
   },
   buttonContent: {
     flexDirection: "row",

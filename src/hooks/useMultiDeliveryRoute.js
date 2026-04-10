@@ -34,7 +34,7 @@ const useMultiDeliveryRoute = (options = {}) => {
         .map((s) => `${s.longitude},${s.latitude}`)
         .join(';');
 
-      const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`;
+      const url = `https://router.project-osrm.org/route/v1/foot/${coords}?overview=full&geometries=geojson&steps=false`;
       const response = await fetch(url);
       const data = await response.json();
 

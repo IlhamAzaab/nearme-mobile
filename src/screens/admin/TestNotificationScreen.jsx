@@ -551,11 +551,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     marginBottom: 14,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
   },
   expoCard: {
     backgroundColor: "#eff6ff",
@@ -603,11 +598,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     marginBottom: 14,
-    shadowColor: "#06C168",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
   buttonDisabled: {
     opacity: 0.7,

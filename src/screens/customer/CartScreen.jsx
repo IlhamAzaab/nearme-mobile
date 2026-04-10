@@ -21,7 +21,7 @@ import { API_BASE_URL } from "../../constants/api";
 /* ── Distance & delivery fee helpers ── */
 async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
+    const url = `https://router.project-osrm.org/route/v1/foot/${lon1},${lat1};${lon2},${lat2}?overview=false`;
     const res = await fetch(url);
     const data = await res.json();
     if (data.code === "Ok" && data.routes?.length) {

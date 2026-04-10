@@ -153,7 +153,6 @@ const progressStyles = StyleSheet.create({
 
 export default function Step1() {
   const navigation = useNavigation();
-  const [userEmail, setUserEmail] = useState("");
 
   // Form state
   const [form, setForm] = useState({
@@ -162,7 +161,6 @@ export default function Step1() {
     dateOfBirth: "",
     mobileNumber: "",
     homeAddress: "",
-    profilePhotoUrl: "",
     nicFrontUrl: "",
     nicBackUrl: "",
   });
@@ -170,7 +168,6 @@ export default function Step1() {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState({
-    profilePhoto: false,
     nicFront: false,
     nicBack: false,
   });
@@ -181,26 +178,8 @@ export default function Step1() {
 
   // Fetch user email on mount
   useEffect(() => {
-    fetchUserData();
     fetchSavedData();
   }, []);
-
-  const fetchUserData = async () => {
-    try {
-      const token = await getAccessToken();
-      const res = await fetch(`${API_URL}/auth/user`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUserEmail(data.email || "");
-      }
-    } catch (err) {
-      console.error("Failed to fetch user data:", err);
-    }
-  };
 
   const fetchSavedData = async () => {
     try {
@@ -219,7 +198,6 @@ export default function Step1() {
             dateOfBirth: data.dateOfBirth || "",
             mobileNumber: data.phone || "",
             homeAddress: data.homeAddress || "",
-            profilePhotoUrl: data.profilePhotoUrl || "",
             nicFrontUrl: data.nicFrontUrl || "",
             nicBackUrl: data.nicBackUrl || "",
           });
@@ -301,7 +279,6 @@ export default function Step1() {
 
       // Update form with the uploaded image URL
       const fieldMap = {
-        profilePhoto: "profilePhotoUrl",
         nicFront: "nicFrontUrl",
         nicBack: "nicBackUrl",
       };
@@ -367,10 +344,6 @@ export default function Step1() {
       newErrors.homeAddress = "Address must be at least 10 characters";
     }
 
-    if (!form.profilePhotoUrl) {
-      newErrors.profilePhotoUrl = "Profile photo is required";
-    }
-
     if (!form.nicFrontUrl) {
       newErrors.nicFrontUrl = "NIC front image is required";
     }
@@ -405,7 +378,6 @@ export default function Step1() {
           dateOfBirth: form.dateOfBirth,
           phone: form.mobileNumber,
           homeAddress: form.homeAddress,
-          profilePhotoUrl: form.profilePhotoUrl,
           nicFrontUrl: form.nicFrontUrl,
           nicBackUrl: form.nicBackUrl,
         }),
@@ -514,20 +486,6 @@ export default function Step1() {
                 <Text style={styles.sectionSubtitle}>
                   Basic details about you as the restaurant admin
                 </Text>
-              </View>
-            </View>
-
-            {/* Verified Email */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Verified Email</Text>
-              <View style={styles.emailContainer}>
-                <Text style={styles.emailText}>
-                  {userEmail || "Loading..."}
-                </Text>
-                <View style={styles.verifiedBadge}>
-                  <Text style={styles.verifiedIcon}>✓</Text>
-                  <Text style={styles.verifiedText}>Verified</Text>
-                </View>
               </View>
             </View>
 
@@ -653,12 +611,6 @@ export default function Step1() {
 
             {/* Image Uploads */}
             {renderImageUploader(
-              "Profile Photo",
-              "profilePhoto",
-              "profilePhotoUrl",
-              "profilePhotoUrl",
-            )}
-            {renderImageUploader(
               "NIC Front Image",
               "nicFront",
               "nicFrontUrl",
@@ -745,11 +697,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
   },
   headerIconText: {
     fontSize: 32,
@@ -768,11 +715,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderRadius: 20,
     padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 4,
   },
   sectionHeader: {
     flexDirection: "row",
@@ -964,18 +906,12 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     backgroundColor: "#06C168",
-    borderRadius: 12,
+    borderRadius: 999,
     paddingVertical: 16,
     marginTop: 8,
-    shadowColor: "#06C168",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: "#6EDE9A",
-    shadowOpacity: 0.1,
+    backgroundColor: "#34D399",
   },
   buttonContent: {
     flexDirection: "row",

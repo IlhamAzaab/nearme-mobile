@@ -24,7 +24,7 @@ const useETAUpdates = (options = {}) => {
       setError(null);
 
       // Use OSRM for route estimation
-      const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=false`;
+      const url = `https://router.project-osrm.org/route/v1/foot/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=false`;
 
       const response = await fetch(url);
       const data = await response.json();

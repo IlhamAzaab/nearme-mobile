@@ -16,6 +16,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -34,7 +35,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FreeMapView from "../../components/maps/FreeMapView";
+import { DriverMapSheetLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import { API_BASE_URL } from "../../constants/api";
+import {
+  approximateDistanceMeters,
+  fetchOSRMRoute,
+  fetchOSRMDistanceMeters,
+} from "../../utils/osrmClient";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -47,6 +55,8 @@ const CACHE_KEY_ACTIVE = "active_deliveries_cache";
 const CACHE_EXPIRY = 30000; // 30 seconds cache (active deliveries need fresher data)
 const LIVE_TRACKING_INTERVAL = 3000; // 3 seconds - smooth driver marker updates
 const DATA_REFRESH_THRESHOLD = 100; // Only fetch API data when driver moves 100m+
+const ACTIVE_DELIVERIES_QUERY_KEY = ["driver", "active-deliveries", "snapshot"];
+const ACTIVE_ROUTE_PROFILE = "foot";
 
 // Default driver location (Kinniya, Sri Lanka)
 const DEFAULT_DRIVER_LOCATION = {
@@ -96,39 +106,19 @@ const saveCacheData = async (data) => {
 // DISTANCE CALCULATOR
 // ============================================================================
 
-const getDistanceMeters = (lat1, lng1, lat2, lng2) => {
-  const R = 6371000; // Earth's radius in meters
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
-
 // ============================================================================
 // OSRM DISTANCE CALCULATOR
 // ============================================================================
 
 const getOSRMDistance = async (lat1, lng1, lat2, lng2) => {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-    const url = `https://router.project-osrm.org/route/v1/foot/${lng1},${lat1};${lng2},${lat2}?overview=false`;
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    const data = await response.json();
-    if (data.code === "Ok" && data.routes?.[0]) {
-      return data.routes[0].distance; // meters
-    }
-    return null;
-  } catch (e) {
-    console.warn(`[OSRM] Distance request failed: ${e.message}`);
-    return null;
-  }
+  const distance = await fetchOSRMDistanceMeters({
+    from: { latitude: lat1, longitude: lng1 },
+    to: { latitude: lat2, longitude: lng2 },
+    profile: ACTIVE_ROUTE_PROFILE,
+    timeoutMs: 9000,
+    retries: 2,
+  });
+  return Number.isFinite(distance) ? distance : null;
 };
 
 // ============================================================================
@@ -322,6 +312,7 @@ const DeliveryCard = ({ delivery, index, isFirst, driverLocation }) => {
 
 export default function ActiveDeliveriesScreen({ navigation }) {
   const isFocused = useIsFocused();
+  const queryClient = useQueryClient();
   const isFocusedRef = useRef(true);
 
   useEffect(() => {
@@ -363,6 +354,24 @@ export default function ActiveDeliveriesScreen({ navigation }) {
     if (role !== "driver") {
       navigation.replace("Login");
       return;
+    }
+
+    const cachedQueryData = queryClient.getQueryData(
+      ACTIVE_DELIVERIES_QUERY_KEY,
+    );
+    if (cachedQueryData) {
+      cachedData.current = cachedQueryData;
+      setPickups(cachedQueryData.pickups || []);
+      setDeliveries(cachedQueryData.deliveries || []);
+      setMode(cachedQueryData.mode || "pickup");
+      if (cachedQueryData.driverLocation) {
+        setDriverLocation(cachedQueryData.driverLocation);
+      }
+      if (cachedQueryData.fullRouteData) {
+        setFullRouteData(cachedQueryData.fullRouteData);
+      }
+      setHasFetchedSuccessfully(true);
+      setInitialLoading(false);
     }
 
     // Load cached data for instant display (matching web version)
@@ -450,12 +459,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
 
           // Only refresh API data when moved 100m+ from last fetch
           const movedSinceFetch = lastFetchLocationRef.current
-            ? getDistanceMeters(
-                lastFetchLocationRef.current.latitude,
-                lastFetchLocationRef.current.longitude,
-                newLoc.latitude,
-                newLoc.longitude,
-              )
+            ? approximateDistanceMeters(lastFetchLocationRef.current, newLoc)
             : Infinity;
 
           if (movedSinceFetch >= DATA_REFRESH_THRESHOLD) {
@@ -571,6 +575,13 @@ export default function ActiveDeliveriesScreen({ navigation }) {
             mode: "pickup",
             driverLocation: location,
           });
+          queryClient.setQueryData(ACTIVE_DELIVERIES_QUERY_KEY, {
+            pickups: list,
+            deliveries: [],
+            mode: "pickup",
+            driverLocation: location,
+            fullRouteData,
+          });
         } else {
           // No pickups left → check for deliveries to deliver
           await fetchDeliveriesRoute(location, isBackgroundRefresh);
@@ -679,6 +690,13 @@ export default function ActiveDeliveriesScreen({ navigation }) {
           deliveries: list,
           mode: "deliver",
           driverLocation: location,
+        });
+        queryClient.setQueryData(ACTIVE_DELIVERIES_QUERY_KEY, {
+          pickups: [],
+          deliveries: list,
+          mode: "deliver",
+          driverLocation: location,
+          fullRouteData,
         });
 
         // Auto-set first delivery to on_the_way when starting delivering mode
@@ -952,6 +970,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
         </Animated.View>
       )}
 
+      <DriverScreenSection screenKey="ActiveDeliveries" sectionIndex={0}>
       {/* Header */}
       <SafeAreaView edges={["top"]} style={styles.header}>
         <View style={styles.headerContent}>
@@ -981,16 +1000,16 @@ export default function ActiveDeliveriesScreen({ navigation }) {
           </Pressable>
         </View>
       </SafeAreaView>
+      </DriverScreenSection>
 
+      <DriverScreenSection
+        screenKey="ActiveDeliveries"
+        sectionIndex={1}
+        style={{ flex: 1 }}
+      >
       {/* Content */}
       {initialLoading ? (
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-        >
-          <SkeletonCard />
-          <SkeletonCard />
-        </ScrollView>
+        <DriverMapSheetLoadingSkeleton />
       ) : fetchError ? (
         <View style={styles.errorContainer}>
           <Text style={styles.errorIcon}>⚠️</Text>
@@ -1096,6 +1115,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
           </Pressable>
         </SafeAreaView>
       )}
+      </DriverScreenSection>
     </View>
   );
 }
@@ -1198,24 +1218,6 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
     await fetchSegmentBySegmentRoute(waypoints);
   }, [driverLocation, pickups]);
 
-  // Helper function for getting OSRM distance
-  const getOSRMDistance = async (lat1, lng1, lat2, lng2) => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const url = `https://router.project-osrm.org/route/v1/foot/${lng1},${lat1};${lng2},${lat2}?overview=false`;
-      const response = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeoutId);
-      const data = await response.json();
-      if (data.code === "Ok" && data.routes?.[0]) {
-        return data.routes[0].distance;
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  };
-
   // Optimize restaurant pickup order
   const getOptimizedRestaurantOrderByShortest = async (
     pickupsList,
@@ -1317,20 +1319,18 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
         const from = waypoints[i];
         const to = waypoints[i + 1];
 
-        const segmentUrl = `https://router.project-osrm.org/route/v1/foot/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson&steps=true`;
-
         try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-          const response = await fetch(segmentUrl, {
-            signal: controller.signal,
+          const route = await fetchOSRMRoute({
+            from: { latitude: from.lat, longitude: from.lng },
+            to: { latitude: to.lat, longitude: to.lng },
+            profile: ACTIVE_ROUTE_PROFILE,
+            timeoutMs: 9000,
+            retries: 2,
+            overview: "full",
+            geometries: "geojson",
           });
-          clearTimeout(timeoutId);
-          const data = await response.json();
 
-          if (data.code === "Ok" && data.routes && data.routes.length > 0) {
-            const route = data.routes[0];
+          if (route?.geometry?.coordinates?.length) {
 
             const segmentPath = route.geometry.coordinates.map((coord) => ({
               latitude: coord[1],
@@ -1351,11 +1351,8 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
               `📍 [SEGMENT ${i + 1}/${waypoints.length - 1}] ✓ ${(route.distance / 1000).toFixed(2)} km, ${Math.ceil(route.duration / 60)} min`,
             );
           } else {
-            console.warn(
-              `📍 [SEGMENT ${i + 1}] Failed to get route, using straight line`,
-            );
-            allRouteSegments.push({ latitude: from.lat, longitude: from.lng });
-            allRouteSegments.push({ latitude: to.lat, longitude: to.lng });
+            console.warn(`📍 [SEGMENT ${i + 1}] Failed to get OSRM route segment`);
+            return;
           }
 
           // Small delay between requests to avoid rate limiting
@@ -1364,8 +1361,7 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
           }
         } catch (segmentError) {
           console.warn(`📍 [SEGMENT ${i + 1}] Error:`, segmentError.message);
-          allRouteSegments.push({ latitude: from.lat, longitude: from.lng });
-          allRouteSegments.push({ latitude: to.lat, longitude: to.lng });
+          return;
         }
       }
 
@@ -1376,7 +1372,7 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
           totalDuration: Math.ceil(totalDuration / 60),
           optimizedRestaurants: optimizedRestaurantOrder,
           optimizedCustomers: optimizedCustomerOrder,
-          selectedMode: "OSRM_FOOT_SEGMENTS",
+          selectedMode: "OSRM_DRIVING_SEGMENTS",
         });
 
         console.log(

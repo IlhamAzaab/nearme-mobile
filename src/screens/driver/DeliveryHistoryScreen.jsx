@@ -1,25 +1,20 @@
-/**
- * Delivery History Screen
- * 
- * Shows driver's completed deliveries with:
- * - Stats overview (total deliveries, earnings, rating)
- * - Filter by status (all, delivered, cancelled)
- * - Delivery history list
- */
-
-import React, { useState, useEffect, useCallback } from "react";
+import { useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
   ActivityIndicator,
+  FlatList,
   RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { API_BASE_URL } from "../../constants/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
+import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
+import { DriverListLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
+import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const FILTER_OPTIONS = [
   { key: "all", label: "All" },
@@ -27,460 +22,335 @@ const FILTER_OPTIONS = [
   { key: "cancelled", label: "Cancelled" },
 ];
 
+async function authFetchJson(url) {
+  const token = await getAccessToken();
+  if (!token) throw new Error("No authentication token");
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(payload?.message || "Request failed");
+  }
+
+  return payload;
+}
+
+function formatDate(timestamp) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  return date.toLocaleDateString("en-IN", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function DeliveryHistoryScreen({ navigation }) {
-  const [deliveries, setDeliveries] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState("all");
-  const [stats, setStats] = useState({
-    totalDeliveries: 0,
-    totalEarnings: 0,
-    averageRating: 4.8,
+  const [refreshing, setRefreshing] = useState(false);
+  const queryClient = useQueryClient();
+
+  const historyQuery = useQuery({
+    queryKey: ["driver", "delivery-history"],
+    queryFn: async () => {
+      const data = await authFetchJson(`${API_URL}/driver/deliveries/history`);
+      return data.deliveries || [];
+    },
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+    initialData: () => queryClient.getQueryData(["driver", "delivery-history"]),
+    placeholderData: (previousData) => previousData,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 
-  // Fetch history
-  const fetchHistory = useCallback(async () => {
+  const deliveries = historyQuery.data || [];
+
+  const stats = useMemo(() => {
+    const totalEarnings = deliveries.reduce(
+      (sum, item) => sum + (parseFloat(item.driver_earnings) || 0),
+      0,
+    );
+
+    return {
+      totalDeliveries: deliveries.length,
+      totalEarnings,
+      averageRating: 4.8,
+    };
+  }, [deliveries]);
+
+  const filteredDeliveries = useMemo(() => {
+    if (filter === "all") return deliveries;
+    return deliveries.filter((item) => item.status === filter);
+  }, [deliveries, filter]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
     try {
-      const token = await AsyncStorage.getItem("token");
-
-      const res = await fetch(`${API_BASE_URL}/driver/deliveries/history`, {
-        headers: { Authorization: `Bearer ${token}` },
+      await queryClient.invalidateQueries({
+        queryKey: ["driver", "delivery-history"],
       });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        const completed = data.deliveries || [];
-        setDeliveries(completed);
-
-        const totalEarnings = completed.reduce(
-          (sum, d) => sum + (parseFloat(d.driver_earnings) || 0),
-          0
-        );
-
-        setStats({
-          totalDeliveries: completed.length,
-          totalEarnings: totalEarnings,
-          averageRating: 4.8,
-        });
-      }
-    } catch (error) {
-      console.log("Fetch history error:", error);
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
-  }, []);
-
-  useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchHistory();
-  }, [fetchHistory]);
-
-  // Filter deliveries
-  const filteredDeliveries =
-    filter === "all"
-      ? deliveries
-      : deliveries.filter((d) => d.status === filter);
-
-  // Format date
-  const formatDate = (timestamp) => {
-    if (!timestamp) return "";
-    const date = new Date(timestamp);
-    return date.toLocaleDateString("en-IN", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
   };
 
-  if (loading) {
+  const renderHistoryCard = ({ item }) => {
+    const isDelivered = item.status === "delivered";
+    const isCancelled = item.status === "cancelled";
+
+    return (
+      <View style={styles.historyCard}>
+        <View
+          style={[
+            styles.statusBadge,
+            isDelivered && styles.deliveredBadge,
+            isCancelled && styles.cancelledBadge,
+          ]}
+        >
+          <Text
+            style={[
+              styles.statusBadgeText,
+              isDelivered && styles.deliveredBadgeText,
+              isCancelled && styles.cancelledBadgeText,
+            ]}
+          >
+            {isDelivered ? "Delivered" : isCancelled ? "Cancelled" : "Pending"}
+          </Text>
+        </View>
+
+        <View style={styles.orderInfo}>
+          <Text
+            style={styles.orderNumber}
+          >{`#${item.orders?.order_number || item.order_id || item.id}`}</Text>
+          <Text style={styles.orderDate}>{formatDate(item.delivered_at)}</Text>
+        </View>
+
+        <View style={styles.locationInfo}>
+          <Text style={styles.locationText} numberOfLines={1}>
+            {`Restaurant: ${item.orders?.restaurant_name || "Restaurant"}`}
+          </Text>
+          <Text style={styles.locationText} numberOfLines={1}>
+            {`Customer: ${item.orders?.customer_name || "Customer"}`}
+          </Text>
+        </View>
+
+        {isDelivered ? (
+          <View style={styles.earningsRow}>
+            <Text style={styles.earningsLabel}>Your Earning</Text>
+            <Text style={styles.earningsValue}>
+              {`Rs. ${Number(item.driver_earnings || 0).toFixed(2)}`}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
+  if (historyQuery.isLoading && deliveries.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#06C168" />
-          <Text style={styles.loadingText}>Loading history...</Text>
-        </View>
+        <DriverListLoadingSkeleton count={6} />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backBtnText}>←</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>Delivery History</Text>
-        <View style={styles.placeholder} />
-      </View>
+      <View style={{ flex: 1 }}>
+        <DriverScreenSection screenKey="DeliveryHistory" sectionIndex={0}>
+          <DriverScreenHeader
+            title="Delivery History"
+            rightIcon="refresh"
+            onBackPress={() => navigation.goBack()}
+            onRightPress={onRefresh}
+          />
+        </DriverScreenSection>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#06C168"]} />
-        }
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Stats Cards */}
-        <View style={styles.statsGrid}>
-          <View style={[styles.statCard, styles.deliveriesCard]}>
-            <Text style={styles.statIcon}>📦</Text>
-            <Text style={styles.statValue}>{stats.totalDeliveries}</Text>
-            <Text style={styles.statLabel}>Total Deliveries</Text>
-          </View>
-
-          <View style={[styles.statCard, styles.earningsCard]}>
-            <Text style={styles.statIcon}>💰</Text>
-            <Text style={styles.statValue}>₹{stats.totalEarnings.toFixed(0)}</Text>
-            <Text style={styles.statLabel}>Total Earnings</Text>
-          </View>
-
-          <View style={[styles.statCard, styles.ratingCard]}>
-            <Text style={styles.statIcon}>⭐</Text>
-            <Text style={styles.statValue}>{stats.averageRating}</Text>
-            <Text style={styles.statLabel}>Avg Rating</Text>
-          </View>
-        </View>
-
-        {/* Filter Buttons */}
-        <View style={styles.filterRow}>
-          {FILTER_OPTIONS.map((option) => (
-            <Pressable
-              key={option.key}
-              style={[styles.filterBtn, filter === option.key && styles.filterBtnActive]}
-              onPress={() => setFilter(option.key)}
-            >
-              <Text
-                style={[
-                  styles.filterBtnText,
-                  filter === option.key && styles.filterBtnTextActive,
-                ]}
-              >
-                {option.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {/* Delivery List */}
-        {filteredDeliveries.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>📭</Text>
-            <Text style={styles.emptyTitle}>No Deliveries Found</Text>
-            <Text style={styles.emptySubtitle}>
-              {filter === "all"
-                ? "You haven't completed any deliveries yet"
-                : `No ${filter} deliveries found`}
-            </Text>
-          </View>
-        ) : (
-          filteredDeliveries.map((delivery, index) => {
-            const isDelivered = delivery.status === "delivered";
-            const isCancelled = delivery.status === "cancelled";
-
-            return (
-              <View key={delivery.id || index} style={styles.historyCard}>
-                {/* Status Badge */}
-                <View
-                  style={[
-                    styles.statusBadge,
-                    isDelivered && styles.deliveredBadge,
-                    isCancelled && styles.cancelledBadge,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.statusBadgeText,
-                      isDelivered && styles.deliveredBadgeText,
-                      isCancelled && styles.cancelledBadgeText,
-                    ]}
-                  >
-                    {isDelivered ? "✅ Delivered" : isCancelled ? "❌ Cancelled" : "⏳ Pending"}
-                  </Text>
-                </View>
-
-                {/* Order Info */}
-                <View style={styles.orderInfo}>
-                  <Text style={styles.orderNumber}>
-                    #{delivery.orders?.order_number || delivery.order_id}
-                  </Text>
-                  <Text style={styles.orderDate}>{formatDate(delivery.delivered_at)}</Text>
-                </View>
-
-                {/* Restaurant & Customer */}
-                <View style={styles.locationInfo}>
-                  <View style={styles.locationRow}>
-                    <Text style={styles.locationIcon}>🏪</Text>
-                    <Text style={styles.locationText} numberOfLines={1}>
-                      {delivery.orders?.restaurant_name || "Restaurant"}
+        <DriverScreenSection
+          screenKey="DeliveryHistory"
+          sectionIndex={1}
+          style={{ flex: 1 }}
+        >
+          <FlatList
+            data={filteredDeliveries}
+            keyExtractor={(item, index) =>
+              String(item.id || item.order_id || index)
+            }
+            renderItem={renderHistoryCard}
+            contentContainerStyle={styles.listContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={["#06C168"]}
+              />
+            }
+            ListHeaderComponent={
+              <>
+                <View style={styles.statsGrid}>
+                  <View style={[styles.statCard, styles.deliveriesCard]}>
+                    <Text style={styles.statLabel}>Total Deliveries</Text>
+                    <Text style={styles.statValue}>
+                      {stats.totalDeliveries}
                     </Text>
                   </View>
-                  <View style={styles.locationRow}>
-                    <Text style={styles.locationIcon}>👤</Text>
-                    <Text style={styles.locationText} numberOfLines={1}>
-                      {delivery.orders?.customer_name || "Customer"}
-                    </Text>
+
+                  <View style={[styles.statCard, styles.earningsCard]}>
+                    <Text style={styles.statLabel}>Total Earnings</Text>
+                    <Text
+                      style={styles.statValue}
+                    >{`Rs. ${stats.totalEarnings.toFixed(2)}`}</Text>
+                  </View>
+
+                  <View style={[styles.statCard, styles.ratingCard]}>
+                    <Text style={styles.statLabel}>Avg Rating</Text>
+                    <Text style={styles.statValue}>{stats.averageRating}</Text>
                   </View>
                 </View>
 
-                {/* Earnings */}
-                {isDelivered && (
-                  <View style={styles.earningsRow}>
-                    <Text style={styles.earningsLabel}>Earnings</Text>
-                    <Text style={styles.earningsValue}>
-                      ₹{parseFloat(delivery.driver_earnings || 0).toFixed(0)}
-                    </Text>
-                  </View>
-                )}
+                <View style={styles.filterRow}>
+                  {FILTER_OPTIONS.map((option) => (
+                    <TouchableOpacity
+                      key={option.key}
+                      style={[
+                        styles.filterBtn,
+                        filter === option.key && styles.filterBtnActive,
+                      ]}
+                      onPress={() => setFilter(option.key)}
+                    >
+                      <Text
+                        style={[
+                          styles.filterBtnText,
+                          filter === option.key && styles.filterBtnTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>No Deliveries</Text>
+                <Text style={styles.emptySubtitle}>
+                  {filter === "all"
+                    ? "Start accepting deliveries to see your history"
+                    : `No ${filter} deliveries found`}
+                </Text>
               </View>
-            );
-          })
-        )}
-      </ScrollView>
+            }
+          />
+        </DriverScreenSection>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F8FAFC",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#6B7280",
-  },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
+  loader: { marginTop: 40 },
+  listContent: { padding: 16, paddingBottom: 110 },
 
-  // Header
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  backBtnText: {
-    fontSize: 24,
-    color: "#111827",
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  placeholder: {
-    width: 40,
-  },
-
-  // Scroll View
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 100,
-  },
-
-  // Stats Grid
-  statsGrid: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 20,
-  },
+  statsGrid: { flexDirection: "row", gap: 10, marginBottom: 18 },
   statCard: {
     flex: 1,
-    padding: 14,
-    borderRadius: 14,
-    alignItems: "center",
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
   },
-  deliveriesCard: {
-    backgroundColor: "#DBEAFE",
-  },
-  earningsCard: {
-    backgroundColor: "#B8F0D0",
-  },
-  ratingCard: {
-    backgroundColor: "#FEF3C7",
-  },
-  statIcon: {
-    fontSize: 24,
-    marginBottom: 6,
-  },
+  deliveriesCard: { backgroundColor: "#eef2ff" },
+  earningsCard: { backgroundColor: "#ecfdf3" },
+  ratingCard: { backgroundColor: "#fff7ed" },
+  statLabel: { fontSize: 10, color: "#6b7280", fontWeight: "700" },
   statValue: {
-    fontSize: 20,
-    fontWeight: "900",
+    marginTop: 6,
+    fontSize: 16,
     color: "#111827",
-  },
-  statLabel: {
-    fontSize: 10,
-    color: "#6B7280",
-    marginTop: 2,
-    textAlign: "center",
+    fontWeight: "800",
   },
 
-  // Filter Row
-  filterRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 16,
-  },
+  filterRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
   filterBtn: {
     flex: 1,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: "#F3F4F6",
     alignItems: "center",
+    backgroundColor: "#f3f4f6",
   },
-  filterBtnActive: {
-    backgroundColor: "#06C168",
-  },
-  filterBtnText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6B7280",
-  },
-  filterBtnTextActive: {
-    color: "#fff",
-  },
+  filterBtnActive: { backgroundColor: "#06C168" },
+  filterBtnText: { fontSize: 13, fontWeight: "700", color: "#6b7280" },
+  filterBtnTextActive: { color: "#fff" },
 
-  // Empty State
-  emptyState: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 60,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: "#6B7280",
-    textAlign: "center",
-  },
-
-  // History Card
   historyCard: {
     backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    padding: 14,
+    marginBottom: 10,
   },
-
-  // Status Badge
   statusBadge: {
     alignSelf: "flex-start",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: "#F3F4F6",
-    marginBottom: 12,
+    backgroundColor: "#f3f4f6",
+    marginBottom: 10,
   },
-  deliveredBadge: {
-    backgroundColor: "#B8F0D0",
-  },
-  cancelledBadge: {
-    backgroundColor: "#FEE2E2",
-  },
-  statusBadgeText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6B7280",
-  },
-  deliveredBadgeText: {
-    color: "#06C168",
-  },
-  cancelledBadgeText: {
-    color: "#DC2626",
-  },
+  deliveredBadge: { backgroundColor: "#dcfce7" },
+  cancelledBadge: { backgroundColor: "#fee2e2" },
+  statusBadgeText: { fontSize: 11, color: "#6b7280", fontWeight: "700" },
+  deliveredBadgeText: { color: "#15803d" },
+  cancelledBadgeText: { color: "#b91c1c" },
 
-  // Order Info
   orderInfo: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 10,
+    gap: 12,
   },
-  orderNumber: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  orderDate: {
-    fontSize: 12,
-    color: "#6B7280",
-  },
+  orderNumber: { fontSize: 15, color: "#111827", fontWeight: "800", flex: 1 },
+  orderDate: { fontSize: 11, color: "#6b7280", fontWeight: "600" },
+  locationInfo: { gap: 4 },
+  locationText: { fontSize: 13, color: "#374151", fontWeight: "600" },
 
-  // Location Info
-  locationInfo: {
-    marginBottom: 12,
-  },
-  locationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  locationIcon: {
-    fontSize: 14,
-    marginRight: 8,
-  },
-  locationText: {
-    flex: 1,
-    fontSize: 14,
-    color: "#374151",
-  },
-
-  // Earnings Row
   earningsRow: {
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+    paddingTop: 10,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
   },
-  earningsLabel: {
-    fontSize: 14,
-    color: "#6B7280",
+  earningsLabel: { fontSize: 12, color: "#6b7280", fontWeight: "700" },
+  earningsValue: { fontSize: 15, color: "#06C168", fontWeight: "800" },
+
+  emptyState: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    backgroundColor: "#fff",
+    paddingVertical: 30,
+    paddingHorizontal: 16,
+    alignItems: "center",
   },
-  earningsValue: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#06C168",
+  emptyTitle: { fontSize: 18, fontWeight: "800", color: "#111827" },
+  emptySubtitle: {
+    marginTop: 8,
+    textAlign: "center",
+    fontSize: 13,
+    color: "#6b7280",
+    fontWeight: "600",
   },
 });

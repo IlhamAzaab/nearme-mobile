@@ -1,10 +1,12 @@
 import { useNavigation } from "@react-navigation/native";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Alert,
+  Easing,
   Platform,
   ScrollView,
   StyleSheet,
@@ -12,65 +14,103 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SvgXml } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../../config/env";
 import { getAccessToken } from "../../../lib/authStorage";
 
-const CONTRACT_VERSION = "1.0.0";
+const CONTRACT_VERSION = "1.1.0";
+
+const MEEZO_LOGO_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #06c168;
+        stroke-width: 0px;
+      }
+    </style>
+  </defs>
+  <path class="cls-1" d="m796.84,470.43c2.16-2.3,1.79-4.86-.71-4.86h-101.74c-2.52,0-5.62,2.05-6.9,4.57l-17.16,33.68c-1.29,2.53-.29,4.58,2.24,4.58h27.48c2.5,0,2.88,2.56.72,4.85l-89.65,95.15c-2.16,2.29-1.78,4.85.72,4.85h112.31c2.52,0,5.62-2.04,6.9-4.57l10.68-33.68c1.29-2.53.28-4.57-2.25-4.57h-31.76c-2.5,0-2.87-2.57-.71-4.86l89.83-95.14Z"/>
+  <path class="cls-1" d="m564.84,465.48h-89.17c-2.14,0-4.76,1.74-5.85,3.88l-71.86,141.03c-1.09,2.14-.24,3.88,1.9,3.88h91.3c2.14,0,4.75-1.74,5.84-3.88l18.04-35.4c1.09-2.14.24-3.87-1.9-3.87h-36.89c-2.14,0-2.99-1.73-1.9-3.87l3.1-6.07c1.09-2.14,3.7-3.87,5.84-3.87h31.36c2.14,0,4.76-1.74,5.85-3.88l14.57-28.6c1.09-2.14.24-3.87-1.9-3.87h-31.36c-2.14,0-2.99-1.73-1.9-3.87l2.34-4.58c1.09-2.14,3.7-3.88,5.84-3.88h34.77c2.13,0,4.75-1.73,5.84-3.87l18.04-35.4c1.09-2.14.24-3.88-1.9-3.88Z"/>
+  <path class="cls-1" d="m674.3,465.48h-89.17c-2.14,0-4.76,1.74-5.85,3.88l-71.86,141.03c-1.09,2.14-.24,3.88,1.9,3.88h91.3c2.14,0,4.75-1.74,5.84-3.88l18.04-35.4c1.09-2.14.24-3.87-1.9-3.87h-36.89c-2.13,0-2.99-1.73-1.9-3.87l3.1-6.07c1.09-2.14,3.7-3.87,5.84-3.87h31.37c2.13,0,4.75-1.74,5.84-3.88l14.57-28.6c1.09-2.14.24-3.87-1.9-3.87h-31.36c-2.14,0-2.99-1.73-1.9-3.87l2.34-4.58c1.09-2.14,3.71-3.88,5.84-3.88h34.77c2.14,0,4.75-1.73,5.84-3.87l18.04-35.4c1.09-2.14.24-3.88-1.9-3.88Z"/>
+  <path class="cls-1" d="m455.98,475.4l-23.01,44.91c-1.96,3.83-5.1,6.86-9.03,8.71-30.64,14.45-56.96,26.84-66.45,31.3-2.31,1.09-5.25.69-7.61-1.03l-14.61-10.6-16.76-12.16-1.95-1.41c-4.49-3.26-10.24-2.47-12.57,1.71l-30.61,56.84c-7.03,13.06-20.71,20.85-36.62,20.85h-40.32c-3.86,0-6.8-4.34-5.11-7.51l41.38-76.8,21.66-40.22,3-5.57c11.39-21.13,40.35-25.25,62.84-8.93l12.1,8.78c9.65,7,19.3,14,28.95,21,3.09,2.25,6.19,4.5,9.28,6.74l82.97-39.09c1.44-.68,3.19,1.08,2.47,2.48Z"/>
+  <g>
+    <path class="cls-1" d="m883.66,586.15h-68.56s.09-.07.13-.12c-1.92-.44-3.34-2.16-3.34-4.2,0-1.19.48-2.28,1.26-3.06.79-.79,1.87-1.27,3.06-1.27h60.25c1.19,0,2.27-.48,3.05-1.26.79-.78,1.27-1.86,1.27-3.06,0-2.38-1.94-4.32-4.32-4.32h-42.37s.09-.08.14-.12c-1.91-.45-3.32-2.16-3.32-4.2,0-1.19.48-2.27,1.26-3.05.79-.79,1.87-1.27,3.06-1.27h32.57c1.2,0,2.28-.48,3.06-1.26.78-.78,1.26-1.86,1.26-3.06,0-2.38-1.93-4.32-4.32-4.32h-14.84c4.43-4.21,8.72-8.5,12.77-12.92,20.38-22.25,24.31-49.41,10.74-63.1-14.41-14.57-43.15-12.8-69.81,4.29-26.28,16.84-43.27,43.87-40.63,65.46,1.87,15.19,4.5,30.02,6.94,44.95.82,5.09,1.72,10.15,2.67,15.37.6,3.31,3.07,5.55,5.92,6.22.6.15,1.21.22,1.83.22h65.52c1.19,0,2.27-.49,3.06-1.27.78-.78,1.26-1.86,1.26-3.05,0-2.39-1.93-4.32-4.32-4.32h-52.95l.02-.02c-2.2-.2-3.92-2.06-3.92-4.3,0-1.19.48-2.27,1.26-3.06.78-.78,1.86-1.26,3.06-1.26h87.28c1.2,0,2.28-.49,3.06-1.27.78-.78,1.26-1.86,1.26-3.05,0-2.39-1.93-4.32-4.32-4.32Zm-78.14-67.05c5-10.73,17.74-19.42,28.47-19.42s15.36,8.69,10.35,19.42c-4.99,10.71-17.74,19.41-28.46,19.41s-15.36-8.7-10.36-19.41Z"/>
+    <path class="cls-1" d="m783.39,612.07h-.5c-.46,0-.91-.07-1.33-.22.6.15,1.21.22,1.83.22Z"/>
+    <rect class="cls-1" x="888.61" y="577.5" width=".54" height=".93"/>
+    <rect class="cls-1" x="888.61" y="577.5" width=".54" height=".93"/>
+  </g>
+</svg>`;
 
 // Contract content as structured data for React Native
 const CONTRACT_SECTIONS = [
   {
-    title: "NearMe Restaurant Partner Terms & Conditions (v1.0.0)",
+    title: "Meezo Restaurant Partner Terms & Conditions (v1.1.0)",
     isHeader: true,
   },
   {
     title: "1. Partnership Agreement",
     content:
-      "By accepting these terms, you agree to become an authorized NearMe restaurant partner. Your restaurant will be listed on the NearMe platform and made available to customers for food delivery and pickup services.",
+      "By accepting these terms, you agree to become an authorized Meezo restaurant partner. Your restaurant will be listed on the Meezo platform and made available to customers for food delivery and pickup services.",
   },
   {
-    title: "2. Accuracy of Information",
+    title: "2. Daily Settlement Schedule",
     content:
-      "You confirm that all submitted information including restaurant details, owner information, bank account details, and KYC documents are accurate and authentic. Any false or misleading information may result in account termination.",
+      "Meezo will process settlement of each day's completed sales at daily midnight. If settlement is not reflected by 2:00 AM local time, you may contact the assigned manager directly at 0759587979 for escalation and support.",
   },
   {
-    title: "3. Food Safety & Compliance",
+    title: "3. Halal Compliance",
     content:
-      "You agree to comply with all local food safety regulations, health codes, and hygiene standards. Your restaurant must maintain valid licenses and permits required by law.",
+      "All food sold through Meezo must comply with halal requirements. You are solely responsible for obtaining, maintaining, and presenting a valid halal certificate and for any legal, regulatory, or customer consequences arising from non-compliance.",
   },
   {
-    title: "4. Service Standards",
+    title: "4. Order Preparation and Handover Priority",
     content:
-      "You commit to maintaining timely order preparation and delivery standards, accurate menu information, and professional customer service. Failure to maintain service standards may result in warnings or account suspension.",
+      "Once an order is accepted, your kitchen must start preparing it immediately in the live queue sequence. For example, if two in-store manual orders are already waiting, an accepted Meezo order must be treated as the third order in sequence and must not be skipped ahead or delayed behind later walk-in orders. When a Meezo delivery partner arrives for pickup, handover must be done at a separate designated pickup point. Delivery partners must not be required to wait in the in-store customer queue.",
   },
   {
-    title: "5. Bank Account & Payments",
+    title: "5. Earnings Recognition Point",
     content:
-      "You authorize NearMe to route all payments to the bank account specified in your application. You are responsible for maintaining accurate and updated bank information. Any issues with payouts due to incorrect bank details are your responsibility.",
+      "The order earning is considered payable to the restaurant once the assigned delivery partner successfully picks up the order from your premises.",
   },
   {
-    title: "6. Account Verification",
+    title: "6. Bank Account and Payout Responsibility",
     content:
-      "Your account will remain in pending status until a NearMe manager reviews and verifies all submitted documents and information. This process typically takes 2-5 business days.",
+      "You authorize Meezo to route all payouts to the bank account provided during onboarding. You are responsible for ensuring that bank details remain accurate and updated. Meezo is not liable for payout delays or failures caused by incorrect bank information submitted by the restaurant.",
   },
   {
-    title: "7. Data & Privacy",
+    title: "7. Accuracy of Information",
     content:
-      "NearMe may collect and store data related to your account, transactions, and customer interactions. This data will be protected according to our privacy policy and will not be shared with third parties without your consent.",
+      "You confirm that all submitted information, including restaurant details, owner information, bank account details, and KYC documents, is accurate and authentic. Any false, expired, or misleading information may result in suspension or account termination.",
   },
   {
-    title: "8. Termination & Suspension",
+    title: "8. Account Verification",
     content:
-      "NearMe reserves the right to suspend or terminate your account if you violate these terms, engage in fraudulent activity, or fail to maintain service standards. Suspended accounts will not receive orders or payments.",
+      "Your account remains in pending status until a Meezo manager reviews and verifies all submitted documents and information. Standard verification timelines are typically 2-5 business days, subject to document quality and regional review load.",
   },
   {
-    title: "9. Governing Law",
+    title: "9. Data and Privacy",
+    content:
+      "Meezo may collect and store data related to your account, transactions, and customer interactions. Such data is handled according to Meezo privacy and security policies and applicable laws.",
+  },
+  {
+    title: "10. Suspension and Termination",
+    content:
+      "Meezo may suspend or terminate partner access for material breach of these terms, fraudulent behavior, repeated service failures, or legal non-compliance. Suspended accounts may be restricted from receiving new orders and payouts until resolution.",
+  },
+  {
+    title: "11. Platform Commission",
+    content:
+      "Meezo may apply a commission margin within a range of 8% to 15% (default 10%), based on city-level and country-level operating conditions unless otherwise notified in writing. This commission will not be deducted from your restaurant sales settlement. The commission is charged externally to the customer as a platform service charge.",
+  },
+  {
+    title: "12. Governing Law",
     content:
       "These terms are governed by the laws of Sri Lanka and you agree to resolve disputes through appropriate legal channels.",
   },
   {
-    title: "Last Updated: January 2026",
+    title: "Last Updated: April 2026",
     isFooter: true,
   },
 ];
@@ -211,6 +251,7 @@ export default function Step4() {
   const [loading, setLoading] = useState(false);
   const [ipAddress, setIpAddress] = useState(null);
   const [deviceInfo, setDeviceInfo] = useState("");
+  const logoFloat = useRef(new Animated.Value(0)).current;
 
   // Fetch IP address on component mount
   useEffect(() => {
@@ -228,6 +269,23 @@ export default function Step4() {
     // Get device info for user agent equivalent
     const deviceString = `${Device.brand || "Unknown"} ${Device.modelName || "Device"} - ${Platform.OS} ${Platform.Version} - Expo ${Constants.expoVersion || "SDK"}`;
     setDeviceInfo(deviceString);
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoFloat, {
+          toValue: -6,
+          duration: 2600,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(logoFloat, {
+          toValue: 0,
+          duration: 2600,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    ).start();
   }, []);
 
   const handleSubmit = async () => {
@@ -312,9 +370,14 @@ export default function Step4() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerIcon}>
-            <Text style={styles.headerIconText}>📋</Text>
-          </View>
+          <Animated.View
+            style={[
+              styles.logoWrap,
+              { transform: [{ translateY: logoFloat }] },
+            ]}
+          >
+            <SvgXml xml={MEEZO_LOGO_XML} width={150} height={150} />
+          </Animated.View>
           <Text style={styles.headerTitle}>Contract Acceptance</Text>
           <Text style={styles.headerSubtitle}>
             Review and accept the partner terms to finish onboarding
@@ -439,44 +502,10 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     paddingTop: 16,
   },
-  headerIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "#ffffff",
-    justifyContent: "center",
+  logoWrap: {
+    marginBottom: 10,
     alignItems: "center",
-    marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  headerIconText: {
-    fontSize: 32,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#ffffff",
-    marginBottom: 8,
-  },
-  headerSubtitle: {
-    fontSize: 16,
-    color: "rgba(255, 255, 255, 0.9)",
-    textAlign: "center",
-    paddingHorizontal: 20,
-  },
-  formCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 4,
+    justifyContent: "center",
   },
   contractContainer: {
     height: 300,
@@ -590,7 +619,7 @@ const styles = StyleSheet.create({
   backButton: {
     flex: 1,
     backgroundColor: "#e5e7eb",
-    borderRadius: 12,
+    borderRadius: 999,
     paddingVertical: 16,
     alignItems: "center",
   },
@@ -602,17 +631,11 @@ const styles = StyleSheet.create({
   submitButton: {
     flex: 2,
     backgroundColor: "#06C168",
-    borderRadius: 12,
+    borderRadius: 999,
     paddingVertical: 16,
-    shadowColor: "#06C168",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: "#6EDE9A",
-    shadowOpacity: 0.1,
+    backgroundColor: "#34D399",
   },
   buttonContent: {
     flexDirection: "row",

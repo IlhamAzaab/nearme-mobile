@@ -43,11 +43,19 @@ export default function AdminTabs() {
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
+        lazy: true,
+        freezeOnBlur: true,
+        tabBarHideOnKeyboard: true,
+        animation: "fade",
+        sceneStyle: {
+          backgroundColor: "#f8fafc",
+        },
         tabBarStyle: {
           ...styles.tabBar,
-          height: 66 + insets.bottom,
-          paddingBottom: insets.bottom,
+          height: 64 + Math.max(insets.bottom - 4, 4),
+          paddingBottom: Math.max(insets.bottom - 4, 4),
         },
+        tabBarItemStyle: styles.tabBarItem,
       }}
     >
       <Tab.Screen
@@ -101,23 +109,26 @@ export default function AdminTabs() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    paddingTop: 8,
+    paddingTop: 6,
     borderTopWidth: 1,
     borderTopColor: "#EEF2F7",
     backgroundColor: "#fff",
+  },
+  tabBarItem: {
+    paddingVertical: 0,
   },
   iconWrap: {
     width: 64,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 14,
-    paddingVertical: 4,
+    paddingVertical: 2,
   },
   iconWrapActive: {
     backgroundColor: "#EAF9F0",
   },
   iconLabel: {
-    marginTop: 4,
+    marginTop: 2,
     fontSize: 11,
     color: "#98A2B3",
     fontWeight: "600",

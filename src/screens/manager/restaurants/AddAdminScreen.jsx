@@ -68,7 +68,11 @@ const AddAdminScreen = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        Alert.alert("Error", data?.message || "Failed to create admin");
+        const fallback =
+          res.status >= 500
+            ? `Server unavailable (${res.status}). Please try again in a moment.`
+            : `Failed to create admin (${res.status}).`;
+        Alert.alert("Error", data?.message || fallback);
       } else {
         Alert.alert(
           "Success",
@@ -84,7 +88,10 @@ const AddAdminScreen = () => {
         );
       }
     } catch (err) {
-      Alert.alert("Error", "Network error. Please try again.");
+      Alert.alert(
+        "Error",
+        "Network/server error. Please check internet and try again.",
+      );
     } finally {
       setLoading(false);
     }

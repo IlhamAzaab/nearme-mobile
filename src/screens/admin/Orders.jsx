@@ -1,10 +1,10 @@
-import { useNavigation } from "@react-navigation/native";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { LinearGradient } from "expo-linear-gradient";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Animated,
-  Dimensions,
   Image,
   Linking,
   Modal,
@@ -17,12 +17,71 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
 import { getAccessToken } from "../../lib/authStorage";
 import supabaseClient from "../../services/supabaseClient";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const PERIOD_LABELS = {
+  today: "Today",
+  yesterday: "Yesterday",
+  last7: "Last 7 Days",
+  last30: "Last 30 Days",
+  all: "All Time",
+};
+
+const STATUS_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "pending", label: "New" },
+  { key: "accepted", label: "Active" },
+  { key: "delivered", label: "Done" },
+];
+
+const SUCCESS_EARNING_STATUSES = new Set([
+  "picked_up",
+  "on_the_way",
+  "at_customer",
+  "delivered",
+]);
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const SRI_LANKA_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+const getSriLankaDateString = (date = new Date()) =>
+  new Date(date.getTime() + SRI_LANKA_OFFSET_MS).toISOString().split("T")[0];
+
+const getSriLankaDayStartMs = (dateStr) =>
+  new Date(`${dateStr}T00:00:00+05:30`).getTime();
+
+const getPeriodRangeMs = (period) => {
+  if (period === "all") return null;
+
+  const todayDateStr = getSriLankaDateString(new Date());
+  const todayStart = getSriLankaDayStartMs(todayDateStr);
+
+  switch (period) {
+    case "today":
+      return { start: todayStart, end: todayStart + ONE_DAY_MS };
+    case "yesterday":
+      return { start: todayStart - ONE_DAY_MS, end: todayStart };
+    case "last7":
+      return {
+        start: todayStart - 6 * ONE_DAY_MS,
+        end: todayStart + ONE_DAY_MS,
+      };
+    case "last30":
+      return {
+        start: todayStart - 29 * ONE_DAY_MS,
+        end: todayStart + ONE_DAY_MS,
+      };
+    default:
+      return null;
+  }
+};
 
 const fetchRestaurantOrders = async () => {
   const token = await getAccessToken();
@@ -86,19 +145,140 @@ const updateRestaurantOrderStatus = async ({ orderId, status, reason }) => {
   return data;
 };
 
+const normalizeDeliveries = (deliveries) => {
+  if (!deliveries) return [];
+  if (Array.isArray(deliveries)) return deliveries;
+  return [deliveries];
+};
+
+const getDeliveryStatus = (order) => {
+  const dels = normalizeDeliveries(order?.deliveries);
+  return dels[0]?.status || order?.delivery_status || order?.status || "placed";
+};
+
+const getDriver = (order) => {
+  const dels = normalizeDeliveries(order?.deliveries);
+  return dels[0]?.drivers || null;
+};
+
+const getOrderPeriodAnchor = (order) => {
+  const delivery = normalizeDeliveries(order?.deliveries)[0] || {};
+  const status = getDeliveryStatus(order);
+
+  if (SUCCESS_EARNING_STATUSES.has(status)) {
+    return delivery.picked_up_at || null;
+  }
+
+  return (
+    order?.placed_at ||
+    delivery.res_accepted_at ||
+    delivery.accepted_at ||
+    delivery.created_at ||
+    order?.created_at
+  );
+};
+
+const computeCounts = (list) => {
+  const allOrders = list || [];
+
+  const pending = allOrders.filter(
+    (o) => getDeliveryStatus(o) === "placed",
+  ).length;
+  const accepted = allOrders.filter((o) => {
+    const s = getDeliveryStatus(o);
+    return s === "pending" || s === "accepted";
+  }).length;
+  const delivered = allOrders.filter((o) => {
+    const s = getDeliveryStatus(o);
+    return (
+      s === "picked_up" ||
+      s === "on_the_way" ||
+      s === "at_customer" ||
+      s === "delivered"
+    );
+  }).length;
+
+  return {
+    all: allOrders.length,
+    pending,
+    accepted,
+    delivered,
+  };
+};
+
+const formatTime = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  const today = new Date();
+  const isToday = date.toDateString() === today.toDateString();
+
+  const timeStr = date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  if (isToday) {
+    return `Today, ${timeStr}`;
+  }
+
+  return `${date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  })}, ${timeStr}`;
+};
+
+const getStatusConfig = (status) => {
+  switch (status) {
+    case "placed":
+      return { label: "New Order", bg: "#fef3c7", text: "#d97706", icon: "🆕" };
+    case "pending":
+      return { label: "Pending", bg: "#dbeafe", text: "#2563eb", icon: "⏳" };
+    case "accepted":
+      return { label: "Accepted", bg: "#B8F0D0", text: "#06C168", icon: "✓" };
+    case "picked_up":
+      return { label: "Picked Up", bg: "#f3e8ff", text: "#9333ea", icon: "📦" };
+    case "on_the_way":
+      return {
+        label: "On The Way",
+        bg: "#e0f2fe",
+        text: "#0284c7",
+        icon: "🚗",
+      };
+    case "at_customer":
+      return { label: "Arriving", bg: "#e0e7ff", text: "#4f46e5", icon: "📍" };
+    case "delivered":
+      return { label: "Delivered", bg: "#dcfce7", text: "#06C168", icon: "✅" };
+    case "cancelled":
+    case "rejected":
+    case "failed":
+      return {
+        label: status === "cancelled" ? "Cancelled" : "Rejected",
+        bg: "#fee2e2",
+        text: "#dc2626",
+        icon: "❌",
+      };
+    default:
+      return {
+        label: status || "Unknown",
+        bg: "#f3f4f6",
+        text: "#6b7280",
+        icon: "•",
+      };
+  }
+};
+
 export default function Orders() {
   const navigation = useNavigation();
+  const route = useRoute();
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
+
   const [orders, setOrders] = useState([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("pending");
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [counts, setCounts] = useState({
-    all: 0,
-    pending: 0,
-    accepted: 0,
-    delivered: 0,
-  });
   const [processingOrderId, setProcessingOrderId] = useState(null);
   const [newOrderNotification, setNewOrderNotification] = useState(null);
   const [rejectModal, setRejectModal] = useState({
@@ -106,23 +286,39 @@ export default function Orders() {
     orderId: null,
   });
   const [rejectReason, setRejectReason] = useState("");
+  const [period, setPeriod] = useState("today");
+  const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [banner, setBanner] = useState(null);
+
+  const slideAnim = useRef(new Animated.Value(400)).current;
+  const pageEnterStyle = usePageEnterAnimation();
+
+  const showBanner = (type, message) => {
+    setBanner({ type, message });
+    setTimeout(() => setBanner(null), 2600);
+  };
 
   const ordersQuery = useQuery({
     queryKey: ["admin", "orders", "restaurant"],
     queryFn: fetchRestaurantOrders,
-    staleTime: 20 * 1000,
+    staleTime: 60 * 1000,
     refetchInterval: 30 * 1000,
   });
 
   const restaurantQuery = useQuery({
     queryKey: ["admin", "restaurant"],
     queryFn: fetchAdminRestaurant,
-    staleTime: 120 * 1000,
+    staleTime: 2 * 60 * 1000,
   });
 
   const acceptOrderMutation = useMutation({
     mutationFn: (orderId) =>
-      updateRestaurantOrderStatus({ orderId, status: "accepted" }),
+      updateRestaurantOrderStatus({
+        orderId,
+        status: "accepted",
+      }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin", "orders"] });
     },
@@ -130,91 +326,90 @@ export default function Orders() {
 
   const rejectOrderMutation = useMutation({
     mutationFn: ({ orderId, reason }) =>
-      updateRestaurantOrderStatus({ orderId, status: "failed", reason }),
+      updateRestaurantOrderStatus({
+        orderId,
+        status: "rejected",
+        reason,
+      }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin", "orders"] });
     },
   });
 
-  const restaurant = restaurantQuery.data;
   const loading =
     (ordersQuery.isLoading && !ordersQuery.data) ||
     (restaurantQuery.isLoading && !restaurantQuery.data);
+
   const error =
     ordersQuery.error?.message || restaurantQuery.error?.message || null;
-
-  // Animation for modal
-  const slideAnim = useRef(new Animated.Value(400)).current;
-
-  // Normalize deliveries to always be an array
-  const normalizeDeliveries = (deliveries) => {
-    if (!deliveries) return [];
-    if (Array.isArray(deliveries)) return deliveries;
-    return [deliveries];
-  };
-
-  const getDeliveryStatus = (order) => {
-    // Always rely on deliveries.status as the ONLY source of truth
-    const dels = normalizeDeliveries(order?.deliveries);
-    return dels[0]?.status || "placed";
-  };
-
-  const getDriver = (order) => {
-    const dels = normalizeDeliveries(order?.deliveries);
-    return dels[0]?.drivers || null;
-  };
-
-  const computeCounts = (list) => {
-    const allOrders = list || [];
-    const pending = allOrders.filter(
-      (o) => getDeliveryStatus(o) === "placed",
-    ).length;
-    const accepted = allOrders.filter((o) => {
-      const s = getDeliveryStatus(o);
-      return s === "pending" || s === "accepted";
-    }).length;
-    const delivered = allOrders.filter((o) => {
-      const s = getDeliveryStatus(o);
-      return (
-        s === "picked_up" ||
-        s === "on_the_way" ||
-        s === "at_customer" ||
-        s === "delivered"
-      );
-    }).length;
-
-    return {
-      all: allOrders.length,
-      pending,
-      accepted,
-      delivered,
-    };
-  };
 
   useEffect(() => {
     if (!ordersQuery.data) return;
     setOrders(ordersQuery.data);
-    setCounts(computeCounts(ordersQuery.data));
   }, [ordersQuery.data]);
 
+  useEffect(() => {
+    setRefreshing(ordersQuery.isFetching || restaurantQuery.isFetching);
+  }, [ordersQuery.isFetching, restaurantQuery.isFetching]);
+
+  useEffect(() => {
+    const requestedFilter = route.params?.statusFilter;
+    const requestedOrderId = route.params?.orderId;
+
+    if (!requestedFilter && !requestedOrderId) return;
+
+    if (
+      requestedFilter &&
+      ["all", "pending", "accepted", "delivered"].includes(requestedFilter)
+    ) {
+      setStatusFilter(requestedFilter);
+    }
+
+    if (requestedOrderId && orders.length > 0) {
+      const targetOrder = orders.find(
+        (order) => String(order.id) === String(requestedOrderId),
+      );
+      if (targetOrder) {
+        setSelectedOrder(targetOrder);
+      }
+    }
+
+    navigation.setParams({
+      statusFilter: undefined,
+      orderId: undefined,
+    });
+  }, [navigation, orders, route.params?.orderId, route.params?.statusFilter]);
+
+  useEffect(() => {
+    if (selectedOrder || rejectModal.open) {
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        friction: 8,
+        tension: 65,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      slideAnim.setValue(400);
+    }
+  }, [rejectModal.open, selectedOrder, slideAnim]);
+
+  const bottomSafeSpacing = insets.bottom + 12;
+
   const fetchOrdersRef = useRef(async () => {});
+
   fetchOrdersRef.current = async (silent = false) => {
     try {
-      if (silent) {
-        await queryClient.invalidateQueries({
-          queryKey: ["admin", "orders", "restaurant"],
-        });
-        return;
-      }
-      await ordersQuery.refetch();
+      if (!silent) setManualRefreshing(true);
+      await Promise.all([ordersQuery.refetch(), restaurantQuery.refetch()]);
     } catch (err) {
       console.error("Failed to refresh orders", err);
+    } finally {
+      if (!silent) setManualRefreshing(false);
     }
   };
 
   useEffect(() => {
-    // Set up real-time subscription for new deliveries
-    const subscription = supabaseClient
+    const newDeliverySubscription = supabaseClient
       .channel("deliveries:new-inserts")
       .on(
         "postgres_changes",
@@ -223,10 +418,9 @@ export default function Orders() {
           schema: "public",
           table: "deliveries",
         },
-        (payload) => {
-          console.log("New delivery created:", payload);
+        () => {
           setNewOrderNotification({
-            message: "New order received! 🔔",
+            message: "New order received",
             timestamp: new Date(),
           });
           setTimeout(() => setNewOrderNotification(null), 5000);
@@ -235,7 +429,6 @@ export default function Orders() {
       )
       .subscribe();
 
-    // Subscribe to delivery status changes
     const statusSubscription = supabaseClient
       .channel("deliveries:status-updates")
       .on(
@@ -247,14 +440,7 @@ export default function Orders() {
         },
         (payload) => {
           const updatedDelivery = payload.new;
-          console.log(
-            "Delivery status updated:",
-            updatedDelivery?.status,
-            "delivery_id:",
-            updatedDelivery?.id,
-          );
 
-          // Immediately update local state for instant UI feedback
           setOrders((prevOrders) => {
             const newOrders = prevOrders.map((order) => {
               const dels = normalizeDeliveries(order.deliveries);
@@ -274,7 +460,7 @@ export default function Orders() {
               }
               return order;
             });
-            setCounts(computeCounts(newOrders));
+
             return newOrders;
           });
 
@@ -284,62 +470,96 @@ export default function Orders() {
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      newDeliverySubscription.unsubscribe();
       statusSubscription.unsubscribe();
     };
-  }, [queryClient]);
+  }, []);
 
-  useEffect(() => {
-    if (selectedOrder || rejectModal.open) {
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        friction: 8,
-        tension: 65,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      slideAnim.setValue(400);
-    }
-  }, [selectedOrder, rejectModal.open]);
+  const isInPeriod = (dateStr) => {
+    if (period === "all") return true;
+    if (!dateStr) return false;
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    try {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["admin", "orders"] }),
-        queryClient.invalidateQueries({ queryKey: ["admin", "restaurant"] }),
-      ]);
-    } finally {
-      setRefreshing(false);
-    }
+    const ts = new Date(dateStr).getTime();
+    if (Number.isNaN(ts)) return false;
+
+    const range = getPeriodRangeMs(period);
+    if (!range) return true;
+
+    return ts >= range.start && ts < range.end;
   };
 
-  const filteredOrders = orders.filter((order) => {
-    const deliveryStatus = getDeliveryStatus(order);
-    if (statusFilter === "all") return true;
-    if (statusFilter === "pending") return deliveryStatus === "placed";
-    if (statusFilter === "accepted")
-      return deliveryStatus === "pending" || deliveryStatus === "accepted";
-    if (statusFilter === "delivered")
-      return (
-        deliveryStatus === "picked_up" ||
-        deliveryStatus === "on_the_way" ||
-        deliveryStatus === "at_customer" ||
-        deliveryStatus === "delivered"
+  const periodOrders = useMemo(
+    () =>
+      orders.filter((o) => {
+        const relevantDate = getOrderPeriodAnchor(o);
+
+        if (isInPeriod(relevantDate)) return true;
+
+        // Keep carry-over unaccepted orders in today view.
+        if (period === "today" && getDeliveryStatus(o) === "placed") {
+          return true;
+        }
+
+        return false;
+      }),
+    [orders, period],
+  );
+
+  const periodCounts = useMemo(
+    () => computeCounts(periodOrders),
+    [periodOrders],
+  );
+
+  const filteredOrders = useMemo(
+    () =>
+      periodOrders.filter((order) => {
+        const deliveryStatus = getDeliveryStatus(order);
+        if (statusFilter === "all") return true;
+        if (statusFilter === "pending") return deliveryStatus === "placed";
+        if (statusFilter === "accepted") {
+          return deliveryStatus === "pending" || deliveryStatus === "accepted";
+        }
+        if (statusFilter === "delivered") {
+          return (
+            deliveryStatus === "picked_up" ||
+            deliveryStatus === "on_the_way" ||
+            deliveryStatus === "at_customer" ||
+            deliveryStatus === "delivered"
+          );
+        }
+        return true;
+      }),
+    [periodOrders, statusFilter],
+  );
+
+  const getPeriodRevenue = () => {
+    return periodOrders
+      .filter((o) => SUCCESS_EARNING_STATUSES.has(getDeliveryStatus(o)))
+      .reduce(
+        (sum, o) =>
+          sum +
+          Number.parseFloat(
+            o.admin_total ?? o.admin_subtotal ?? o.subtotal ?? 0,
+          ),
+        0,
       );
-    return true;
-  });
+  };
+
+  const getPeriodOrdersCount = () => {
+    return periodOrders.filter((o) =>
+      SUCCESS_EARNING_STATUSES.has(getDeliveryStatus(o)),
+    ).length;
+  };
 
   const handleAcceptOrder = async (orderId) => {
     setProcessingOrderId(orderId);
 
     try {
       await acceptOrderMutation.mutateAsync(orderId);
-
-      Alert.alert("Success", "Order accepted!");
+      showBanner("success", "Order accepted!");
     } catch (err) {
       console.error("Failed to accept order", err);
-      Alert.alert("Error", err.message || "Failed to accept order");
+      showBanner("error", err.message || "Failed to accept order");
     } finally {
       setProcessingOrderId(null);
     }
@@ -354,7 +574,7 @@ export default function Orders() {
     const orderId = rejectModal.orderId;
     if (!orderId) return;
     if (!rejectReason.trim()) {
-      Alert.alert("Error", "Please provide a reason for rejection");
+      showBanner("error", "Please provide a reason for rejection");
       return;
     }
 
@@ -367,7 +587,6 @@ export default function Orders() {
         reason: rejectReason.trim(),
       });
 
-      // Optimistically update the UI immediately - update deliveries table only
       setOrders((prevOrders) => {
         const newOrders = prevOrders.map((order) => {
           if (order.id === orderId) {
@@ -376,287 +595,71 @@ export default function Orders() {
               ...order,
               deliveries: dels.map((d) => ({
                 ...d,
-                status: "failed",
+                status: "rejected",
                 rejection_reason: rejectReason.trim(),
               })),
             };
           }
           return order;
         });
-        setCounts(computeCounts(newOrders));
+
         return newOrders;
       });
 
-      Alert.alert("Success", "Order rejected");
+      showBanner("success", "Order rejected");
     } catch (err) {
       console.error("Failed to reject order", err);
-      Alert.alert("Error", err.message || "Failed to reject order");
+      showBanner("error", err.message || "Failed to reject order");
     } finally {
       setProcessingOrderId(null);
       setRejectReason("");
     }
   };
 
-  const formatTime = (value) => {
-    if (!value) return "-";
-    const date = new Date(value);
-    if (isNaN(date.getTime())) return "-";
-
-    const today = new Date();
-    const isToday = date.toDateString() === today.toDateString();
-
-    const timeStr = date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    });
-
-    if (isToday) {
-      return `Today, ${timeStr}`;
-    }
-
-    return (
-      date.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-      }) + `, ${timeStr}`
-    );
-  };
-
-  const getStatusConfig = (status) => {
-    switch (status) {
-      case "placed":
-        return {
-          label: "New Order",
-          bg: "#fef3c7",
-          text: "#d97706",
-          icon: "🆕",
-        };
-      case "pending":
-        return {
-          label: "Pending",
-          bg: "#dbeafe",
-          text: "#2563eb",
-          icon: "⏳",
-        };
-      case "accepted":
-        return {
-          label: "Accepted",
-          bg: "#B8F0D0",
-          text: "#06C168",
-          icon: "✓",
-        };
-      case "picked_up":
-        return {
-          label: "Picked Up",
-          bg: "#f3e8ff",
-          text: "#9333ea",
-          icon: "📦",
-        };
-      case "on_the_way":
-        return {
-          label: "On The Way",
-          bg: "#e0f2fe",
-          text: "#0284c7",
-          icon: "🚗",
-        };
-      case "at_customer":
-        return {
-          label: "Arriving",
-          bg: "#e0e7ff",
-          text: "#4f46e5",
-          icon: "📍",
-        };
-      case "delivered":
-        return {
-          label: "Delivered",
-          bg: "#dcfce7",
-          text: "#06C168",
-          icon: "✅",
-        };
-      case "cancelled":
-      case "failed":
-        return {
-          label: status === "cancelled" ? "Cancelled" : "Rejected",
-          bg: "#fee2e2",
-          text: "#dc2626",
-          icon: "❌",
-        };
-      default:
-        return {
-          label: status,
-          bg: "#f3f4f6",
-          text: "#6b7280",
-          icon: "•",
-        };
-    }
-  };
-
-  const calculateTodayRevenue = () => {
-    const today = new Date().toDateString();
-    const pickedUpStatuses = [
-      "picked_up",
-      "on_the_way",
-      "at_customer",
-      "delivered",
-    ];
-    return orders
-      .filter((o) => {
-        const placedToday = new Date(o.placed_at).toDateString() === today;
-        const deliveryStatus = getDeliveryStatus(o);
-        return placedToday && pickedUpStatuses.includes(deliveryStatus);
-      })
-      .reduce((sum, o) => sum + parseFloat(o.subtotal || 0), 0);
-  };
-
-  const getTodayOrdersCount = () => {
-    const today = new Date().toDateString();
-    const pickedUpStatuses = [
-      "picked_up",
-      "on_the_way",
-      "at_customer",
-      "delivered",
-    ];
-    return orders.filter((o) => {
-      const placedToday = new Date(o.placed_at).toDateString() === today;
-      const deliveryStatus = getDeliveryStatus(o);
-      return placedToday && pickedUpStatuses.includes(deliveryStatus);
-    }).length;
-  };
-
-  const filterTabs = [
-    { key: "all", label: "All", count: counts.all },
-    { key: "pending", label: "New", count: counts.pending },
-    { key: "accepted", label: "Active", count: counts.accepted },
-    { key: "delivered", label: "Done", count: counts.delivered },
-  ];
-
-  // Loading Skeleton
-  if (loading) {
+  if (loading && orders.length === 0) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
-        {/* Stats Header Skeleton */}
-        <View style={styles.statsHeader}>
+        <LinearGradient
+          colors={["#24e68c", "#06c16a"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.statsHeader}
+        >
           <View style={styles.statsHeaderTop}>
             <View>
               <View
                 style={[
-                  styles.skeleton,
                   styles.skeletonLight,
-                  { width: 80, height: 20, marginBottom: 4 },
+                  { width: 90, height: 24, marginBottom: 6 },
                 ]}
               />
               <View
-                style={[
-                  styles.skeleton,
-                  styles.skeletonLight,
-                  { width: 120, height: 12 },
-                ]}
+                style={[styles.skeletonLight, { width: 120, height: 12 }]}
               />
             </View>
             <View
               style={[
-                styles.skeleton,
                 styles.skeletonLight,
-                { width: 40, height: 40, borderRadius: 20 },
+                { width: 36, height: 36, borderRadius: 18 },
               ]}
             />
           </View>
+
           <View style={styles.statsRow}>
-            <View style={styles.statCardSkeleton}>
-              <View
-                style={[
-                  styles.skeleton,
-                  styles.skeletonLight,
-                  { width: 80, height: 10, marginBottom: 8 },
-                ]}
-              />
-              <View
-                style={[
-                  styles.skeleton,
-                  styles.skeletonLight,
-                  { width: 50, height: 28 },
-                ]}
-              />
-            </View>
-            <View style={styles.statCardSkeleton}>
-              <View
-                style={[
-                  styles.skeleton,
-                  styles.skeletonLight,
-                  { width: 80, height: 10, marginBottom: 8 },
-                ]}
-              />
-              <View
-                style={[
-                  styles.skeleton,
-                  styles.skeletonLight,
-                  { width: 80, height: 28 },
-                ]}
-              />
-            </View>
+            <View style={styles.statCardSkeleton} />
+            <View style={styles.statCardSkeleton} />
           </View>
-        </View>
+        </LinearGradient>
 
         <View style={styles.mainContent}>
-          {/* Filter Tabs Skeleton */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.filterTabs}
-          >
-            {[1, 2, 3, 4].map((i) => (
-              <View
-                key={i}
-                style={[
-                  styles.skeleton,
-                  { width: 70, height: 36, borderRadius: 18, marginRight: 8 },
-                ]}
-              />
+          <View style={styles.filtersRow}>
+            {[1, 2, 3, 4].map((item) => (
+              <View key={item} style={styles.filterSkeleton} />
             ))}
-          </ScrollView>
+          </View>
 
-          {/* Orders Skeleton */}
-          {[1, 2, 3, 4].map((i) => (
-            <View key={i} style={styles.skeletonOrderCard}>
-              <View style={styles.skeletonOrderHeader}>
-                <View>
-                  <View
-                    style={[
-                      styles.skeleton,
-                      { width: 100, height: 16, marginBottom: 6 },
-                    ]}
-                  />
-                  <View style={[styles.skeleton, { width: 130, height: 12 }]} />
-                </View>
-                <View
-                  style={[
-                    styles.skeleton,
-                    { width: 70, height: 24, borderRadius: 12 },
-                  ]}
-                />
-              </View>
-              <View style={styles.skeletonOrderCustomer}>
-                <View
-                  style={[
-                    styles.skeleton,
-                    { width: 40, height: 40, borderRadius: 20 },
-                  ]}
-                />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <View
-                    style={[
-                      styles.skeleton,
-                      { width: "60%", height: 14, marginBottom: 6 },
-                    ]}
-                  />
-                  <View
-                    style={[styles.skeleton, { width: "40%", height: 12 }]}
-                  />
-                </View>
-                <View style={[styles.skeleton, { width: 60, height: 20 }]} />
-              </View>
-            </View>
+          {[1, 2, 3].map((item) => (
+            <View key={item} style={styles.orderSkeletonCard} />
           ))}
         </View>
       </SafeAreaView>
@@ -665,67 +668,174 @@ export default function Orders() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Stats Header */}
-      <View style={styles.statsHeader}>
-        <View style={styles.statsHeaderTop}>
-          <View>
-            <Text style={styles.headerTitle}>Orders</Text>
-            <Text style={styles.headerSubtitle}>Order Management</Text>
+      <Modal
+        visible={showPeriodDropdown}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPeriodDropdown(false)}
+      >
+        <Pressable
+          style={styles.dropdownOverlay}
+          onPress={() => setShowPeriodDropdown(false)}
+        >
+          <View style={styles.periodDropdown}>
+            {Object.entries(PERIOD_LABELS).map(([key, label]) => (
+              <TouchableOpacity
+                key={key}
+                style={[
+                  styles.periodOption,
+                  period === key ? styles.periodOptionActive : null,
+                ]}
+                onPress={() => {
+                  setPeriod(key);
+                  setShowPeriodDropdown(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.periodOptionText,
+                    period === key ? styles.periodOptionTextActive : null,
+                  ]}
+                >
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
-          <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
-            <Text style={styles.refreshIcon}>🔄</Text>
-          </TouchableOpacity>
+        </Pressable>
+      </Modal>
+
+      <LinearGradient
+        colors={["#24e68c", "#06c16a"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.statsHeader}
+      >
+        <View style={styles.statsHeaderTop}>
+          <View style={styles.titleWrap}>
+            <Text style={styles.headerTitle}>Orders</Text>
+            <View style={styles.titleUnderline} />
+          </View>
+
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.periodPickerButton}
+              onPress={() => setShowPeriodDropdown(true)}
+            >
+              <Text style={styles.periodPickerText}>
+                {PERIOD_LABELS[period]}
+              </Text>
+              <Feather name="chevron-down" size={14} color="#111827" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.roundRefreshButton}
+              onPress={() => fetchOrdersRef.current(false)}
+            >
+              <Ionicons name="refresh" size={16} color="#ffffff" />
+            </TouchableOpacity>
+          </View>
         </View>
+
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>TODAY'S ORDERS</Text>
-            <Text style={styles.statValue}>{getTodayOrdersCount()}</Text>
+            {/* Orders */}
+            <Text style={styles.statLabel}>ORDERS</Text>
+            <Text style={styles.statValue}>{getPeriodOrdersCount()}</Text>
           </View>
+
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>TODAY'S REVENUE</Text>
+            {/* Revenue */}
+            <Text style={styles.statLabel}>REVENUE</Text>
             <Text style={styles.statValue}>
-              Rs.{calculateTodayRevenue().toFixed(0)}
+              Rs.{getPeriodRevenue().toFixed(0)}
             </Text>
           </View>
         </View>
-      </View>
+      </LinearGradient>
 
-      {/* Main Content */}
-      <View style={styles.mainContent}>
-        {error && (
+      <Animated.View style={[styles.mainContentFloating, pageEnterStyle]}>
+        {banner ? (
+          <View
+            style={[
+              styles.actionBanner,
+              banner.type === "success"
+                ? styles.actionBannerSuccess
+                : styles.actionBannerError,
+            ]}
+          >
+            <Text
+              style={[
+                styles.actionBannerText,
+                banner.type === "success"
+                  ? styles.actionBannerTextSuccess
+                  : styles.actionBannerTextError,
+              ]}
+            >
+              {banner.message}
+            </Text>
+          </View>
+        ) : null}
+
+        {error ? (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
           </View>
-        )}
+        ) : null}
 
-        {/* Filter Tabs */}
+        {newOrderNotification ? (
+          <View style={styles.notificationBanner}>
+            <View style={styles.notificationLeft}>
+              <MaterialCommunityIcons
+                name="bell-ring"
+                size={20}
+                color="#15803d"
+              />
+              <View>
+                <Text style={styles.notificationTitle}>
+                  {newOrderNotification.message}
+                </Text>
+                <Text style={styles.notificationTime}>Just now</Text>
+              </View>
+            </View>
+            <TouchableOpacity onPress={() => setNewOrderNotification(null)}>
+              <Feather name="x" size={16} color="#16a34a" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={styles.filterTabs}
+          style={styles.filtersRow}
+          contentContainerStyle={styles.filtersRowContent}
         >
-          {filterTabs.map((tab) => (
-            <TouchableOpacity
-              key={tab.key}
-              style={[
-                styles.filterTab,
-                statusFilter === tab.key && styles.filterTabActive,
-              ]}
-              onPress={() => setStatusFilter(tab.key)}
-            >
-              <Text
+          {STATUS_FILTERS.map((tab) => {
+            const tabCount = periodCounts[tab.key] || 0;
+            return (
+              <TouchableOpacity
+                key={tab.key}
                 style={[
-                  styles.filterTabText,
-                  statusFilter === tab.key && styles.filterTabTextActive,
+                  styles.filterTab,
+                  statusFilter === tab.key ? styles.filterTabActive : null,
                 ]}
+                onPress={() => setStatusFilter(tab.key)}
               >
-                {tab.label} ({tab.count})
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Text
+                  style={[
+                    styles.filterTabText,
+                    statusFilter === tab.key
+                      ? styles.filterTabTextActive
+                      : null,
+                  ]}
+                >
+                  {tab.label} ({tabCount})
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
-        {/* Section Header */}
         <Text style={styles.sectionTitle}>
           {statusFilter === "all"
             ? "Recent Orders"
@@ -736,22 +846,23 @@ export default function Orders() {
                 : "Completed Orders"}
         </Text>
 
-        {/* Orders List */}
         <ScrollView
           style={styles.ordersList}
+          contentContainerStyle={{ paddingBottom: 16 }}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
+              refreshing={manualRefreshing}
+              onRefresh={() => fetchOrdersRef.current(false)}
               colors={["#06C168"]}
+              tintColor="#06C168"
             />
           }
         >
           {filteredOrders.length === 0 ? (
             <View style={styles.emptyState}>
-              <View style={styles.emptyIconContainer}>
-                <Text style={styles.emptyIcon}>📄</Text>
+              <View style={styles.emptyIconWrap}>
+                <Feather name="file-text" size={30} color="#9ca3af" />
               </View>
               <Text style={styles.emptyTitle}>No orders found</Text>
               <Text style={styles.emptySubtitle}>
@@ -767,15 +878,37 @@ export default function Orders() {
                 const statusConfig = getStatusConfig(deliveryStatus);
                 const driver = getDriver(order);
                 const items = order.order_items || [];
+                const showDriverContact =
+                  !!driver &&
+                  [
+                    "accepted",
+                    "picked_up",
+                    "on_the_way",
+                    "at_customer",
+                    "delivered",
+                  ].includes(deliveryStatus);
+
+                const fullDeliveryAddress = [
+                  order.delivery_address,
+                  order.delivery_city || order.city || order.customer_city,
+                ]
+                  .filter(Boolean)
+                  .join(", ");
 
                 return (
-                  <View key={order.id} style={styles.orderCard}>
-                    {/* Order Header */}
-                    <View style={styles.orderHeader}>
-                      <View>
-                        <View style={styles.orderIdRow}>
-                          <Text style={styles.orderId}>
-                            Order #{order.order_number || order.id?.slice(-6)}
+                  <TouchableOpacity
+                    key={order.id}
+                    style={styles.orderCard}
+                    activeOpacity={0.92}
+                    onPress={() => setSelectedOrder(order)}
+                  >
+                    <View style={styles.orderHeaderRow}>
+                      <View style={styles.orderHeaderLeft}>
+                        <View style={styles.orderIdBadgeRow}>
+                          <Text style={styles.orderIdText}>
+                            Order #
+                            {order.order_number ||
+                              String(order.id || "").slice(-6)}
                           </Text>
                           <View
                             style={[
@@ -793,94 +926,98 @@ export default function Orders() {
                             </Text>
                           </View>
                         </View>
-                        <Text style={styles.orderTime}>
+                        <Text style={styles.orderTimeText}>
                           {formatTime(order.placed_at || order.created_at)}
                         </Text>
                       </View>
-                      <Text style={styles.orderAmount}>
+
+                      <Text style={styles.orderAmountText}>
                         Rs.
-                        {parseFloat(
+                        {Number.parseFloat(
                           order.subtotal || order.total_amount || 0,
                         ).toFixed(0)}
                       </Text>
                     </View>
 
-                    {/* Customer Info */}
                     <View style={styles.customerRow}>
-                      <View style={styles.customerInfo}>
+                      <View style={styles.customerLeft}>
                         <View style={styles.customerAvatar}>
-                          <Text style={styles.customerAvatarIcon}>👤</Text>
+                          <Feather name="user" size={16} color="#9ca3af" />
                         </View>
-                        <View>
+                        <View style={styles.customerTextWrap}>
                           <Text style={styles.customerName}>
                             {order.customer_name || "Customer"}
                           </Text>
-                          <Text style={styles.customerPhone}>
-                            {order.customer_phone || "-"}
-                          </Text>
+                          {fullDeliveryAddress ? (
+                            <Text style={styles.customerAddress}>
+                              {fullDeliveryAddress}
+                            </Text>
+                          ) : null}
                         </View>
                       </View>
-                      {order.customer_phone && (
-                        <TouchableOpacity
-                          style={styles.callButton}
-                          onPress={() =>
-                            Linking.openURL(`tel:${order.customer_phone}`)
-                          }
-                        >
-                          <Text style={styles.callIcon}>📞</Text>
-                        </TouchableOpacity>
-                      )}
                     </View>
 
-                    {/* Food Items Preview */}
-                    {items.length > 0 && (
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        style={styles.itemsPreview}
-                      >
-                        {items.slice(0, 4).map((item, idx) => (
-                          <View key={idx} style={styles.itemPreviewCard}>
+                    {items.length > 0 ? (
+                      <View style={styles.itemsListWrap}>
+                        {items.map((item, idx) => (
+                          <View
+                            key={`${order.id}-item-${idx}`}
+                            style={styles.itemRowCard}
+                          >
                             {item.food_image_url ? (
                               <Image
                                 source={{ uri: item.food_image_url }}
                                 style={styles.itemImage}
                               />
                             ) : (
-                              <View style={styles.itemImagePlaceholder}>
+                              <View style={styles.itemImageFallback}>
                                 <Text style={styles.itemImageEmoji}>🍽️</Text>
                               </View>
                             )}
-                            <Text style={styles.itemName} numberOfLines={1}>
-                              {item.quantity}x{" "}
-                              {item.food_name?.length > 12
-                                ? item.food_name.slice(0, 12) + "..."
-                                : item.food_name}
-                            </Text>
-                            {item.size && item.size !== "regular" && (
-                              <Text style={styles.itemSize}>{item.size}</Text>
-                            )}
+
+                            <View style={styles.itemInfoCol}>
+                              <View style={styles.itemTopRow}>
+                                <Text style={styles.itemNameText}>
+                                  {item.quantity}x{" "}
+                                  {item.food_name || "Food item"}
+                                </Text>
+                                <Text style={styles.itemLineAmount}>
+                                  Rs.
+                                  {Number.parseFloat(
+                                    item.total_price ||
+                                      item.unit_price * item.quantity ||
+                                      0,
+                                  ).toFixed(0)}
+                                </Text>
+                              </View>
+
+                              {item.size ? (
+                                <Text style={styles.itemSizePill}>
+                                  {item.size}
+                                </Text>
+                              ) : null}
+
+                              <Text style={styles.itemUnitPrice}>
+                                Rs.
+                                {Number.parseFloat(
+                                  item.unit_price || 0,
+                                ).toFixed(0)}{" "}
+                                each
+                              </Text>
+                            </View>
                           </View>
                         ))}
-                        {items.length > 4 && (
-                          <View style={styles.moreItemsCard}>
-                            <Text style={styles.moreItemsText}>
-                              +{items.length - 4} more
-                            </Text>
-                          </View>
-                        )}
-                      </ScrollView>
-                    )}
+                      </View>
+                    ) : null}
 
-                    <View style={styles.divider} />
+                    <View style={styles.cardDivider} />
 
-                    {/* Driver Info or Actions */}
                     {driver ? (
                       <View style={styles.driverRow}>
-                        <View style={styles.driverInfo}>
+                        <View style={styles.driverLeft}>
                           <Text style={styles.driverLabel}>Driver</Text>
                           <View style={styles.driverBadge}>
-                            <View style={styles.driverInitials}>
+                            <View style={styles.driverInitialsCircle}>
                               <Text style={styles.driverInitialsText}>
                                 {driver.full_name
                                   ?.split(" ")
@@ -889,27 +1026,33 @@ export default function Orders() {
                                   .slice(0, 2) || "D"}
                               </Text>
                             </View>
-                            <Text style={styles.driverName}>
+                            <Text style={styles.driverNameText}>
                               {driver.full_name || "Driver"}
                             </Text>
+                            {showDriverContact && driver.phone ? (
+                              <Text style={styles.driverPhoneInline}>
+                                {driver.phone}
+                              </Text>
+                            ) : null}
                           </View>
                         </View>
-                        {driver.phone && (
+
+                        {showDriverContact && driver.phone ? (
                           <TouchableOpacity
                             onPress={() =>
                               Linking.openURL(`tel:${driver.phone}`)
                             }
                           >
-                            <Text style={styles.driverCallIcon}>📞</Text>
+                            <Feather name="phone" size={18} color="#06C168" />
                           </TouchableOpacity>
-                        )}
+                        ) : null}
                       </View>
                     ) : deliveryStatus === "placed" ? (
-                      <View style={styles.actionButtons}>
+                      <View style={styles.actionsRow}>
                         <TouchableOpacity
                           style={styles.acceptButton}
-                          onPress={() => handleAcceptOrder(order.id)}
                           disabled={processingOrderId === order.id}
+                          onPress={() => handleAcceptOrder(order.id)}
                         >
                           <Text style={styles.acceptButtonText}>
                             {processingOrderId === order.id
@@ -917,28 +1060,31 @@ export default function Orders() {
                               : "Accept Order"}
                           </Text>
                         </TouchableOpacity>
+
                         <TouchableOpacity
                           style={styles.rejectButton}
-                          onPress={() => handleRejectOrder(order.id)}
                           disabled={processingOrderId === order.id}
+                          onPress={() => handleRejectOrder(order.id)}
                         >
                           <Text style={styles.rejectButtonText}>Reject</Text>
                         </TouchableOpacity>
                       </View>
                     ) : (
-                      <View style={styles.statusRow}>
-                        <Text style={styles.statusText}>
+                      <View style={styles.statusFooterRow}>
+                        <Text style={styles.statusFooterText}>
                           {deliveryStatus === "pending" ||
                           deliveryStatus === "accepted"
                             ? "Waiting for driver"
                             : deliveryStatus === "delivered"
                               ? "Order completed"
-                              : deliveryStatus === "failed"
+                              : deliveryStatus === "failed" ||
+                                  deliveryStatus === "rejected"
                                 ? `Rejected: ${normalizeDeliveries(order.deliveries)[0]?.rejection_reason || "No reason provided"}`
                                 : deliveryStatus === "cancelled"
                                   ? "Order cancelled"
                                   : "In progress"}
                         </Text>
+
                         <TouchableOpacity
                           style={styles.viewDetailsButton}
                           onPress={() => setSelectedOrder(order)}
@@ -946,25 +1092,31 @@ export default function Orders() {
                           <Text style={styles.viewDetailsText}>
                             View Details
                           </Text>
-                          <Text style={styles.viewDetailsArrow}>›</Text>
+                          <Feather
+                            name="chevron-right"
+                            size={14}
+                            color="#06C168"
+                          />
                         </TouchableOpacity>
                       </View>
                     )}
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
 
-              {/* End of list indicator */}
-              <View style={styles.endOfList}>
-                <Text style={styles.endOfListIcon}>✓</Text>
-                <Text style={styles.endOfListText}>That's all for now</Text>
+              <View style={styles.endListWrap}>
+                <Ionicons
+                  name="checkmark-circle-outline"
+                  size={34}
+                  color="#9ca3af"
+                />
+                <Text style={styles.endListText}>That's all for now</Text>
               </View>
             </>
           )}
         </ScrollView>
-      </View>
+      </Animated.View>
 
-      {/* Reject Reason Modal */}
       <Modal
         visible={rejectModal.open}
         transparent
@@ -975,29 +1127,23 @@ export default function Orders() {
         }}
       >
         <Pressable
-          style={styles.modalOverlay}
+          style={styles.rejectModalOverlay}
           onPress={() => {
             setRejectModal({ open: false, orderId: null });
             setRejectReason("");
           }}
         >
-          <Animated.View
-            style={[
-              styles.rejectModalContent,
-              { transform: [{ translateY: slideAnim }] },
-            ]}
-          >
+          <View style={styles.rejectModalShell}>
             <Pressable onPress={(e) => e.stopPropagation()}>
               <View style={styles.rejectModalHeader}>
-                <Text style={styles.rejectModalTitle}>⚠️ Reject Order</Text>
+                <Text style={styles.rejectModalTitle}>Reject Order</Text>
                 <Text style={styles.rejectModalSubtitle}>
                   This will notify the customer via message
                 </Text>
               </View>
+
               <View style={styles.rejectModalBody}>
-                <Text style={styles.rejectLabel}>
-                  Reason for rejection <Text style={styles.required}>*</Text>
-                </Text>
+                <Text style={styles.rejectLabel}>Reason for rejection *</Text>
                 <TextInput
                   style={styles.rejectInput}
                   value={rejectReason}
@@ -1008,45 +1154,50 @@ export default function Orders() {
                   numberOfLines={3}
                   textAlignVertical="top"
                 />
-                <View style={styles.rejectModalButtons}>
+
+                <View style={styles.rejectButtonsRow}>
                   <TouchableOpacity
-                    style={styles.cancelRejectButton}
+                    style={styles.rejectCancelButton}
                     onPress={() => {
                       setRejectModal({ open: false, orderId: null });
                       setRejectReason("");
                     }}
                   >
-                    <Text style={styles.cancelRejectText}>Cancel</Text>
+                    <Text style={styles.rejectCancelText}>Cancel</Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[
-                      styles.confirmRejectButton,
-                      !rejectReason.trim() && styles.buttonDisabled,
+                      styles.rejectConfirmButton,
+                      !rejectReason.trim() ? styles.buttonDisabled : null,
                     ]}
-                    onPress={handleConfirmReject}
                     disabled={!rejectReason.trim()}
+                    onPress={handleConfirmReject}
                   >
-                    <Text style={styles.confirmRejectText}>
+                    <Text style={styles.rejectConfirmText}>
                       Confirm Rejection
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
             </Pressable>
-          </Animated.View>
+          </View>
         </Pressable>
       </Modal>
 
-      {/* Order Details Modal */}
-      {selectedOrder && (
+      {selectedOrder ? (
         <OrderDetailsModal
           order={selectedOrder}
           onClose={() => setSelectedOrder(null)}
           getStatusConfig={getStatusConfig}
           getDeliveryStatus={getDeliveryStatus}
           getDriver={getDriver}
+          onAccept={handleAcceptOrder}
+          onReject={handleRejectOrder}
+          processingOrderId={processingOrderId}
+          bottomSafeSpacing={bottomSafeSpacing}
         />
-      )}
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1057,16 +1208,37 @@ function OrderDetailsModal({
   getStatusConfig,
   getDeliveryStatus,
   getDriver,
+  onAccept,
+  onReject,
+  processingOrderId,
+  bottomSafeSpacing,
 }) {
   const deliveryStatus = getDeliveryStatus(order);
   const statusConfig = getStatusConfig(deliveryStatus);
   const driver = getDriver(order);
   const items = order.order_items || [];
 
+  const showDriverContact =
+    !!driver &&
+    [
+      "accepted",
+      "picked_up",
+      "on_the_way",
+      "at_customer",
+      "delivered",
+    ].includes(deliveryStatus);
+
+  const fullDeliveryAddress = [
+    order.delivery_address,
+    order.delivery_city || order.city || order.customer_city,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
   const formatDateTime = (value) => {
     if (!value) return "-";
     const date = new Date(value);
-    if (isNaN(date.getTime())) return "-";
+    if (Number.isNaN(date.getTime())) return "-";
     return date.toLocaleString("en-US", {
       month: "short",
       day: "numeric",
@@ -1078,98 +1250,89 @@ function OrderDetailsModal({
   };
 
   return (
-    <Modal
-      visible={true}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.modalOverlay} onPress={onClose}>
-        <View style={styles.detailsModalContent}>
+        <View style={styles.detailsModalSheet}>
           <Pressable onPress={(e) => e.stopPropagation()}>
-            {/* Handle */}
-            <View style={styles.modalHandle}>
+            <View style={styles.modalHandleWrap}>
               <View style={styles.modalHandleBar} />
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Header */}
+            <ScrollView
+              style={styles.detailsScroll}
+              contentContainerStyle={{ paddingBottom: bottomSafeSpacing }}
+              showsVerticalScrollIndicator={false}
+            >
               <View style={styles.detailsHeader}>
                 <View>
                   <Text style={styles.detailsOrderId}>
-                    Order #{order.order_number || order.id?.slice(-6)}
+                    Order #
+                    {order.order_number || String(order.id || "").slice(-6)}
                   </Text>
                   <Text style={styles.detailsTime}>
                     {formatDateTime(order.placed_at || order.created_at)}
                   </Text>
                 </View>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    { backgroundColor: statusConfig.bg },
-                  ]}
-                >
-                  <Text
+
+                <View style={styles.detailsHeaderRight}>
+                  <View
                     style={[
-                      styles.statusBadgeText,
-                      { color: statusConfig.text },
+                      styles.statusBadge,
+                      { backgroundColor: statusConfig.bg },
                     ]}
                   >
-                    {statusConfig.label}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Customer Info */}
-              <View style={styles.detailsSection}>
-                <Text style={styles.detailsSectionLabel}>CUSTOMER</Text>
-                <View style={styles.detailsCustomerCard}>
-                  <View style={styles.detailsCustomerInfo}>
-                    <View style={styles.detailsCustomerAvatar}>
-                      <Text style={styles.detailsCustomerAvatarIcon}>👤</Text>
-                    </View>
-                    <View>
-                      <Text style={styles.detailsCustomerName}>
-                        {order.customer_name || "Customer"}
-                      </Text>
-                      <Text style={styles.detailsCustomerPhone}>
-                        {order.customer_phone || "-"}
-                      </Text>
-                    </View>
-                  </View>
-                  {order.customer_phone && (
-                    <TouchableOpacity
-                      style={styles.detailsCallButton}
-                      onPress={() =>
-                        Linking.openURL(`tel:${order.customer_phone}`)
-                      }
+                    <Text
+                      style={[
+                        styles.statusBadgeText,
+                        { color: statusConfig.text },
+                      ]}
                     >
-                      <Text style={styles.detailsCallIcon}>📞</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                {order.delivery_address && (
-                  <View style={styles.addressBox}>
-                    <Text style={styles.addressLabel}>Delivery Address</Text>
-                    <Text style={styles.addressText}>
-                      {order.delivery_address}
+                      {statusConfig.label}
                     </Text>
                   </View>
-                )}
+                  <TouchableOpacity
+                    style={styles.closeIconButton}
+                    onPress={onClose}
+                  >
+                    <Feather name="x" size={15} color="#4b5563" />
+                  </TouchableOpacity>
+                </View>
               </View>
 
-              {/* Driver Info */}
-              {driver && (
-                <View style={styles.detailsSection}>
+              <View style={styles.detailSectionCard}>
+                <Text style={styles.detailSectionLabel}>CUSTOMER</Text>
+                <View style={styles.detailCustomerRow}>
+                  <View style={styles.detailCustomerLeft}>
+                    <View style={styles.detailAvatarCircle}>
+                      <Feather name="user" size={17} color="#9ca3af" />
+                    </View>
+                    <Text style={styles.detailCustomerName}>
+                      {order.customer_name || "Customer"}
+                    </Text>
+                  </View>
+                </View>
+
+                {fullDeliveryAddress ? (
+                  <View style={styles.addressBlock}>
+                    <Text style={styles.addressLabel}>Delivery Address</Text>
+                    <Text style={styles.addressText}>
+                      {fullDeliveryAddress}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {driver ? (
+                <View style={styles.detailDriverCard}>
                   <Text
-                    style={[styles.detailsSectionLabel, { color: "#15803d" }]}
+                    style={[styles.detailSectionLabel, { color: "#15803d" }]}
                   >
                     ASSIGNED DRIVER
                   </Text>
-                  <View style={styles.detailsDriverCard}>
-                    <View style={styles.detailsDriverInfo}>
-                      <View style={styles.detailsDriverAvatar}>
-                        <Text style={styles.detailsDriverInitials}>
+                  <View style={styles.detailDriverRow}>
+                    <View style={styles.detailDriverLeft}>
+                      <View style={styles.detailDriverAvatar}>
+                        <Text style={styles.detailDriverInitials}>
                           {driver.full_name
                             ?.split(" ")
                             .map((n) => n[0])
@@ -1177,58 +1340,83 @@ function OrderDetailsModal({
                             .slice(0, 2) || "D"}
                         </Text>
                       </View>
+
                       <View>
-                        <Text style={styles.detailsDriverName}>
+                        <Text style={styles.detailDriverName}>
                           {driver.full_name || "Driver"}
                         </Text>
-                        <Text style={styles.detailsDriverPhone}>
-                          {driver.phone || "-"}
-                        </Text>
+                        {showDriverContact && driver.phone ? (
+                          <Text style={styles.detailDriverPhone}>
+                            {driver.phone}
+                          </Text>
+                        ) : null}
                       </View>
                     </View>
-                    {driver.phone && (
+
+                    {showDriverContact && driver.phone ? (
                       <TouchableOpacity
-                        style={styles.detailsCallButton}
+                        style={styles.driverCallRound}
                         onPress={() => Linking.openURL(`tel:${driver.phone}`)}
                       >
-                        <Text style={styles.detailsCallIcon}>📞</Text>
+                        <Feather name="phone" size={15} color="#ffffff" />
                       </TouchableOpacity>
-                    )}
+                    ) : null}
                   </View>
                 </View>
-              )}
+              ) : null}
 
-              {/* Order Items */}
-              <View style={styles.detailsSection}>
-                <Text style={styles.detailsSectionLabel}>ORDER ITEMS</Text>
-                <View style={styles.itemsList}>
+              <View style={styles.detailItemsSection}>
+                <Text style={styles.detailSectionLabel}>
+                  ORDER ITEMS ({items.length})
+                </Text>
+                <View style={styles.detailItemsList}>
                   {items.map((item, index) => (
-                    <View key={index} style={styles.itemRow}>
+                    <View
+                      key={`${order.id}-details-item-${index}`}
+                      style={styles.detailItemCard}
+                    >
                       {item.food_image_url ? (
                         <Image
                           source={{ uri: item.food_image_url }}
-                          style={styles.itemImageLarge}
+                          style={styles.detailItemImage}
                         />
                       ) : (
-                        <View style={styles.itemImageLargePlaceholder}>
-                          <Text style={styles.itemImageLargeEmoji}>🍽️</Text>
+                        <View style={styles.detailItemImageFallback}>
+                          <Text style={styles.detailItemEmoji}>🍽️</Text>
                         </View>
                       )}
-                      <View style={styles.itemDetails}>
-                        <Text style={styles.itemNameLarge}>
+
+                      <View style={styles.detailItemInfo}>
+                        <Text style={styles.detailItemName} numberOfLines={1}>
                           {item.food_name}
                         </Text>
-                        <Text style={styles.itemMeta}>
-                          {item.size &&
-                            item.size !== "regular" &&
-                            `${item.size} • `}
-                          Qty: {item.quantity}
+
+                        <View style={styles.detailItemMetaRow}>
+                          {item.size ? (
+                            <Text style={styles.detailItemSize}>
+                              {item.size}
+                            </Text>
+                          ) : null}
+                          <Text style={styles.detailItemQty}>
+                            x{item.quantity}
+                          </Text>
+                        </View>
+
+                        <Text style={styles.detailItemUnitPrice}>
+                          Rs.
+                          {Number.parseFloat(item.unit_price || 0).toFixed(
+                            0,
+                          )}{" "}
+                          each
                         </Text>
                       </View>
-                      <Text style={styles.itemPrice}>
+
+                      <Text style={styles.detailItemTotal}>
                         Rs.
-                        {parseFloat(
-                          item.total_price || item.unit_price * item.quantity,
+                        {Number.parseFloat(
+                          item.total_price ||
+                            item.unit_price * item.quantity ||
+                            0,
                         ).toFixed(0)}
                       </Text>
                     </View>
@@ -1236,17 +1424,48 @@ function OrderDetailsModal({
                 </View>
               </View>
 
-              {/* Order Summary */}
               <View style={styles.summaryCard}>
-                <Text style={styles.summaryLabel}>Admin Total</Text>
+                <Text style={styles.summaryTitle}>Admin Total</Text>
                 <Text style={styles.summaryAmount}>
-                  Rs.{parseFloat(order.subtotal || 0).toFixed(0)}
+                  Rs.{Number.parseFloat(order.subtotal || 0).toFixed(0)}
                 </Text>
               </View>
 
-              {/* Close Button */}
-              <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-                <Text style={styles.closeButtonText}>Close</Text>
+              {deliveryStatus === "placed" ? (
+                <View style={styles.detailsActionRow}>
+                  <TouchableOpacity
+                    style={styles.acceptButton}
+                    disabled={processingOrderId === order.id}
+                    onPress={() => {
+                      onAccept(order.id);
+                      onClose();
+                    }}
+                  >
+                    <Text style={styles.acceptButtonText}>
+                      {processingOrderId === order.id
+                        ? "Processing..."
+                        : "Accept Order"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.rejectButton}
+                    disabled={processingOrderId === order.id}
+                    onPress={() => {
+                      onReject(order.id);
+                      onClose();
+                    }}
+                  >
+                    <Text style={styles.rejectButtonText}>Reject</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={onClose}
+              >
+                <Text style={styles.modalCloseButtonText}>Close</Text>
               </TouchableOpacity>
             </ScrollView>
           </Pressable>
@@ -1259,406 +1478,464 @@ function OrderDetailsModal({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#f8fafc",
+  },
+  dropdownOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.2)",
+    justifyContent: "flex-start",
+    alignItems: "flex-end",
+    paddingTop: 96,
+    paddingRight: 16,
+  },
+  periodDropdown: {
+    width: 170,
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
+    overflow: "hidden",
+  },
+  periodOption: {
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  periodOptionActive: {
+    backgroundColor: "#ecfdf5",
+  },
+  periodOptionText: {
+    color: "#374151",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  periodOptionTextActive: {
+    color: "#16a34a",
+    fontWeight: "700",
   },
 
-  // Stats Header
   statsHeader: {
-    backgroundColor: "#06C168",
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 54,
   },
   statsHeaderTop: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  titleWrap: {
+    alignItems: "flex-end",
+    paddingRight: 6,
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#fff",
-    lineHeight: 30,
-  },
-  headerSubtitle: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.8)",
+    fontSize: 34,
     fontWeight: "500",
-    marginTop: 2,
+    color: "#111827",
+    lineHeight: 35,
   },
-  refreshButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.2)",
+  titleUnderline: {
+    marginTop: 3,
+    width: 44,
+    height: 2,
+    borderRadius: 999,
+    backgroundColor: "#111827",
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  periodPickerButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  periodPickerText: {
+    color: "#111827",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  roundRefreshButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
   },
-  refreshIcon: {
-    fontSize: 18,
-  },
+
   statsRow: {
     flexDirection: "row",
     gap: 10,
   },
   statCard: {
     flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 12,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "rgba(255,255,255,0.2)",
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    borderColor: "rgba(255,255,255,0.18)",
   },
   statLabel: {
-    fontSize: 9,
+    color: "#111827",
+    fontSize: 15,
     fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
   },
   statValue: {
-    fontSize: 20,
+    color: "#111827",
+    fontSize: 28,
     fontWeight: "800",
-    color: "#06C168",
-    marginTop: 4,
+    marginTop: 2,
   },
 
-  // Main Content
+  mainContentFloating: {
+    flex: 1,
+    marginTop: -36,
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+  },
   mainContent: {
     flex: 1,
-    marginTop: 0,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingTop: 10,
   },
   errorBanner: {
-    backgroundColor: "#FEF2F2",
-    borderWidth: 1,
-    borderColor: "#FECACA",
+    backgroundColor: "#fef2f2",
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#fecaca",
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 10,
   },
   errorText: {
-    color: "#B91C1C",
+    color: "#b91c1c",
     fontSize: 13,
-    fontWeight: "500",
+    fontWeight: "600",
+  },
+  actionBanner: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  actionBannerSuccess: {
+    backgroundColor: "#ecfdf5",
+    borderColor: "#a7f3d0",
+  },
+  actionBannerError: {
+    backgroundColor: "#fef2f2",
+    borderColor: "#fecaca",
+  },
+  actionBannerText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  actionBannerTextSuccess: {
+    color: "#047857",
+  },
+  actionBannerTextError: {
+    color: "#b91c1c",
   },
 
-  // Notification Banner
   notificationBanner: {
     backgroundColor: "#dcfce7",
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "#9EEBBE",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  notificationContent: {
+  notificationLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 8,
   },
-  notificationIcon: {
-    fontSize: 24,
-  },
-  notificationText: {
-    fontSize: 14,
-    fontWeight: "600",
+  notificationTitle: {
     color: "#166534",
+    fontSize: 13,
+    fontWeight: "700",
   },
   notificationTime: {
-    fontSize: 12,
-    color: "#06C168",
-  },
-  notificationClose: {
-    fontSize: 18,
-    color: "#06C168",
-    padding: 4,
+    marginTop: 1,
+    color: "#16a34a",
+    fontSize: 11,
   },
 
-  // Filter Tabs
-  filterTabs: {
-    marginBottom: 12,
+  filtersRow: {
+    marginBottom: 11,
+    maxHeight: 38,
+    flexGrow: 0,
+    alignSelf: "flex-start",
+  },
+  filtersRowContent: {
+    paddingRight: 8,
+    alignItems: "center",
   },
   filterTab: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 18,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
     marginRight: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 100,
+    backgroundColor: "#ffffff",
+    borderWidth: 0.5,
+    borderColor: "#e5e7eb",
+    alignItems: "center",
+    justifyContent: "center",
   },
   filterTabActive: {
     backgroundColor: "#06C168",
     borderColor: "#06C168",
   },
   filterTabText: {
-    fontSize: 13,
-    fontWeight: "600",
     color: "#6b7280",
+    fontSize: 14,
+    lineHeight: 16,
+    fontWeight: "600",
   },
   filterTabTextActive: {
-    color: "#fff",
+    color: "#ffffff",
   },
 
-  // Section Title
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#111827",
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1f2937",
     marginBottom: 10,
   },
 
-  // Orders List
   ordersList: {
     flex: 1,
   },
-
-  // Empty State
   emptyState: {
     alignItems: "center",
-    paddingVertical: 64,
+    justifyContent: "center",
+    paddingVertical: 70,
   },
-  emptyIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+  emptyIconWrap: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
     backgroundColor: "#f3f4f6",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
-  },
-  emptyIcon: {
-    fontSize: 28,
+    marginBottom: 14,
   },
   emptyTitle: {
-    fontSize: 16,
-    fontWeight: "600",
     color: "#6b7280",
+    fontSize: 16,
+    fontWeight: "700",
   },
   emptySubtitle: {
-    fontSize: 14,
-    color: "#9ca3af",
     marginTop: 4,
+    color: "#9ca3af",
+    fontSize: 13,
   },
 
-  // Order Card
   orderCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
     padding: 12,
     marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
   },
-  orderHeader: {
+  orderHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 8,
   },
-  orderIdRow: {
+  orderHeaderLeft: {
+    flex: 1,
+    marginRight: 8,
+  },
+  orderIdBadgeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 7,
+    flexWrap: "wrap",
   },
-  orderId: {
+  orderIdText: {
+    color: "#1f2937",
     fontSize: 13,
-    fontWeight: "700",
-    color: "#111827",
+    fontWeight: "800",
   },
   statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: 999,
   },
   statusBadgeText: {
     fontSize: 10,
-    fontWeight: "600",
+    fontWeight: "800",
     textTransform: "uppercase",
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
-  orderTime: {
-    fontSize: 11,
+  orderTimeText: {
     color: "#9ca3af",
-    fontWeight: "500",
-    marginTop: 2,
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 4,
   },
-  orderAmount: {
+  orderAmountText: {
+    color: "#4ade80",
     fontSize: 16,
     fontWeight: "800",
-    color: "#06C168",
-    textAlign: "right",
   },
 
-  // Customer Row
   customerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 8,
-    marginBottom: 8,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
+    paddingVertical: 2,
   },
-  customerInfo: {
+  customerLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    flex: 1,
   },
   customerAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "#f3f4f6",
     alignItems: "center",
     justifyContent: "center",
   },
-  customerAvatarIcon: {
-    fontSize: 16,
+  customerTextWrap: {
+    flex: 1,
   },
   customerName: {
+    color: "#1f2937",
     fontSize: 13,
-    fontWeight: "700",
-    color: "#111827",
+    fontWeight: "800",
   },
-  customerPhone: {
-    fontSize: 11,
-    color: "#9ca3af",
-    marginTop: 1,
-  },
-  callButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#E6F4FF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  callIcon: {
-    fontSize: 14,
+  customerAddress: {
+    color: "#6b7280",
+    fontSize: 12,
+    marginTop: 2,
   },
 
-  // Items Preview
-  itemsPreview: {
-    marginVertical: 8,
+  itemsListWrap: {
+    marginTop: 8,
+    gap: 6,
   },
-  itemPreviewCard: {
+  itemRowCard: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f9fafb",
-    paddingVertical: 6,
-    paddingLeft: 6,
-    paddingRight: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    marginRight: 8,
     gap: 8,
+    backgroundColor: "#f9fafb",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
+    padding: 8,
   },
   itemImage: {
-    width: 30,
-    height: 30,
-    borderRadius: 6,
+    width: 38,
+    height: 38,
+    borderRadius: 8,
   },
-  itemImagePlaceholder: {
-    width: 30,
-    height: 30,
-    borderRadius: 6,
+  itemImageFallback: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
     backgroundColor: "#e5e7eb",
     alignItems: "center",
     justifyContent: "center",
   },
   itemImageEmoji: {
-    fontSize: 13,
+    fontSize: 14,
   },
-  itemName: {
-    fontSize: 11,
-    fontWeight: "600",
+  itemInfoCol: {
+    flex: 1,
+  },
+  itemTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  itemNameText: {
+    flex: 1,
     color: "#374151",
+    fontSize: 12,
+    fontWeight: "700",
   },
-  itemSize: {
-    fontSize: 9,
-    fontWeight: "500",
-    color: "#9ca3af",
-    textTransform: "capitalize",
+  itemLineAmount: {
+    color: "#374151",
+    fontSize: 12,
+    fontWeight: "800",
   },
-  moreItemsCard: {
-    paddingHorizontal: 10,
-    backgroundColor: "#f9fafb",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    justifyContent: "center",
+  itemSizePill: {
+    marginTop: 2,
+    alignSelf: "flex-start",
+    backgroundColor: "#ecfdf5",
+    color: "#059669",
+    fontSize: 10,
+    fontWeight: "700",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    textTransform: "uppercase",
   },
-  moreItemsText: {
-    fontSize: 11,
-    fontWeight: "600",
+  itemUnitPrice: {
+    marginTop: 2,
     color: "#6b7280",
+    fontSize: 10,
+    fontWeight: "600",
   },
 
-  divider: {
+  cardDivider: {
     height: 1,
-    backgroundColor: "#E5E7EB",
-    marginVertical: 8,
+    backgroundColor: "#f3f4f6",
+    marginVertical: 9,
   },
 
-  // Driver Row
   driverRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
+    alignItems: "center",
   },
-  driverInfo: {
+  driverLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    flex: 1,
   },
   driverLabel: {
-    fontSize: 9,
-    fontWeight: "700",
     color: "#6b7280",
+    fontSize: 10,
+    fontWeight: "700",
     textTransform: "uppercase",
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   driverBadge: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 6,
     backgroundColor: "#E6F9F1",
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 12,
     borderWidth: 1,
     borderColor: "#B8F0D0",
-    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    flexShrink: 1,
   },
-  driverInitials: {
+  driverInitialsCircle: {
     width: 18,
     height: 18,
     borderRadius: 9,
@@ -1667,278 +1944,336 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   driverInitialsText: {
+    color: "#ffffff",
     fontSize: 9,
-    fontWeight: "700",
-    color: "#fff",
+    fontWeight: "800",
   },
-  driverName: {
-    fontSize: 11,
-    fontWeight: "700",
+  driverNameText: {
     color: "#15803d",
+    fontSize: 11,
+    fontWeight: "800",
   },
-  driverCallIcon: {
-    fontSize: 16,
-    color: "#06C168",
+  driverPhoneInline: {
+    color: "#15803d",
+    fontSize: 11,
   },
 
-  // Action Buttons
-  actionButtons: {
+  actionsRow: {
     flexDirection: "row",
     gap: 8,
-    marginTop: 8,
   },
   acceptButton: {
     flex: 1,
-    backgroundColor: "#06C168",
-    paddingVertical: 11,
     borderRadius: 10,
+    backgroundColor: "#10b981",
     alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 11,
   },
   acceptButtonText: {
+    color: "#ffffff",
     fontSize: 13,
-    fontWeight: "700",
-    color: "#fff",
+    fontWeight: "800",
   },
   rejectButton: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
     paddingHorizontal: 14,
     paddingVertical: 11,
-    backgroundColor: "#FEE2E2",
-    borderRadius: 10,
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#FCA5A5",
+    justifyContent: "center",
   },
   rejectButtonText: {
+    color: "#dc2626",
     fontSize: 13,
-    fontWeight: "700",
-    color: "#DC2626",
+    fontWeight: "800",
   },
 
-  // Status Row
-  statusRow: {
+  statusFooterRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 8,
+    gap: 8,
   },
-  statusText: {
-    fontSize: 10,
-    fontWeight: "500",
+  statusFooterText: {
     color: "#9ca3af",
+    fontSize: 10,
+    fontWeight: "600",
     textTransform: "uppercase",
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
     flex: 1,
   },
   viewDetailsButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    paddingVertical: 4,
-    paddingLeft: 8,
+    gap: 3,
   },
   viewDetailsText: {
+    color: "#06C168",
     fontSize: 12,
-    fontWeight: "700",
-    color: "#06C168",
-  },
-  viewDetailsArrow: {
-    fontSize: 16,
-    color: "#06C168",
-    marginTop: -2,
+    fontWeight: "800",
   },
 
-  // End of List
-  endOfList: {
+  endListWrap: {
     alignItems: "center",
-    paddingVertical: 32,
-    opacity: 0.5,
+    paddingVertical: 24,
+    opacity: 0.45,
+    gap: 6,
   },
-  endOfListIcon: {
-    fontSize: 32,
-    color: "#9ca3af",
-    marginBottom: 8,
+  endListText: {
+    color: "#6b7280",
+    fontSize: 13,
+    fontWeight: "600",
   },
-  endOfListText: {
+
+  rejectModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 16,
+  },
+  rejectModalShell: {
+    width: "100%",
+    maxWidth: 380,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#ffffff",
+  },
+  rejectModalHeader: {
+    backgroundColor: "#fef2f2",
+    borderBottomWidth: 1,
+    borderBottomColor: "#fecaca",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  rejectModalTitle: {
+    color: "#991b1b",
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  rejectModalSubtitle: {
+    marginTop: 3,
+    color: "#dc2626",
     fontSize: 13,
     fontWeight: "500",
-    color: "#6b7280",
+  },
+  rejectModalBody: {
+    padding: 16,
+  },
+  rejectLabel: {
+    color: "#374151",
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  rejectInput: {
+    minHeight: 90,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: "#111827",
+  },
+  rejectButtonsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+  },
+  rejectCancelButton: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 11,
+  },
+  rejectCancelText: {
+    color: "#4b5563",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  rejectConfirmButton: {
+    flex: 1,
+    borderRadius: 10,
+    backgroundColor: "#dc2626",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 11,
+  },
+  rejectConfirmText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  buttonDisabled: {
+    opacity: 0.45,
   },
 
-  // Modal Overlay
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "flex-end",
   },
-
-  // Reject Modal
-  rejectModalContent: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    overflow: "hidden",
-  },
-  rejectModalHeader: {
-    backgroundColor: "#FEE2E2",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#FCA5A5",
-  },
-  rejectModalTitle: {
-    fontSize: 17,
-    fontWeight: "800",
-    color: "#991B1B",
-  },
-  rejectModalSubtitle: {
-    fontSize: 13,
-    color: "#DC2626",
-    marginTop: 3,
-    fontWeight: "500",
-  },
-  rejectModalBody: {
-    padding: 18,
-  },
-  rejectLabel: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#374151",
-    marginBottom: 8,
-  },
-  required: {
-    color: "#ef4444",
-  },
-  rejectInput: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontSize: 13,
-    color: "#1f2937",
-    minHeight: 80,
-  },
-  rejectModalButtons: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 14,
-  },
-  cancelRejectButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    alignItems: "center",
-    backgroundColor: "#fff",
-  },
-  cancelRejectText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#4b5563",
-  },
-  confirmRejectButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: "#DC2626",
-    alignItems: "center",
-  },
-  confirmRejectText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  buttonDisabled: {
-    opacity: 0.4,
-  },
-
-  // Details Modal
-  detailsModalContent: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+  detailsModalSheet: {
+    backgroundColor: "#ffffff",
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
     maxHeight: "90%",
   },
-  modalHandle: {
+  modalHandleWrap: {
     alignItems: "center",
     paddingVertical: 10,
   },
   modalHandleBar: {
-    width: 38,
+    width: 40,
     height: 4,
+    borderRadius: 999,
     backgroundColor: "#d1d5db",
-    borderRadius: 2,
+  },
+  detailsScroll: {
+    maxHeight: "100%",
   },
   detailsHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    paddingHorizontal: 18,
-    paddingBottom: 14,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
+    borderBottomColor: "#f3f4f6",
   },
   detailsOrderId: {
-    fontSize: 18,
+    color: "#1f2937",
+    fontSize: 20,
     fontWeight: "800",
-    color: "#111827",
   },
   detailsTime: {
+    color: "#6b7280",
     fontSize: 12,
-    color: "#6b7280",
-    marginTop: 3,
+    marginTop: 2,
   },
-  detailsSection: {
-    paddingHorizontal: 18,
-    paddingVertical: 14,
+  detailsHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
-  detailsSectionLabel: {
-    fontSize: 9,
-    fontWeight: "700",
-    color: "#6b7280",
-    letterSpacing: 0.5,
-    marginBottom: 10,
+  closeIconButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#f3f4f6",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  detailsCustomerCard: {
+
+  detailSectionCard: {
+    marginHorizontal: 16,
+    marginTop: 14,
     backgroundColor: "#f9fafb",
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
     borderRadius: 12,
-    padding: 14,
+    padding: 12,
+  },
+  detailSectionLabel: {
+    color: "#6b7280",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  detailCustomerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
   },
-  detailsCustomerInfo: {
+  detailCustomerLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
-  detailsCustomerAvatar: {
+  detailAvatarCircle: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#fff",
+    backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "#e5e7eb",
     alignItems: "center",
     justifyContent: "center",
   },
-  detailsCustomerAvatarIcon: {
-    fontSize: 18,
+  detailCustomerName: {
+    color: "#1f2937",
+    fontSize: 14,
+    fontWeight: "800",
   },
-  detailsCustomerName: {
+  addressBlock: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+  },
+  addressLabel: {
+    color: "#6b7280",
+    fontSize: 11,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  addressText: {
+    color: "#374151",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+  detailDriverCard: {
+    marginHorizontal: 16,
+    marginTop: 14,
+    backgroundColor: "#E6F9F1",
+    borderWidth: 1,
+    borderColor: "#B8F0D0",
+    borderRadius: 12,
+    padding: 12,
+  },
+  detailDriverRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  detailDriverLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  detailDriverAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#06C168",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  detailDriverInitials: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  detailDriverName: {
+    color: "#1f2937",
     fontSize: 14,
     fontWeight: "700",
-    color: "#111827",
   },
-  detailsCustomerPhone: {
-    fontSize: 12,
+  detailDriverPhone: {
     color: "#6b7280",
+    fontSize: 12,
     marginTop: 2,
   },
-  detailsCallButton: {
+  driverCallRound: {
     width: 38,
     height: 38,
     borderRadius: 19,
@@ -1946,183 +2281,151 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  detailsCallIcon: {
-    fontSize: 16,
-  },
-  addressBox: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
-  },
-  addressLabel: {
-    fontSize: 11,
-    color: "#6b7280",
-    marginBottom: 3,
-    fontWeight: "600",
-  },
-  addressText: {
-    fontSize: 13,
-    fontWeight: "500",
-    color: "#374151",
-  },
-  detailsDriverCard: {
-    backgroundColor: "#E6F9F1",
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#B8F0D0",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  detailsDriverInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  detailsDriverAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#06C168",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  detailsDriverInitials: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  detailsDriverName: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  detailsDriverPhone: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginTop: 2,
-  },
 
-  // Items List
-  itemsList: {
+  detailItemsSection: {
+    marginHorizontal: 16,
+    marginTop: 14,
+  },
+  detailItemsList: {
     gap: 8,
   },
-  itemRow: {
+  detailItemCard: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 10,
     backgroundColor: "#f9fafb",
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
     borderRadius: 10,
     padding: 10,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
   },
-  itemImageLarge: {
-    width: 52,
-    height: 52,
+  detailItemImage: {
+    width: 54,
+    height: 54,
     borderRadius: 8,
   },
-  itemImageLargePlaceholder: {
-    width: 52,
-    height: 52,
+  detailItemImageFallback: {
+    width: 54,
+    height: 54,
     borderRadius: 8,
     backgroundColor: "#e5e7eb",
     alignItems: "center",
     justifyContent: "center",
   },
-  itemImageLargeEmoji: {
-    fontSize: 22,
+  detailItemEmoji: {
+    fontSize: 24,
   },
-  itemDetails: {
+  detailItemInfo: {
     flex: 1,
   },
-  itemNameLarge: {
+  detailItemName: {
+    color: "#1f2937",
     fontSize: 13,
-    fontWeight: "700",
-    color: "#111827",
+    fontWeight: "800",
   },
-  itemMeta: {
-    fontSize: 11,
-    color: "#6b7280",
+  detailItemMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
     marginTop: 2,
   },
-  itemPrice: {
-    fontSize: 13,
+  detailItemSize: {
+    backgroundColor: "#d1fae5",
+    color: "#047857",
+    fontSize: 10,
     fontWeight: "700",
-    color: "#111827",
+    textTransform: "uppercase",
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  detailItemQty: {
+    backgroundColor: "#e5e7eb",
+    color: "#4b5563",
+    fontSize: 10,
+    fontWeight: "700",
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  detailItemUnitPrice: {
+    marginTop: 2,
+    color: "#9ca3af",
+    fontSize: 11,
+  },
+  detailItemTotal: {
+    color: "#1f2937",
+    fontSize: 13,
+    fontWeight: "800",
   },
 
-  // Summary
   summaryCard: {
-    backgroundColor: "#f9fafb",
+    marginHorizontal: 16,
+    marginTop: 14,
     borderRadius: 12,
-    padding: 14,
-    marginHorizontal: 18,
+    backgroundColor: "#f9fafb",
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
+    padding: 12,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
   },
-  summaryLabel: {
+  summaryTitle: {
+    color: "#1f2937",
     fontSize: 14,
     fontWeight: "700",
-    color: "#111827",
   },
   summaryAmount: {
-    fontSize: 20,
+    color: "#10b981",
+    fontSize: 24,
     fontWeight: "800",
-    color: "#06C168",
   },
 
-  // Close Button
-  closeButton: {
-    backgroundColor: "#E5E7EB",
-    marginHorizontal: 18,
-    marginVertical: 18,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
+  detailsActionRow: {
+    marginHorizontal: 16,
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 10,
   },
-  closeButtonText: {
+  modalCloseButton: {
+    marginHorizontal: 16,
+    marginVertical: 16,
+    borderRadius: 10,
+    backgroundColor: "#e5e7eb",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+  },
+  modalCloseButtonText: {
+    color: "#374151",
     fontSize: 13,
     fontWeight: "700",
-    color: "#374151",
   },
 
-  // Skeleton Styles
-  skeleton: {
-    backgroundColor: "#e5e7eb",
-    borderRadius: 6,
-  },
   skeletonLight: {
-    backgroundColor: "rgba(255,255,255,0.3)",
+    backgroundColor: "rgba(255,255,255,0.32)",
+    borderRadius: 8,
   },
   statCardSkeleton: {
     flex: 1,
-    backgroundColor: "rgba(255,255,255,0.15)",
+    height: 78,
     borderRadius: 16,
-    padding: 16,
+    backgroundColor: "rgba(255,255,255,0.2)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(255,255,255,0.18)",
   },
-  skeletonOrderCard: {
-    backgroundColor: "#fff",
+  filterSkeleton: {
+    width: 82,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#e5e7eb",
+    marginRight: 8,
+  },
+  orderSkeletonCard: {
+    height: 152,
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
-  },
-  skeletonOrderHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  skeletonOrderCustomer: {
-    flexDirection: "row",
-    alignItems: "center",
+    backgroundColor: "#e5e7eb",
+    marginBottom: 10,
   },
 });

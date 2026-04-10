@@ -3,7 +3,6 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import ActiveDeliveriesScreen from "../screens/driver/ActiveDeliveriesScreen";
 import AvailableDeliveriesScreen from "../screens/driver/AvailableDeliveriesScreen";
 import DashboardScreen from "../screens/driver/DashboardScreen";
 import DeliveryHistoryScreen from "../screens/driver/DeliveryHistoryScreen";
@@ -97,7 +96,14 @@ function DriverTabs() {
       />
       <Tab.Screen
         name="Active"
-        component={ActiveDeliveriesScreen}
+        component={DashboardScreen}
+        listeners={({ navigation }) => ({
+          tabPress: (e) => {
+            // Match web behavior: Active tab should open DriverMap directly.
+            e.preventDefault();
+            navigation.navigate("DriverMap");
+          },
+        })}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon label="Active" focused={focused} />
@@ -168,10 +174,6 @@ export default function DriverNavigator() {
       />
       <Stack.Screen name="DriverDeposits" component={DriverDepositsScreen} />
       <Stack.Screen name="DriverPending" component={DriverPendingScreen} />
-      <Stack.Screen
-        name="ActiveDeliveries"
-        component={ActiveDeliveriesScreen}
-      />
       <Stack.Screen
         name="DriverOnboardingStep1"
         component={OnboardingStep1Screen}

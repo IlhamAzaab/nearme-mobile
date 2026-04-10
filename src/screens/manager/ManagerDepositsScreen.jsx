@@ -17,6 +17,8 @@ import ManagerDrawer from "../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../components/manager/ManagerHeader";
 import { API_URL } from "../../config/env";
 
+const SRI_LANKA_TIME_ZONE = "Asia/Colombo";
+
 const DRIVER_DRAWER_ITEMS = [
   {
     route: "ManagerDeposits",
@@ -152,14 +154,22 @@ export default function ManagerDepositsScreen() {
   const formatDateTime = (dateStr) => {
     if (!dateStr) return "-";
     const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "-";
     return date.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      hour12: true,
+      timeZone: SRI_LANKA_TIME_ZONE,
     });
   };
+
+  const getTransferId = (id) =>
+    String(id || "-")
+      .substring(0, 12)
+      .toUpperCase();
 
   const getDriverInitials = (name) => {
     if (!name) return "DR";
@@ -431,10 +441,15 @@ export default function ManagerDepositsScreen() {
                     {deposit.driver?.full_name || "Driver"}
                   </Text>
                   <Text style={styles.depositPhone}>
-                    {deposit.driver?.phone || "No phone"}
+                    {deposit.driver?.phone ||
+                      deposit.driver?.email ||
+                      "No contact"}
                   </Text>
                   <Text style={styles.depositDate}>
                     {formatDateTime(deposit.created_at)}
+                  </Text>
+                  <Text style={styles.depositTransferId}>
+                    {`Transfer ID: ${getTransferId(deposit.id)}`}
                   </Text>
                 </View>
                 <View style={styles.depositRight}>
@@ -719,6 +734,12 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   depositDate: { fontSize: 11, color: "#618980", marginTop: 1 },
+  depositTransferId: {
+    fontSize: 10,
+    color: "#4B5563",
+    marginTop: 2,
+    fontWeight: "700",
+  },
   depositRight: { alignItems: "flex-end" },
   depositAmount: { fontSize: 14, fontWeight: "700", color: "#111816" },
   depositStatus: {

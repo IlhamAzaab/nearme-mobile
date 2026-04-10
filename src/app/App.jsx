@@ -2,12 +2,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NavigationContainer } from "@react-navigation/native";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, AppState, Platform, StatusBar } from "react-native";
+import { Alert, AppState, LogBox, Platform, StatusBar } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import UrgentNotificationModal from "../components/common/UrgentNotificationModal";
+import DeliveryNotificationOverlay from "../components/driver/DeliveryNotificationOverlay";
 import { API_URL } from "../config/env";
 import { CustomAlertProvider } from "../context/CustomAlertContext";
+import { DriverDeliveryNotificationProvider } from "../context/DriverDeliveryNotificationContext";
 import { OrderProvider } from "../context/OrderContext";
+import { SocketProvider } from "../context/SocketContext";
+import { useDriverDeliveryNotifications } from "../context/DriverDeliveryNotificationContext";
 import { initializeApiAuthFetch } from "../lib/apiAuthFetch";
 import {
   getAccessToken,
@@ -18,18 +22,156 @@ import { mobileQueryClient } from "../lib/queryClient";
 import RootNavigator from "../navigation/RootNavigator";
 import orderTrackingService from "../services/orderTrackingService";
 import pushNotificationService from "../services/pushNotificationService";
-import { AuthProvider } from "./providers/AuthProvider";
+import { AuthProvider, useAuth } from "./providers/AuthProvider";
 import { NotificationProvider } from "./providers/NotificationProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
 
 initializeAuthStorage();
 initializeApiAuthFetch();
 
-// Safe import — requires native rebuild to work
+LogBox.ignoreLogs([
+  "[expo-av]: Expo AV has been deprecated",
+  "setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.",
+]);
+
+// Safe import G�� requires native rebuild to work
 let NavigationBar = null;
 try {
   NavigationBar = require("expo-navigation-bar");
 } catch {}
+
+function RealtimeProviders({ children }) {
+  const { isAuthenticated, userRole, user } = useAuth();
+  const [authToken, setAuthToken] = useState(null);
+  const normalizedRole = userRole
+    ? String(userRole).trim().toLowerCase()
+    : null;
+  const authUserId = user?.id ? String(user.id) : null;
+
+  const syncToken = useCallback(async () => {
+    if (!isAuthenticated || !normalizedRole || !authUserId) {
+      setAuthToken(null);
+      return;
+    }
+
+    try {
+      const token = await getAccessToken();
+      setAuthToken(token || null);
+    } catch {
+      setAuthToken(null);
+    }
+  }, [isAuthenticated, normalizedRole, authUserId]);
+
+  useEffect(() => {
+    syncToken();
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active") syncToken();
+    });
+
+    return () => appStateSub?.remove();
+  }, [syncToken]);
+
+  if (!authToken || !normalizedRole || !authUserId) {
+    return children;
+  }
+
+  if (normalizedRole === "driver") {
+    return (
+      <SocketProvider
+        key={`${normalizedRole}:${authUserId}`}
+        userId={authUserId}
+        userRole={normalizedRole}
+        authToken={authToken}
+      >
+        <DriverDeliveryNotificationProvider>
+          {children}
+        </DriverDeliveryNotificationProvider>
+      </SocketProvider>
+    );
+  }
+
+  return (
+    <SocketProvider
+      key={`${normalizedRole}:${authUserId}`}
+      userId={authUserId}
+      userRole={normalizedRole}
+      authToken={authToken}
+    >
+      {children}
+    </SocketProvider>
+  );
+}
+
+function DriverNotificationLayer() {
+  const { notifications, acceptDelivery, declineDelivery, isDriverOnline } =
+    useDriverDeliveryNotifications();
+  const [driverLocation, setDriverLocation] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const readDriverLocation = async () => {
+      try {
+        const cachedRaw = await AsyncStorage.getItem(
+          "available_deliveries_cache",
+        );
+        if (!cachedRaw || !mounted) return;
+        const parsed = JSON.parse(cachedRaw);
+        const cachedLocation = parsed?.data?.driverLocation || null;
+        if (
+          cachedLocation &&
+          Number.isFinite(Number(cachedLocation.latitude)) &&
+          Number.isFinite(Number(cachedLocation.longitude))
+        ) {
+          setDriverLocation({
+            latitude: Number(cachedLocation.latitude),
+            longitude: Number(cachedLocation.longitude),
+          });
+        }
+      } catch {
+        // Ignore location hydration issues for popup actions.
+      }
+    };
+
+    readDriverLocation();
+    return () => {
+      mounted = false;
+    };
+  }, [notifications.length]);
+
+  const topNotification = notifications?.[0] || null;
+
+  const handleAccept = useCallback(async () => {
+    if (!topNotification?.delivery_id) return;
+    await acceptDelivery(topNotification.delivery_id, driverLocation);
+  }, [acceptDelivery, topNotification, driverLocation]);
+
+  const handleReject = useCallback(() => {
+    if (!topNotification?.delivery_id) return;
+    declineDelivery(topNotification.delivery_id);
+  }, [declineDelivery, topNotification]);
+
+  if (!isDriverOnline || !topNotification) {
+    return null;
+  }
+
+  return (
+    <DeliveryNotificationOverlay
+      visible={true}
+      delivery={{
+        ...topNotification,
+        restaurantName: topNotification.restaurant_name,
+        pickupAddress: topNotification.restaurant_address,
+        dropoffAddress: topNotification.customer_address,
+        distance:
+          topNotification.total_distance_km || topNotification.distance_km,
+        estimated_time: topNotification.estimated_time,
+      }}
+      onAccept={handleAccept}
+      onReject={handleReject}
+    />
+  );
+}
 
 export default function App() {
   const navigationRef = useRef(null);
@@ -192,7 +334,7 @@ export default function App() {
         navigationRef.current.navigate("AdminMain", { screen: "Orders" });
       }
     } else if (data?.type === "new_delivery") {
-      // Driver just dismisses — no reason needed
+      // Driver just dismisses G�� no reason needed
       console.log("[UrgentModal] Driver declined delivery:", data?.deliveryId);
     }
   }, []);
@@ -241,7 +383,7 @@ export default function App() {
       const token = await getAccessToken();
       const role = await AsyncStorage.getItem("role");
       if (token && navigationRef.current) {
-        console.log("🔔 App: Auto-initializing push notifications...");
+        console.log("=��� App: Auto-initializing push notifications...");
         pushNotificationService.setNavigationRef(navigationRef.current);
         await pushNotificationService.initialize(token);
 
@@ -339,9 +481,9 @@ export default function App() {
             setUrgentNotification({
               title:
                 pendingType === "order_reminder"
-                  ? "⏰ Order Waiting Alert"
-                  : "🔔 New Order Received",
-              body: `Order #${pendingOrder.order_number || pendingOrder.id?.slice(-6)} · Rs. ${parseFloat(pendingOrder.subtotal || 0).toFixed(2)} · ${items.length} item(s)`,
+                  ? "GŦ Order Waiting Alert"
+                  : "=��� New Order Received",
+              body: `Order #${pendingOrder.order_number || pendingOrder.id?.slice(-6)} -+ Rs. ${parseFloat(pendingOrder.subtotal || 0).toFixed(2)} -+ ${items.length} item(s)`,
               data: {
                 type: pendingType,
                 orderId: String(pendingOrder.id),
@@ -355,8 +497,8 @@ export default function App() {
             });
             pushNotificationService.startAlarm(
               pendingType === "order_reminder"
-                ? "⏰ Order Reminder"
-                : "🔔 New Order",
+                ? "GŦ Order Reminder"
+                : "=��� New Order",
               `Order #${pendingOrder.order_number}`,
               { type: pendingType },
             );
@@ -375,9 +517,21 @@ export default function App() {
       "change",
       async (nextAppState) => {
         if (nextAppState === "active") {
-          // App came to foreground - check for pending orders
+          // App came to foreground - refresh push token registration.
           const token = await getAccessToken();
           const role = await AsyncStorage.getItem("role");
+          if (token) {
+            try {
+              await pushNotificationService.initialize(token);
+            } catch (err) {
+              console.warn(
+                "[App] Push re-initialize failed on foreground:",
+                err,
+              );
+            }
+          }
+
+          // Admin-only pending order modal refresh.
           if (token && role === "admin") {
             console.log(
               "[App] App became active, checking for pending orders...",
@@ -408,19 +562,22 @@ export default function App() {
             <AuthProvider>
               <NotificationProvider>
                 <OrderProvider>
-                  <NavigationContainer ref={navigationRef}>
-                    <RootNavigator />
-                    {/* Urgent notification modal - renders above everything */}
-                    <UrgentNotificationModal
-                      visible={!!urgentNotification}
-                      title={urgentNotification?.title}
-                      body={urgentNotification?.body}
-                      data={urgentNotification?.data}
-                      onAccept={handleAcceptUrgent}
-                      onReject={handleRejectUrgent}
-                      onDismiss={handleDismissUrgent}
-                    />
-                  </NavigationContainer>
+                  <RealtimeProviders>
+                    <NavigationContainer ref={navigationRef}>
+                      <RootNavigator />
+                      <DriverNotificationLayer />
+                      {/* Urgent notification modal - renders above everything */}
+                      <UrgentNotificationModal
+                        visible={!!urgentNotification}
+                        title={urgentNotification?.title}
+                        body={urgentNotification?.body}
+                        data={urgentNotification?.data}
+                        onAccept={handleAcceptUrgent}
+                        onReject={handleRejectUrgent}
+                        onDismiss={handleDismissUrgent}
+                      />
+                    </NavigationContainer>
+                  </RealtimeProviders>
                 </OrderProvider>
               </NotificationProvider>
             </AuthProvider>

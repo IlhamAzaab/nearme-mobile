@@ -79,7 +79,7 @@ const DriverPaymentsScreen = () => {
     const q = searchQuery.toLowerCase();
     return (
       (d.full_name || "").toLowerCase().includes(q) ||
-      (d.user_name || "").toLowerCase().includes(q) ||
+      (d.full_name || "").toLowerCase().includes(q) ||
       (d.phone || "").includes(q)
     );
   });

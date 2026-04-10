@@ -4,14 +4,14 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import { BarChart, LineChart } from "react-native-chart-kit";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
@@ -30,69 +30,140 @@ const REPORT_DRAWER_ITEMS = [
   { route: "TimeAnalytics", label: "Time Analytics", icon: "time-outline" },
 ];
 
-const { width: SCREEN_W } = Dimensions.get("window");
-const CHART_W = SCREEN_W - 40;
-const periodLabels = {
-  daily: "Today",
-  weekly: "This Week",
-  monthly: "This Month",
-  all: "All Time",
-};
-const CHART_COLORS = ["#13ECB9", "#3B82F6", "#8B5CF6", "#F59E0B", "#EC4899"];
-
 const CustomerReportsScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState("monthly");
-  const [data, setData] = useState(null);
-  const [showAllCustomers, setShowAllCustomers] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState("");
+  const [search, setSearch] = useState("");
+  const [orderFilter, setOrderFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("recent");
+  const [sortOrder, setSortOrder] = useState("desc");
+  const [page, setPage] = useState(1);
+  const [result, setResult] = useState(null);
 
   const fetchData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem("token");
+      const params = new URLSearchParams({
+        search,
+        orderFilter,
+        sortBy,
+        sortOrder,
+        page: String(page),
+        limit: "15",
+      });
       const res = await fetch(
-        `${API_URL}/manager/reports/customers?period=${period}`,
+        `${API_URL}/manager/reports/customers/management?${params.toString()}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
-      if (res.ok) setData(await res.json());
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to load customers");
+      }
+      setResult(data);
     } catch (e) {
       console.error("Customer report error", e);
+      Alert.alert("Error", e.message || "Failed to load customers");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [period]);
+  }, [orderFilter, page, search, sortBy, sortOrder]);
 
   useEffect(() => {
     setLoading(true);
     fetchData();
   }, [fetchData]);
 
-  const s = data?.summary || {};
-  const topCustomers = data?.top_customers || [];
-  const displayCustomers = showAllCustomers
-    ? topCustomers
-    : topCustomers.slice(0, 5);
-  const regTrend = data?.registration_trend || [];
-  const orderFreq = data?.order_frequency || [];
-
-  const chartCfg = {
-    backgroundGradientFrom: "#fff",
-    backgroundGradientTo: "#fff",
-    decimalPlaces: 0,
-    color: (o = 1) => `rgba(19,236,185,${o})`,
-    labelColor: () => "#9CA3AF",
-    propsForBackgroundLines: { strokeDasharray: "" },
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchData();
   };
+
+  const handleSuspendToggle = async (customer) => {
+    const nextSuspended = customer.status !== "suspended";
+    const token = await AsyncStorage.getItem("token");
+    try {
+      setActionLoadingId(customer.id);
+      const res = await fetch(
+        `${API_URL}/manager/reports/customers/${customer.id}/suspend`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            suspended: nextSuspended,
+            reason: nextSuspended ? "Suspended by manager" : "",
+          }),
+        },
+      );
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.message || "Failed to update customer");
+      }
+
+      await fetchData();
+    } catch (err) {
+      Alert.alert("Action Failed", err.message || "Unable to update status");
+    } finally {
+      setActionLoadingId("");
+    }
+  };
+
+  const handleDelete = async (customer) => {
+    Alert.alert(
+      "Permanently Remove Customer",
+      `Remove ${customer.username || customer.email}? This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            const token = await AsyncStorage.getItem("token");
+            try {
+              setActionLoadingId(customer.id);
+              const res = await fetch(
+                `${API_URL}/manager/reports/customers/${customer.id}`,
+                {
+                  method: "DELETE",
+                  headers: { Authorization: `Bearer ${token}` },
+                },
+              );
+              const json = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                throw new Error(json?.message || "Failed to remove customer");
+              }
+              await fetchData();
+            } catch (err) {
+              Alert.alert("Action Failed", err.message || "Unable to remove customer");
+            } finally {
+              setActionLoadingId("");
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const summary = result?.summary || {};
+  const customers = result?.customers || [];
+  const pagination = result?.pagination || { page: 1, totalPages: 1 };
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <ManagerHeader
-        title="Customer Reports"
+        title="Customer Management"
         showBack
+        onRefresh={handleRefresh}
         onMenuPress={() => setDrawerOpen(true)}
       />
       <ManagerDrawer
@@ -104,357 +175,224 @@ const CustomerReportsScreen = () => {
         navigation={navigation}
       />
       <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Period */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ marginBottom: 12 }}
-        >
-          {["daily", "weekly", "monthly", "all"].map((p) => (
-            <TouchableOpacity
-              key={p}
-              style={[styles.pill, period === p && styles.pillActive]}
-              onPress={() => setPeriod(p)}
-            >
-              <Text
-                style={[styles.pillText, period === p && styles.pillTextActive]}
-              >
-                {periodLabels[p]}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator size="large" color="#13ECB9" />
           </View>
         ) : (
           <>
-            {/* Hero */}
             <View style={styles.heroCard}>
-              <Text style={styles.heroLabel}>Total Customers</Text>
-              <Text style={styles.heroValue}>{s.total_customers || 0}</Text>
-              <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
-                {s.new_customers || 0} new {periodLabels[period]?.toLowerCase()}
+              <Text style={styles.heroTitle}>Customer Management Center</Text>
+              <Text style={styles.heroSubtitle}>
+                Filter by order behavior, sort by spend/orders, and manage account status.
               </Text>
             </View>
 
-            {/* Key Metrics */}
-            <View
-              style={{
-                flexDirection: "row",
-                flexWrap: "wrap",
-                gap: 8,
-                marginBottom: 12,
-              }}
-            >
+            <View style={styles.metricWrap}>
               {[
-                {
-                  icon: "bag-handle-outline",
-                  label: "Avg Orders",
-                  value: parseFloat(s.avg_orders_per_customer || 0).toFixed(1),
-                  sub: "per customer",
-                  bg: "#E6F9EE",
-                  color: "#06C168",
-                },
-                {
-                  icon: "receipt-outline",
-                  label: "Avg Spend",
-                  value: `Rs.${parseFloat(s.avg_spend_per_customer || 0).toFixed(0)}`,
-                  sub: "per customer",
-                  bg: "#EFF6FF",
-                  color: "#2563EB",
-                },
-                {
-                  icon: "repeat-outline",
-                  label: "Repeat Rate",
-                  value: `${s.total_customers > 0 ? ((s.repeat_customers / s.total_customers) * 100).toFixed(1) : 0}%`,
-                  sub: "2+ orders",
-                  bg: "#F5F3FF",
-                  color: "#7C3AED",
-                },
-                {
-                  icon: "star-outline",
-                  label: "Loyal Customers",
-                  value: s.loyal_customers || 0,
-                  sub: "5+ orders",
-                  bg: "#FFFBEB",
-                  color: "#D97706",
-                },
+                { label: "Total", value: summary.total_customers || 0 },
+                { label: "With Orders", value: summary.with_orders || 0 },
+                { label: "No Orders", value: summary.without_orders || 0 },
+                { label: "Suspended", value: summary.suspended_customers || 0 },
               ].map((m, i) => (
-                <View
-                  key={i}
-                  style={[styles.metricCard, { backgroundColor: m.bg }]}
-                >
-                  <Ionicons name={m.icon} size={16} color={m.color} />
-                  <Text
-                    style={{
-                      fontSize: 9,
-                      fontWeight: "700",
-                      color: "#6B7280",
-                      textTransform: "uppercase",
-                      marginTop: 4,
-                    }}
-                  >
-                    {m.label}
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 16,
-                      fontWeight: "800",
-                      color: "#111827",
-                      marginTop: 2,
-                    }}
-                  >
-                    {m.value}
-                  </Text>
-                  <Text style={{ fontSize: 9, color: "#9CA3AF" }}>{m.sub}</Text>
+                <View key={i} style={styles.metricCard}>
+                  <Text style={styles.metricLabel}>{m.label}</Text>
+                  <Text style={styles.metricValue}>{m.value}</Text>
                 </View>
               ))}
             </View>
 
-            {/* Registration Trend */}
-            {regTrend.length > 0 && (
-              <View style={styles.chartCard}>
-                <Text style={styles.chartTitle}>
-                  Customer Registration Trend
-                </Text>
-                <LineChart
-                  data={{
-                    labels: regTrend
-                      .filter(
-                        (_, i) => i % Math.ceil(regTrend.length / 5) === 0,
-                      )
-                      .map((t) => t.date?.toString().slice(-5) || ""),
-                    datasets: [
-                      {
-                        data: regTrend.map((t) => t.registrations || 0),
-                        color: () => "#13ECB9",
-                        strokeWidth: 2,
-                      },
-                    ],
-                  }}
-                  width={CHART_W}
-                  height={200}
-                  chartConfig={chartCfg}
-                  style={{ borderRadius: 12 }}
-                  withInnerLines={false}
-                  bezier
-                />
-              </View>
-            )}
+            <View style={styles.filtersCard}>
+              <TextInput
+                value={search}
+                onChangeText={(text) => {
+                  setSearch(text);
+                  setPage(1);
+                }}
+                placeholder="Search name, email, phone, city"
+                style={styles.input}
+              />
 
-            {/* Order Frequency */}
-            {orderFreq.length > 0 && (
-              <View style={styles.chartCard}>
-                <Text style={styles.chartTitle}>
-                  Order Frequency Distribution
-                </Text>
-                <BarChart
-                  data={{
-                    labels: orderFreq.map((f) => f.range || ""),
-                    datasets: [{ data: orderFreq.map((f) => f.count || 0) }],
-                  }}
-                  width={CHART_W}
-                  height={200}
-                  chartConfig={{
-                    ...chartCfg,
-                    color: (o = 1) => `rgba(59,130,246,${o})`,
-                  }}
-                  style={{ borderRadius: 12 }}
-                  withInnerLines={false}
-                />
-              </View>
-            )}
-
-            {/* City Breakdown */}
-            {data?.city_breakdown?.length > 0 && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Customers by City</Text>
-                {data.city_breakdown.map((c, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      paddingVertical: 6,
-                    }}
-                  >
-                    <View
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: 5,
-                        backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-                        marginRight: 8,
+              <View style={styles.optionRow}>
+                <Text style={styles.optionLabel}>Order Filter</Text>
+                <View style={styles.inlineOptions}>
+                  {["all", "with_orders", "without_orders"].map((value) => (
+                    <TouchableOpacity
+                      key={value}
+                      onPress={() => {
+                        setOrderFilter(value);
+                        setPage(1);
                       }}
-                    />
-                    <Text style={{ flex: 1, fontSize: 13, color: "#374151" }}>
-                      {c.city || "Unknown"}
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 13,
-                        fontWeight: "700",
-                        color: "#111827",
-                      }}
-                    >
-                      {c.count}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {/* Top Customers */}
-            {topCustomers.length > 0 && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Top Customers</Text>
-                {displayCustomers.map((c, i) => (
-                  <View key={i} style={styles.custRow}>
-                    <View
                       style={[
-                        styles.rankBadge,
-                        i < 3 && {
-                          backgroundColor:
-                            i === 0
-                              ? "#FEF3C7"
-                              : i === 1
-                                ? "#F3F4F6"
-                                : "#FED7AA",
-                        },
+                        styles.optionPill,
+                        orderFilter === value && styles.optionPillActive,
                       ]}
                     >
                       <Text
                         style={[
-                          styles.rankNum,
-                          i < 3 && {
-                            color:
-                              i === 0
-                                ? "#B45309"
-                                : i === 1
-                                  ? "#6B7280"
-                                  : "#C2410C",
-                          },
+                          styles.optionPillText,
+                          orderFilter === value && styles.optionPillTextActive,
                         ]}
                       >
-                        {i + 1}
+                        {value === "all"
+                          ? "All"
+                          : value === "with_orders"
+                            ? "With Orders"
+                            : "No Orders"}
                       </Text>
-                    </View>
-                    <View style={{ flex: 1, marginLeft: 8 }}>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.optionRow}>
+                <Text style={styles.optionLabel}>Sort By</Text>
+                <View style={styles.inlineOptions}>
+                  {["recent", "orders", "spend", "last_order"].map((value) => (
+                    <TouchableOpacity
+                      key={value}
+                      onPress={() => {
+                        setSortBy(value);
+                        setPage(1);
+                      }}
+                      style={[
+                        styles.optionPill,
+                        sortBy === value && styles.optionPillActive,
+                      ]}
+                    >
                       <Text
-                        style={{
-                          fontSize: 13,
-                          fontWeight: "700",
-                          color: "#111827",
-                        }}
-                        numberOfLines={1}
+                        style={[
+                          styles.optionPillText,
+                          sortBy === value && styles.optionPillTextActive,
+                        ]}
                       >
-                        {c.name || "Unknown"}
+                        {value === "recent"
+                          ? "Recent"
+                          : value === "orders"
+                            ? "Orders"
+                            : value === "spend"
+                              ? "Spend"
+                              : "Last Order"}
                       </Text>
-                      <Text style={{ fontSize: 10, color: "#9CA3AF" }}>
-                        {c.city || "N/A"} • {c.order_count || 0} orders
-                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.sortButton}
+                onPress={() => {
+                  setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+                  setPage(1);
+                }}
+              >
+                <Ionicons
+                  name={sortOrder === "asc" ? "arrow-up" : "arrow-down"}
+                  size={14}
+                  color="#0F766E"
+                />
+                <Text style={styles.sortButtonText}>
+                  {sortOrder === "asc" ? "Ascending" : "Descending"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.listCard}>
+              {customers.length === 0 ? (
+                <Text style={styles.emptyText}>No customers found.</Text>
+              ) : (
+                customers.map((customer) => (
+                  <View key={customer.id} style={styles.customerItem}>
+                    <View style={styles.customerTop}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.customerName}>
+                          {customer.username || "Unnamed"}
+                        </Text>
+                        <Text style={styles.customerSub}>{customer.email || "No email"}</Text>
+                        <Text style={styles.customerSub}>{customer.phone || "No phone"}</Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          customer.status === "suspended"
+                            ? styles.statusSuspended
+                            : styles.statusActive,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.statusText,
+                            customer.status === "suspended"
+                              ? { color: "#B91C1C" }
+                              : { color: "#065F46" },
+                          ]}
+                        >
+                          {customer.status === "suspended" ? "Suspended" : "Active"}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          fontWeight: "700",
-                          color: "#04553C",
-                        }}
+
+                    <View style={styles.detailGrid}>
+                      <Stat label="City" value={customer.city || "N/A"} />
+                      <Stat label="Orders" value={customer.order_count || 0} />
+                      <Stat
+                        label="Spent"
+                        value={`Rs.${Number(customer.total_spent || 0).toFixed(0)}`}
+                      />
+                      <Stat
+                        label="Last Order"
+                        value={
+                          customer.last_order_at
+                            ? new Date(customer.last_order_at).toLocaleDateString()
+                            : "No orders"
+                        }
+                      />
+                    </View>
+
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity
+                        onPress={() => handleSuspendToggle(customer)}
+                        disabled={actionLoadingId === customer.id}
+                        style={styles.actionSuspend}
                       >
-                        Rs.{parseFloat(c.total_spent || 0).toFixed(0)}
-                      </Text>
-                      <Text style={{ fontSize: 9, color: "#9CA3AF" }}>
-                        total spent
-                      </Text>
+                        <Text style={styles.actionSuspendText}>
+                          {customer.status === "suspended" ? "Unsuspend" : "Suspend"}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => handleDelete(customer)}
+                        disabled={actionLoadingId === customer.id}
+                        style={styles.actionRemove}
+                      >
+                        <Text style={styles.actionRemoveText}>Remove</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
-                ))}
-                {topCustomers.length > 5 && (
-                  <TouchableOpacity
-                    style={styles.showAllBtn}
-                    onPress={() => setShowAllCustomers(!showAllCustomers)}
-                  >
-                    <Text style={styles.showAllText}>
-                      {showAllCustomers
-                        ? "Show Less"
-                        : `Show All (${topCustomers.length})`}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-
-            {/* Popular Restaurants */}
-            {data?.favorite_restaurants?.length > 0 && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Most Popular Restaurants</Text>
-                {data.favorite_restaurants.slice(0, 5).map((r, i) => {
-                  const maxO = data.favorite_restaurants[0]?.order_count || 1;
-                  const pct = ((r.order_count || 0) / maxO) * 100;
-                  return (
-                    <View key={i} style={{ marginBottom: 10 }}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          marginBottom: 3,
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 12,
-                            fontWeight: "600",
-                            color: "#374151",
-                          }}
-                          numberOfLines={1}
-                        >
-                          {r.restaurant_name}
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 11,
-                            fontWeight: "700",
-                            color: "#6B7280",
-                          }}
-                        >
-                          {r.order_count} orders
-                        </Text>
-                      </View>
-                      <View
-                        style={{
-                          height: 6,
-                          backgroundColor: "#F3F4F6",
-                          borderRadius: 3,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <View
-                          style={{
-                            height: "100%",
-                            width: `${pct}%`,
-                            backgroundColor: "#F43F5E",
-                            borderRadius: 3,
-                          }}
-                        />
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-
-            {/* No data */}
-            {(!topCustomers || topCustomers.length === 0) &&
-              (!regTrend || regTrend.length === 0) && (
-                <View style={styles.emptyWrap}>
-                  <Ionicons name="people-outline" size={48} color="#D1D5DB" />
-                  <Text style={styles.emptyText}>No customer data yet</Text>
-                </View>
+                ))
               )}
+            </View>
+
+            <View style={styles.paginationRow}>
+              <TouchableOpacity
+                style={styles.pageBtn}
+                disabled={(pagination.page || 1) <= 1 || refreshing}
+                onPress={() => setPage((prev) => Math.max(1, prev - 1))}
+              >
+                <Text style={styles.pageBtnText}>Previous</Text>
+              </TouchableOpacity>
+              <Text style={styles.pageInfo}>
+                {pagination.page || 1} / {pagination.totalPages || 1}
+              </Text>
+              <TouchableOpacity
+                style={styles.pageBtn}
+                disabled={(pagination.page || 1) >= (pagination.totalPages || 1) || refreshing}
+                onPress={() =>
+                  setPage((prev) => Math.min(pagination.totalPages || 1, prev + 1))
+                }
+              >
+                <Text style={styles.pageBtnText}>Next</Text>
+              </TouchableOpacity>
+            </View>
           </>
         )}
         <View style={{ height: 40 }} />
@@ -465,116 +403,262 @@ const CustomerReportsScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
+  scroll: { padding: 12, paddingBottom: 28 },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     paddingTop: 100,
   },
-  scroll: { padding: 16 },
-
-  pill: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    marginRight: 6,
-  },
-  pillActive: { backgroundColor: "#13ECB9", borderColor: "#13ECB9" },
-  pillText: { fontSize: 12, fontWeight: "700", color: "#6B7280" },
-  pillTextActive: { color: "#111816" },
-
   heroCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    backgroundColor: "#0F766E",
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 12,
-    alignItems: "center",
   },
-  heroLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#9CA3AF",
-    letterSpacing: 1,
-    textTransform: "uppercase",
+  heroTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#ECFEFF",
   },
-  heroValue: {
-    fontSize: 40,
-    fontWeight: "900",
-    color: "#04553C",
-    marginVertical: 4,
+  heroSubtitle: {
+    fontSize: 12,
+    color: "#CCFBF1",
+    marginTop: 6,
+    lineHeight: 18,
   },
-
+  metricWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 12,
+  },
   metricCard: {
     width: "48%",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  metricLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    color: "#64748B",
+  },
+  metricValue: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#04553C",
+    marginTop: 4,
+  },
+  filtersCard: {
+    backgroundColor: "#fff",
     borderRadius: 14,
     padding: 12,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-
-  chartCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "#E2E8F0",
+    gap: 12,
     marginBottom: 12,
   },
-  chartTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 10,
-  },
-
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
+  input: {
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-    marginBottom: 12,
-  },
-  cardTitle: {
+    borderColor: "#E2E8F0",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     fontSize: 13,
-    fontWeight: "700",
     color: "#111827",
-    marginBottom: 8,
   },
-
-  custRow: {
+  optionRow: { gap: 8 },
+  optionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+    textTransform: "uppercase",
+  },
+  inlineOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  optionPill: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: "#fff",
+  },
+  optionPillActive: {
+    borderColor: "#0F766E",
+    backgroundColor: "#CCFBF1",
+  },
+  optionPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  optionPillTextActive: {
+    color: "#0F766E",
+  },
+  sortButton: {
+    alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 8,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "#99F6E4",
+    borderRadius: 14,
+    backgroundColor: "#F0FDFA",
+  },
+  sortButtonText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#0F766E",
+  },
+  listCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  customerItem: {
+    padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
+    borderBottomColor: "#EEF2F7",
   },
-  rankBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: "#F3F4F6",
-    justifyContent: "center",
-    alignItems: "center",
+  customerTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 8,
   },
-  rankNum: { fontSize: 10, fontWeight: "800", color: "#6B7280" },
-
-  showAllBtn: {
+  customerName: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  customerSub: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  statusActive: {
+    backgroundColor: "#DCFCE7",
+  },
+  statusSuspended: {
+    backgroundColor: "#FEE2E2",
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  detailGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  statCell: {
+    width: "48%",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 10,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  statLabel: {
+    fontSize: 10,
+    color: "#64748B",
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  statValue: {
+    fontSize: 12,
+    color: "#0F172A",
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: 8,
     marginTop: 10,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: "rgba(19,236,185,0.1)",
+  },
+  actionSuspend: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#FCD34D",
+    backgroundColor: "#FEFCE8",
+    paddingVertical: 8,
     alignItems: "center",
   },
-  showAllText: { fontSize: 12, fontWeight: "700", color: "#13ECB9" },
-
-  emptyWrap: { alignItems: "center", paddingTop: 60 },
-  emptyText: { color: "#9CA3AF", marginTop: 8, fontSize: 13 },
+  actionSuspendText: {
+    color: "#92400E",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  actionRemove: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+    backgroundColor: "#FEF2F2",
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  actionRemoveText: {
+    color: "#B91C1C",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  paginationRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  pageBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    backgroundColor: "#fff",
+  },
+  pageBtnText: {
+    fontSize: 12,
+    color: "#334155",
+    fontWeight: "700",
+  },
+  pageInfo: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "700",
+  },
+  emptyText: {
+    fontSize: 13,
+    color: "#94A3B8",
+    padding: 16,
+    textAlign: "center",
+  },
 });
+
+function Stat({ label, value }) {
+  return (
+    <View style={styles.statCell}>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue}>{value}</Text>
+    </View>
+  );
+}
 
 export default CustomerReportsScreen;

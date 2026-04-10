@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Linking,
+  Image,
   Modal,
   ScrollView,
   StyleSheet,
@@ -52,6 +52,9 @@ const DriverVerificationScreen = () => {
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [activeDocument, setActiveDocument] = useState(null);
+  const [documentZoom, setDocumentZoom] = useState(1);
 
   const fetchPendingDrivers = useCallback(async () => {
     try {
@@ -134,6 +137,18 @@ const DriverVerificationScreen = () => {
     } finally {
       setVerifyLoading(false);
     }
+  };
+
+  const openDocumentPreview = (doc) => {
+    setActiveDocument(doc);
+    setDocumentZoom(1);
+    setShowDocumentModal(true);
+  };
+
+  const closeDocumentPreview = () => {
+    setShowDocumentModal(false);
+    setActiveDocument(null);
+    setDocumentZoom(1);
   };
 
   /* ─── renderInfoRow helper ─── */
@@ -236,8 +251,16 @@ const DriverVerificationScreen = () => {
               <InfoRow
                 label="License Expiry"
                 value={
-                  vl.license_expiry_date
-                    ? new Date(vl.license_expiry_date).toLocaleDateString()
+                  vl.vehicle_license_expiry ||
+                  vl.license_expiry_date ||
+                  vl.license_expiry ||
+                  vl.vehicle_license_expiry_date
+                    ? new Date(
+                        vl.vehicle_license_expiry ||
+                          vl.license_expiry_date ||
+                          vl.license_expiry ||
+                          vl.vehicle_license_expiry_date,
+                      ).toLocaleDateString()
                     : null
                 }
               />
@@ -255,9 +278,7 @@ const DriverVerificationScreen = () => {
                   <Text style={styles.docType}>
                     {(doc.document_type || "").replace(/_/g, " ").toUpperCase()}
                   </Text>
-                  <TouchableOpacity
-                    onPress={() => Linking.openURL(doc.document_url)}
-                  >
+                  <TouchableOpacity onPress={() => openDocumentPreview(doc)}>
                     <Text style={styles.docLink}>View Document →</Text>
                   </TouchableOpacity>
                   {doc.verified && (
@@ -443,6 +464,81 @@ const DriverVerificationScreen = () => {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={showDocumentModal}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDocumentPreview}
+      >
+        <View style={styles.viewerOverlay}>
+          <View style={styles.viewerCard}>
+            <View style={styles.viewerHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.viewerTitle}>Document Preview</Text>
+                <Text style={styles.viewerSubtitle}>
+                  {(activeDocument?.document_type || "document")
+                    .replace(/_/g, " ")
+                    .toUpperCase()}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.viewerCloseBtn}
+                onPress={closeDocumentPreview}
+              >
+                <Text style={styles.viewerCloseText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.viewerControls}>
+              <TouchableOpacity
+                style={styles.zoomBtn}
+                onPress={() =>
+                  setDocumentZoom((z) =>
+                    Math.max(0.5, Number((z - 0.1).toFixed(2))),
+                  )
+                }
+              >
+                <Text style={styles.zoomBtnText}>-</Text>
+              </TouchableOpacity>
+              <Text style={styles.zoomText}>
+                {Math.round(documentZoom * 100)}%
+              </Text>
+              <TouchableOpacity
+                style={styles.zoomBtn}
+                onPress={() =>
+                  setDocumentZoom((z) =>
+                    Math.min(3, Number((z + 0.1).toFixed(2))),
+                  )
+                }
+              >
+                <Text style={styles.zoomBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.viewerBody}
+              contentContainerStyle={styles.viewerBodyContent}
+              maximumZoomScale={3}
+              minimumZoomScale={1}
+              centerContent
+            >
+              {activeDocument?.document_url ? (
+                <Image
+                  source={{ uri: activeDocument.document_url }}
+                  style={[
+                    styles.viewerImage,
+                    { transform: [{ scale: documentZoom }] },
+                  ]}
+                  resizeMode="contain"
+                />
+              ) : (
+                <Text style={styles.emptyText}>No document image found</Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -598,6 +694,94 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalBtnText: { fontWeight: "700", fontSize: 13 },
+
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    padding: 14,
+  },
+  viewerCard: {
+    flex: 1,
+    maxHeight: "92%",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    overflow: "hidden",
+  },
+  viewerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+  },
+  viewerTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  viewerSubtitle: {
+    fontSize: 11,
+    color: "#6B7280",
+    marginTop: 2,
+  },
+  viewerCloseBtn: {
+    backgroundColor: "#DC2626",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  viewerCloseText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  viewerControls: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  zoomBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomBtnText: {
+    fontSize: 20,
+    lineHeight: 22,
+    color: "#111827",
+    fontWeight: "700",
+  },
+  zoomText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#374151",
+    minWidth: 52,
+    textAlign: "center",
+  },
+  viewerBody: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
+  },
+  viewerBodyContent: {
+    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  viewerImage: {
+    width: "100%",
+    height: 560,
+  },
 });
 
 export default DriverVerificationScreen;

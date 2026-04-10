@@ -1,6 +1,7 @@
-﻿import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useIsFocused } from "@react-navigation/native";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -11,187 +12,329 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DriverListLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
 import { API_URL } from "../../config/env";
-import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
+import { getAccessToken } from "../../lib/authStorage";
+import supabaseClient from "../../services/supabaseClient";
 
-const FILTER_TABS = ["all"];
-const DRIVER_READ_IDS_KEY = "@driver_read_notification_ids";
+const READ_NOTIFICATIONS_STORAGE_PREFIX = "@driver_notifications_read_map_";
+
+const getNotificationReadStorageKey = (driverId) =>
+  `${READ_NOTIFICATIONS_STORAGE_PREFIX}${driverId || "unknown"}`;
+
+const getNotificationId = (item) =>
+  String(item?.id || item?.notification_id || "");
 
 function getNotifIcon(type) {
   switch (type) {
     case "new_delivery":
     case "order_assigned":
-      return "";
+      return "🛵";
     case "order_ready":
-      return "";
-    case "reminder":
-      return "";
+      return "📦";
+    case "order_on_the_way":
+      return "🚗";
+    case "order_delivered":
+      return "🎉";
     default:
-      return "";
+      return "📢";
   }
 }
 
+function getTimeAgo(timestamp) {
+  if (!timestamp) return "";
+  const now = new Date();
+  const then = new Date(timestamp);
+  const diffMins = Math.floor((now - then) / 60000);
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+async function authFetch(url, options = {}) {
+  const token = await getAccessToken();
+  if (!token) throw new Error("No authentication token");
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(options.headers || {}),
+    },
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || "Request failed");
+  }
+
+  return payload;
+}
+
+function normalizeRealtimeNotification(row) {
+  const metadata = row?.data || {};
+  return {
+    id: row.id,
+    title: row.title || "Notification",
+    body: row.body || row.message || "",
+    message: row.body || row.message || "",
+    data: metadata,
+    type: metadata?.type || row.type || "info",
+    is_read: false,
+    created_at: row.sent_at || row.created_at || new Date().toISOString(),
+    source: "notification_log",
+  };
+}
+
 export default function DriverNotificationsScreen({ navigation }) {
+  const queryClient = useQueryClient();
   const isFocused = useIsFocused();
-  const isFocusedRef = useRef(true);
-
-  useEffect(() => {
-    isFocusedRef.current = isFocused;
-  }, [isFocused]);
-
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState("all");
   const [driverId, setDriverId] = useState(null);
-  const [readIds, setReadIds] = useState(new Set());
+  const [refreshing, setRefreshing] = useState(false);
+  const [readMap, setReadMap] = useState({});
+  const prevFocusedRef = useRef(isFocused);
 
-  // Load persisted read IDs from AsyncStorage
   useEffect(() => {
-    const loadReadIds = async () => {
+    const resolveDriverId = async () => {
+      const savedUserId = await AsyncStorage.getItem("userId");
+      if (savedUserId) {
+        setDriverId(savedUserId);
+        return;
+      }
+
+      const token = await getAccessToken();
+      if (!token) return;
+
       try {
-        const stored = await AsyncStorage.getItem(DRIVER_READ_IDS_KEY);
-        if (stored) {
-          setReadIds(new Set(JSON.parse(stored)));
-        }
-      } catch (e) {
-        console.log("[DriverNotifications] loadReadIds error:", e);
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        const uid =
+          payload.sub || payload.id || payload.userId || payload.user_id;
+        if (uid) setDriverId(String(uid));
+      } catch {
+        // Ignore invalid token payload.
       }
     };
-    loadReadIds();
+
+    resolveDriverId();
   }, []);
 
-  const persistReadIds = useCallback(async (ids) => {
-    try {
-      await AsyncStorage.setItem(DRIVER_READ_IDS_KEY, JSON.stringify([...ids]));
-    } catch (e) {
-      console.log("[DriverNotifications] persistReadIds error:", e);
-    }
-  }, []);
-
-  // Mark all current notifications as read on screen open
   useEffect(() => {
-    if (notifications.length > 0) {
-      const allIds = new Set(readIds);
-      let changed = false;
-      for (const n of notifications) {
-        if (!allIds.has(String(n.id))) {
-          allIds.add(String(n.id));
-          changed = true;
-        }
-      }
-      if (changed) {
-        setReadIds(allIds);
-        persistReadIds(allIds);
-      }
-    }
-  }, [notifications, persistReadIds]);
-
-  useEffect(() => {
-    const getDriver = async () => {
-      const token = await AsyncStorage.getItem("token");
-      if (token) {
-        try {
-          const payload = JSON.parse(atob(token.split(".")[1]));
-          const uid =
-            payload.sub || payload.id || payload.userId || payload.user_id;
-          setDriverId(uid);
-        } catch {}
+    let mounted = true;
+    const loadReadMap = async () => {
+      if (!driverId) return;
+      try {
+        const raw = await AsyncStorage.getItem(
+          getNotificationReadStorageKey(driverId),
+        );
+        if (!mounted) return;
+        const parsed = raw ? JSON.parse(raw) : {};
+        setReadMap(parsed && typeof parsed === "object" ? parsed : {});
+      } catch {
+        if (mounted) setReadMap({});
       }
     };
-    getDriver();
-  }, []);
 
-  const fetchNotifications = useCallback(async () => {
+    loadReadMap();
+    return () => {
+      mounted = false;
+    };
+  }, [driverId]);
+
+  const notificationsQuery = useQuery({
+    queryKey: ["driver", "notifications"],
+    queryFn: async () => {
+      const data = await authFetch(`${API_URL}/driver/notifications?limit=50`);
+      return data.notifications || [];
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: isFocused ? 60 * 1000 : false,
+    initialData: () => queryClient.getQueryData(["driver", "notifications"]),
+    placeholderData: (previousData) => previousData,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+
+  useEffect(() => {
+    if (!driverId) return;
+
+    const channel = supabaseClient
+      .channel(`mobile-driver-notifications-${driverId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notification_log",
+          filter: `user_id=eq.${driverId}`,
+        },
+        (payload) => {
+          const next = normalizeRealtimeNotification(payload.new);
+          queryClient.setQueryData(["driver", "notifications"], (prev = []) => {
+            if (prev.some((n) => String(n.id) === String(next.id))) return prev;
+            return [next, ...prev];
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
+  }, [driverId, queryClient]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
     try {
-      const token = await AsyncStorage.getItem("token");
-      const res = await rateLimitedFetch(`${API_URL}/driver/notifications`, {
-        headers: { Authorization: `Bearer ${token}` },
+      await queryClient.invalidateQueries({
+        queryKey: ["driver", "notifications"],
       });
-      const data = await res.json();
-      if (res.ok) {
-        setNotifications(data.notifications || []);
-      }
-    } catch (e) {
-      console.error("Fetch notifications error:", e);
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
-  }, []);
-
-  useEffect(() => {
-    fetchNotifications();
-    // Poll every 60 seconds (was 15s), only when this screen is visible
-    const interval = setInterval(() => {
-      if (isFocusedRef.current) fetchNotifications();
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [fetchNotifications]);
-
-  const handleNotificationPress = (notification) => {
-    // Mark this notification as read locally
-    const newReadIds = new Set(readIds);
-    newReadIds.add(String(notification.id));
-    setReadIds(newReadIds);
-    persistReadIds(newReadIds);
-
-    try {
-      // notification_log uses 'data' instead of 'metadata'
-      const metadata = notification.data
-        ? typeof notification.data === "string"
-          ? JSON.parse(notification.data)
-          : notification.data
-        : notification.metadata
-          ? typeof notification.metadata === "string"
-            ? JSON.parse(notification.metadata)
-            : notification.metadata
-          : {};
-      if (metadata.delivery_id || metadata.order_id) {
-        navigation.navigate("ActiveDeliveries");
-      }
-    } catch {}
   };
 
-  // notification_log has no is_read field - track locally via AsyncStorage
-  const filtered = notifications;
+  const notifications = notificationsQuery.data || [];
 
-  const unreadCount = notifications.filter(
-    (n) => !readIds.has(String(n.id))
-  ).length;
+  const notificationsWithReadState = useMemo(() => {
+    return notifications.map((item) => {
+      const id = getNotificationId(item);
+      const localRead = Boolean(id && readMap[id]);
+      return {
+        ...item,
+        is_read: Boolean(item?.is_read) || localRead,
+      };
+    });
+  }, [notifications, readMap]);
+
+  const counts = useMemo(() => {
+    const unread = notificationsWithReadState.filter((n) => !n.is_read).length;
+    return {
+      all: notificationsWithReadState.length,
+      unread,
+    };
+  }, [notificationsWithReadState]);
+
+  useEffect(() => {
+    const persist = async (nextMap) => {
+      if (!driverId) return;
+      await AsyncStorage.setItem(
+        getNotificationReadStorageKey(driverId),
+        JSON.stringify(nextMap),
+      );
+    };
+
+    const wasFocused = prevFocusedRef.current;
+    const nowFocused = isFocused;
+
+    if (wasFocused && !nowFocused && notificationsWithReadState.length > 0) {
+      setReadMap((prev) => {
+        let changed = false;
+        const next = { ...prev };
+
+        notificationsWithReadState.forEach((item) => {
+          const id = getNotificationId(item);
+          if (!id || next[id]) return;
+          next[id] = true;
+          changed = true;
+        });
+
+        if (changed) {
+          persist(next).catch(() => {});
+          return next;
+        }
+
+        return prev;
+      });
+    }
+
+    prevFocusedRef.current = nowFocused;
+  }, [isFocused, notificationsWithReadState, driverId]);
+
+  const handleNotificationPress = (notification) => {
+    const notificationId = getNotificationId(notification);
+    if (notificationId) {
+      setReadMap((prev) => {
+        if (prev[notificationId]) return prev;
+        const next = { ...prev, [notificationId]: true };
+        if (driverId) {
+          AsyncStorage.setItem(
+            getNotificationReadStorageKey(driverId),
+            JSON.stringify(next),
+          ).catch(() => {});
+        }
+        return next;
+      });
+    }
+
+    let metadata = {};
+    if (typeof notification?.data === "string") {
+      try {
+        metadata = JSON.parse(notification.data);
+      } catch {
+        metadata = {};
+      }
+    } else {
+      metadata = notification?.data || notification?.metadata || {};
+    }
+
+    const paymentId =
+      metadata.paymentId || metadata.payment_id || metadata.paymentID;
+    const type = metadata.type || notification?.type;
+
+    if (type === "payment_received" || paymentId) {
+      navigation.navigate("DriverWithdrawals", {
+        paymentId: paymentId ? String(paymentId) : null,
+      });
+      return;
+    }
+
+    if (metadata.delivery_id || metadata.order_id) {
+      navigation.navigate("DriverMap", {
+        deliveryId: metadata.delivery_id || metadata.order_id,
+      });
+    }
+  };
 
   const renderItem = ({ item }) => {
-    const isUnread = !readIds.has(String(item.id));
+    const unread = !item.is_read;
     return (
       <TouchableOpacity
-        style={[styles.notifCard, isUnread && styles.notifUnread]}
+        style={[styles.notifCard, unread && styles.notifUnread]}
         onPress={() => handleNotificationPress(item)}
-        activeOpacity={0.7}
+        activeOpacity={0.75}
       >
         <View style={styles.notifRow}>
           <View style={styles.notifIconWrap}>
             <Text style={styles.notifIconText}>{getNotifIcon(item.type)}</Text>
           </View>
+
           <View style={styles.notifContent}>
             <View style={styles.notifTitleRow}>
               <Text
-                style={[styles.notifTitle, isUnread && styles.notifTitleUnread]}
+                style={[styles.notifTitle, unread && styles.notifTitleUnread]}
                 numberOfLines={2}
               >
-                {item.title}
+                {item.title || "Notification"}
               </Text>
-              {isUnread && <View style={styles.unreadDot} />}
+              {unread ? <View style={styles.unreadDot} /> : null}
             </View>
+
             <Text
-              style={[styles.notifMessage, isUnread && styles.notifMessageUnread]}
-              numberOfLines={2}
+              style={[styles.notifMessage, unread && styles.notifMessageUnread]}
+              numberOfLines={3}
             >
-              {item.body || item.message}
+              {item.body || item.message || ""}
             </Text>
-            <Text style={styles.notifTime}>
-              {new Date(item.created_at).toLocaleString()}
-            </Text>
+
+            <Text style={styles.notifTime}>{getTimeAgo(item.created_at)}</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -199,145 +342,99 @@ export default function DriverNotificationsScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <DriverScreenHeader
-        title="Notifications"
-        rightIcon="refresh"
-        onBackPress={() => navigation.goBack()}
-        onRightPress={() => {
-          setRefreshing(true);
-          fetchNotifications();
-        }}
-      />
+    <SafeAreaView style={styles.container} edges={["left", "right", "bottom"]}>
+      <View style={{ flex: 1 }}>
+        <DriverScreenSection screenKey="DriverNotifications" sectionIndex={0}>
+          <DriverScreenHeader
+            title="Notifications"
+            rightIcon="refresh"
+            onBackPress={() => navigation.goBack()}
+            onRightPress={onRefresh}
+          />
+        </DriverScreenSection>
 
-      {/* Filter Tabs */}
-      <View style={styles.tabs}>
-        {FILTER_TABS.map((tab) => {
-          const count = notifications.length;
-          return (
-            <TouchableOpacity
-              key={tab}
-              style={[styles.tab, filter === tab && styles.tabActive]}
-              onPress={() => setFilter(tab)}
-            >
-              <Text
-                style={[styles.tabText, filter === tab && styles.tabTextActive]}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)} ({count})
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+        <DriverScreenSection screenKey="DriverNotifications" sectionIndex={1}>
+          <View style={styles.actionsRow}>
+            <Text style={styles.badgeText}>{`${counts.unread} unread`}</Text>
+            <Text style={styles.allLabel}>{`All (${counts.all})`}</Text>
+          </View>
+        </DriverScreenSection>
 
-      {loading ? (
-        <ActivityIndicator
-          size="large"
-          color="#3b82f6"
-          style={{ marginTop: 40 }}
-        />
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={renderItem}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                fetchNotifications();
-              }}
-              colors={["#3b82f6"]}
+        <DriverScreenSection
+          screenKey="DriverNotifications"
+          sectionIndex={2}
+          style={{ flex: 1 }}
+        >
+          {notificationsQuery.isLoading ? (
+            <DriverListLoadingSkeleton count={6} />
+          ) : (
+            <FlatList
+              data={notificationsWithReadState}
+              keyExtractor={(item) => String(item.id)}
+              renderItem={renderItem}
+              contentContainerStyle={styles.list}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={["#06C168"]}
+                />
+              }
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyIcon}>🔔</Text>
+                  <Text style={styles.emptyTitle}>No Notifications</Text>
+                  <Text style={styles.emptyMessage}>
+                    New notifications will appear here
+                  </Text>
+                </View>
+              }
+              ListFooterComponent={
+                <Text style={styles.footer}>
+                  Auto-refreshing every 60 seconds
+                </Text>
+              }
             />
-          }
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}></Text>
-              <Text style={styles.emptyTitle}>No Notifications</Text>
-              <Text style={styles.emptyMessage}>
-                {filter === "unread"
-                  ? "You're all caught up!"
-                  : "New notifications will appear here."}
-              </Text>
-            </View>
-          }
-          ListFooterComponent={
-            <Text style={styles.footer}>Auto-refreshing every 60 seconds</Text>
-          }
-        />
-      )}
+          )}
+        </DriverScreenSection>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f9fafb" },
-  header: {
+  loader: { marginTop: 40 },
+  actionsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
+    marginHorizontal: 12,
+    marginTop: 10,
+    marginBottom: 8,
   },
-  headerTitle: { fontSize: 22, fontWeight: "800", color: "#111827" },
-  unreadBadge: {
-    fontSize: 12,
-    color: "#3b82f6",
-    fontWeight: "600",
-    marginTop: 2,
-  },
-  refreshBtn: { padding: 8 },
-  refreshIcon: { fontSize: 22, color: "#6b7280" },
-  tabs: {
-    flexDirection: "row",
-    backgroundColor: "#fff",
-    padding: 4,
-    margin: 12,
-    borderRadius: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  tabActive: { backgroundColor: "#3b82f6" },
-  tabText: { fontSize: 12, fontWeight: "600", color: "#6b7280" },
-  tabTextActive: { color: "#fff" },
-  list: { paddingHorizontal: 12, paddingBottom: 40 },
+  badgeText: { color: "#374151", fontWeight: "700", fontSize: 12 },
+  allLabel: { color: "#6b7280", fontWeight: "700", fontSize: 12 },
+  list: { paddingHorizontal: 12, paddingBottom: 42 },
   notifCard: {
     backgroundColor: "#fff",
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
   },
-  notifUnread: { borderLeftWidth: 4, borderLeftColor: "#3b82f6" },
+  notifUnread: { borderLeftWidth: 4, borderLeftColor: "#06C168" },
   notifRow: { flexDirection: "row", gap: 12 },
   notifIconWrap: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#eff6ff",
+    backgroundColor: "#ecfdf3",
     alignItems: "center",
     justifyContent: "center",
   },
-  notifIconText: { fontSize: 18 },
+  notifIconText: { fontSize: 17 },
   notifContent: { flex: 1 },
   notifTitleRow: {
     flexDirection: "row",
@@ -356,7 +453,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#3b82f6",
+    backgroundColor: "#06C168",
     marginTop: 4,
   },
   notifMessage: {
@@ -368,7 +465,7 @@ const styles = StyleSheet.create({
   notifMessageUnread: { color: "#374151" },
   notifTime: { fontSize: 11, color: "#9ca3af", marginTop: 6 },
   empty: { alignItems: "center", paddingVertical: 60 },
-  emptyIcon: { fontSize: 48, marginBottom: 16 },
+  emptyIcon: { fontSize: 48, marginBottom: 14 },
   emptyTitle: {
     fontSize: 18,
     fontWeight: "700",

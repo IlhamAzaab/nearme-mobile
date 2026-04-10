@@ -21,6 +21,7 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Easing,
   Linking,
   Platform,
   Pressable,
@@ -29,9 +30,23 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import Svg, { Path } from "react-native-svg";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import { DriverMapSheetLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
+import DeliveryProofUpload from "../../components/driver/DeliveryProofUpload";
 import FreeMapView from "../../components/maps/FreeMapView";
+import StatusTransitionOverlay from "../../components/driver/StatusTransitionOverlay";
+import SwipeToDeliver from "../../components/driver/SwipeToDeliver";
 import { API_BASE_URL } from "../../constants/api";
+import {
+  approximateDistanceMeters,
+  fetchOSRMRoute as fetchResilientOSRMRoute,
+} from "../../utils/osrmClient";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -43,54 +58,106 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const LIVE_TRACKING_INTERVAL = 3000; // 3s - smooth driver marker updates
 const DATA_REFRESH_THRESHOLD = 100; // 100m - only fetch API data after this
 const DEFAULT_LOCATION = { latitude: 8.5017, longitude: 81.186 };
+const DRIVER_MAP_CACHE_KEY = "driver_map_cache";
+const DRIVER_MAP_CACHE_TTL_MS = 120000;
+const DRIVER_STATUS_FOCUS_SIGNAL_KEY = "driver_status_focus_signal";
+
+const loadDriverMapCache = async () => {
+  try {
+    const raw = await AsyncStorage.getItem(DRIVER_MAP_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.timestamp || !parsed?.data) return null;
+    if (Date.now() - parsed.timestamp > DRIVER_MAP_CACHE_TTL_MS) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+};
+
+const saveDriverMapCache = async (data) => {
+  try {
+    await AsyncStorage.setItem(
+      DRIVER_MAP_CACHE_KEY,
+      JSON.stringify({ timestamp: Date.now(), data }),
+    );
+  } catch {
+    // no-op
+  }
+};
+
+const pushStatusFocusSignal = async (status, deliveryId) => {
+  try {
+    await AsyncStorage.setItem(
+      DRIVER_STATUS_FOCUS_SIGNAL_KEY,
+      JSON.stringify({
+        status,
+        delivery_id: deliveryId,
+        timestamp: Date.now(),
+      }),
+    );
+  } catch {
+    // no-op
+  }
+};
 
 // ============================================================================
 // HELPERS
 // ============================================================================
 
-const getDistanceMeters = (lat1, lng1, lat2, lng2) => {
-  const R = 6371000;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+const fetchOSRMRoute = async (fromLat, fromLng, toLat, toLng) => {
+  const route = await fetchResilientOSRMRoute({
+    from: { latitude: fromLat, longitude: fromLng },
+    to: { latitude: toLat, longitude: toLng },
+    profile: "foot",
+    timeoutMs: 10000,
+    retries: 2,
+    overview: "full",
+  });
+
+  if (route?.geometry?.coordinates?.length) {
+    return {
+      success: true,
+      coordinates: route.geometry.coordinates.map(function (c) {
+        return { latitude: c[1], longitude: c[0] };
+      }),
+      distance_km: (route.distance / 1000).toFixed(1),
+      duration_min: Math.ceil(route.duration / 60),
+    };
+  }
+
+  return { success: false };
 };
 
-const fetchOSRMRoute = async (fromLat, fromLng, toLat, toLng) => {
-  try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`;
-    const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(tid);
-    const data = await res.json();
-    if (data.code === "Ok" && data.routes && data.routes[0]) {
-      const r = data.routes[0];
-      return {
-        success: true,
-        coordinates: r.geometry.coordinates.map(function (c) {
-          return { latitude: c[1], longitude: c[0] };
-        }),
-        distance_km: (r.distance / 1000).toFixed(1),
-        duration_min: Math.ceil(r.duration / 60),
-      };
-    }
-    return { success: false };
-  } catch (e) {
-    return { success: false };
-  }
-};
+function MetricBadge({ type, value, unit }) {
+  const isDistance = type === "distance";
+
+  return (
+    <View style={styles.metricBadge}>
+      <Svg width={14} height={14} viewBox="0 0 24 24">
+        {isDistance ? (
+          <Path
+            d="M12 2C8.13 2 5 5.13 5 9c0 4.8 5.36 11.06 6.02 11.8a1.3 1.3 0 0 0 1.96 0C13.64 20.06 19 13.8 19 9c0-3.87-3.13-7-7-7Zm0 9.3a2.3 2.3 0 1 1 0-4.6 2.3 2.3 0 0 1 0 4.6Z"
+            fill="#059669"
+          />
+        ) : (
+          <Path
+            d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5A8.51 8.51 0 0 0 12 3.5Zm.75 4.25v4.1l3 1.8-.75 1.3-3.75-2.25V7.75Z"
+            fill="#059669"
+          />
+        )}
+      </Svg>
+      <Text style={styles.metricBadgeText}>{`${value} ${unit}`}</Text>
+    </View>
+  );
+}
 
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
 export default function DriverMapScreen({ route, navigation }) {
+  const insets = useSafeAreaInsets();
   const params = route.params || {};
   const deliveryId = params.deliveryId;
   const initialMode = params.mode || "pickup";
@@ -102,6 +169,13 @@ export default function DriverMapScreen({ route, navigation }) {
   const isFetchingRef = useRef(false);
   const routeFetchLocRef = useRef(null);
   const sheetAnim = useRef(new Animated.Value(0)).current;
+  const contentFadeAnim = useRef(new Animated.Value(0)).current;
+  const sheetHeightAnim = useRef(
+    new Animated.Value(SCREEN_HEIGHT * 0.4),
+  ).current;
+  const overlayCallbackRef = useRef(null);
+  const sheetTouchStartY = useRef(null);
+  const hasAutoFitRef = useRef(false);
 
   const [mode, setMode] = useState(initialMode);
   const [pickups, setPickups] = useState([]);
@@ -115,13 +189,22 @@ export default function DriverMapScreen({ route, navigation }) {
   const [routeInfo, setRouteInfo] = useState(null);
   const [isTracking, setIsTracking] = useState(false);
   const [userInteracted, setUserInteracted] = useState(false);
+  const [sheetExpanded, setSheetExpanded] = useState(false);
+  const [overlayVisible, setOverlayVisible] = useState(false);
+  const [overlayStatus, setOverlayStatus] = useState("processing");
+  const [overlayActionType, setOverlayActionType] = useState("pickup");
+  const [overlayErrorMsg, setOverlayErrorMsg] = useState("");
+
+  const mapTabBarHeight = 70 + insets.bottom;
+  const collapsedSheetHeight = SCREEN_HEIGHT * 0.4;
+  const expandedSheetHeight = SCREEN_HEIGHT * 0.6;
 
   // ============================================================================
   // INIT / CLEANUP
   // ============================================================================
 
   useEffect(function () {
-    startLocationTracking();
+    hydrateFromCacheAndStart();
     return function () {
       if (watchIdRef.current) {
         watchIdRef.current.remove();
@@ -129,6 +212,39 @@ export default function DriverMapScreen({ route, navigation }) {
       }
     };
   }, []);
+
+  const hydrateFromCacheAndStart = async () => {
+    const cached = await loadDriverMapCache();
+    if (cached) {
+      if (cached.driverLocation) {
+        setDriverLocation(cached.driverLocation);
+        lastFetchLocationRef.current = cached.driverLocation;
+      }
+
+      const cachedPickups = Array.isArray(cached.pickups) ? cached.pickups : [];
+      const cachedDeliveries = Array.isArray(cached.deliveries)
+        ? cached.deliveries
+        : [];
+
+      setPickups(cachedPickups);
+      setDeliveriesList(cachedDeliveries);
+
+      if (cached.currentTarget) {
+        setMode(cached.mode || "pickup");
+        setCurrentTarget(cached.currentTarget);
+      } else if (cachedPickups.length > 0) {
+        setMode("pickup");
+        setCurrentTarget(cachedPickups[0]);
+      } else if (cachedDeliveries.length > 0) {
+        setMode("deliver");
+        setCurrentTarget(cachedDeliveries[0]);
+      }
+
+      setLoading(false);
+    }
+
+    startLocationTracking();
+  };
 
   // ============================================================================
   // LOCATION TRACKING
@@ -166,7 +282,7 @@ export default function DriverMapScreen({ route, navigation }) {
           distanceInterval: 0,
         },
         function (position) {
-          var newLoc = {
+          let newLoc = {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
           };
@@ -178,14 +294,9 @@ export default function DriverMapScreen({ route, navigation }) {
           updateBackendLocation(newLoc);
 
           // Only fetch API data when moved 100m+ from last fetch
-          var lastFetch = lastFetchLocationRef.current;
+          let lastFetch = lastFetchLocationRef.current;
           if (lastFetch) {
-            var moved = getDistanceMeters(
-              lastFetch.latitude,
-              lastFetch.longitude,
-              newLoc.latitude,
-              newLoc.longitude,
-            );
+            let moved = approximateDistanceMeters(lastFetch, newLoc);
             if (moved >= DATA_REFRESH_THRESHOLD) {
               console.log(
                 "[LOCATION] Moved " +
@@ -217,44 +328,44 @@ export default function DriverMapScreen({ route, navigation }) {
     isFetchingRef.current = true;
 
     try {
-      var token = await AsyncStorage.getItem("token");
+      let token = await AsyncStorage.getItem("token");
       if (!token) {
         navigation.replace("Login");
         return;
       }
 
       // Fetch pickups
-      var pickupsUrl =
+      let pickupsUrl =
         API_BASE_URL +
         "/driver/deliveries/pickups?driver_latitude=" +
         location.latitude +
         "&driver_longitude=" +
         location.longitude;
-      var pickupsRes = await rateLimitedFetch(pickupsUrl, {
+      let pickupsRes = await rateLimitedFetch(pickupsUrl, {
         headers: { Authorization: "Bearer " + token },
       });
-      var pickupsData = { pickups: [] };
+      let pickupsData = { pickups: [] };
       if (pickupsRes.ok) {
         pickupsData = await pickupsRes.json();
       }
 
       // Fetch deliveries
-      var deliveriesUrl =
+      let deliveriesUrl =
         API_BASE_URL +
         "/driver/deliveries/deliveries-route?driver_latitude=" +
         location.latitude +
         "&driver_longitude=" +
         location.longitude;
-      var deliveriesRes = await rateLimitedFetch(deliveriesUrl, {
+      let deliveriesRes = await rateLimitedFetch(deliveriesUrl, {
         headers: { Authorization: "Bearer " + token },
       });
-      var deliveriesData = { deliveries: [] };
+      let deliveriesData = { deliveries: [] };
       if (deliveriesRes.ok) {
         deliveriesData = await deliveriesRes.json();
       }
 
-      var pList = pickupsData.pickups || [];
-      var dList = deliveriesData.deliveries || [];
+      let pList = pickupsData.pickups || [];
+      let dList = deliveriesData.deliveries || [];
 
       // ── Fallback: hit /active when both lists are empty ──
       if (pList.length === 0 && dList.length === 0) {
@@ -262,20 +373,20 @@ export default function DriverMapScreen({ route, navigation }) {
           "[FETCH] Both endpoints empty, trying /driver/deliveries/active fallback...",
         );
         try {
-          var fallbackRes = await rateLimitedFetch(
+          let fallbackRes = await rateLimitedFetch(
             API_BASE_URL + "/driver/deliveries/active",
             {
               headers: { Authorization: "Bearer " + token },
             },
           );
           if (fallbackRes.ok) {
-            var fallbackData = await fallbackRes.json();
-            var activeList = fallbackData.deliveries || [];
+            let fallbackData = await fallbackRes.json();
+            let activeList = fallbackData.deliveries || [];
             if (activeList.length > 0) {
-              var accepted = activeList.filter(function (d) {
+              let accepted = activeList.filter(function (d) {
                 return d.status === "accepted";
               });
-              var inProgress = activeList.filter(function (d) {
+              let inProgress = activeList.filter(function (d) {
                 return d.status !== "accepted";
               });
               if (accepted.length > 0) {
@@ -383,26 +494,34 @@ export default function DriverMapScreen({ route, navigation }) {
       setPickups(pList);
       setDeliveriesList(dList);
 
+      let nextMode = mode;
+      let nextTarget = null;
+
       // Auto-select mode and target
       if (pList.length > 0) {
         setMode("pickup");
-        var pTarget = deliveryId
-          ? pList.find(function (p) {
-              return p.delivery_id === deliveryId;
-            }) || pList[0]
-          : pList[0];
+        let pTarget = pList[0];
         setCurrentTarget(pTarget);
+        nextMode = "pickup";
+        nextTarget = pTarget;
       } else if (dList.length > 0) {
         setMode("deliver");
-        var dTarget = deliveryId
-          ? dList.find(function (d) {
-              return d.delivery_id === deliveryId;
-            }) || dList[0]
-          : dList[0];
+        let dTarget = dList[0];
         setCurrentTarget(dTarget);
+        nextMode = "deliver";
+        nextTarget = dTarget;
       } else {
         setCurrentTarget(null);
+        nextTarget = null;
       }
+
+      await saveDriverMapCache({
+        driverLocation: location,
+        pickups: pList,
+        deliveries: dList,
+        mode: nextMode,
+        currentTarget: nextTarget,
+      });
     } catch (err) {
       console.error("[FETCH] Data error:", err);
     } finally {
@@ -455,17 +574,12 @@ export default function DriverMapScreen({ route, navigation }) {
   useEffect(
     function () {
       if (!driverLocation || !targetForMap) return;
-      var prev = routeFetchLocRef.current;
+      let prev = routeFetchLocRef.current;
       if (!prev) {
         routeFetchLocRef.current = driverLocation;
         return;
       }
-      var moved = getDistanceMeters(
-        prev.latitude,
-        prev.longitude,
-        driverLocation.latitude,
-        driverLocation.longitude,
-      );
+      let moved = approximateDistanceMeters(prev, driverLocation);
       if (moved >= DATA_REFRESH_THRESHOLD) {
         routeFetchLocRef.current = driverLocation;
         doFetchRoute(driverLocation, targetForMap);
@@ -475,7 +589,7 @@ export default function DriverMapScreen({ route, navigation }) {
   );
 
   const doFetchRoute = async (from, to) => {
-    var result = await fetchOSRMRoute(
+    let result = await fetchOSRMRoute(
       from.latitude,
       from.longitude,
       to.latitude,
@@ -489,7 +603,7 @@ export default function DriverMapScreen({ route, navigation }) {
       });
     } else {
       // Fallback
-      var backendCoords =
+      let backendCoords =
         currentTarget &&
         currentTarget.route_geometry &&
         currentTarget.route_geometry.coordinates
@@ -500,7 +614,7 @@ export default function DriverMapScreen({ route, navigation }) {
       if (backendCoords.length > 1) {
         setRouteCoords(backendCoords);
       } else {
-        setRouteCoords([from, to]);
+        setRouteCoords([]);
       }
       setRouteInfo(null);
     }
@@ -511,14 +625,15 @@ export default function DriverMapScreen({ route, navigation }) {
   // ============================================================================
 
   const updateBackendLocation = async (loc) => {
-    var now = Date.now();
+    let now = Date.now();
     if (now - lastBackendUpdateRef.current < 5000) return;
     lastBackendUpdateRef.current = now;
     try {
-      var token = await AsyncStorage.getItem("token");
-      if (!token || !deliveryId) return;
+      let token = await AsyncStorage.getItem("token");
+      const locationDeliveryId = currentTarget?.delivery_id || deliveryId;
+      if (!token || !locationDeliveryId) return;
       await fetch(
-        API_BASE_URL + "/driver/deliveries/" + deliveryId + "/location",
+        API_BASE_URL + "/driver/deliveries/" + locationDeliveryId + "/location",
         {
           method: "PATCH",
           headers: {
@@ -542,10 +657,15 @@ export default function DriverMapScreen({ route, navigation }) {
 
   const handlePickedUp = async () => {
     if (!currentTarget || updating) return;
+
+    setOverlayActionType("pickup");
+    setOverlayStatus("processing");
+    setOverlayVisible(true);
     setUpdating(true);
+
     try {
-      var token = await AsyncStorage.getItem("token");
-      var res = await fetch(
+      let token = await AsyncStorage.getItem("token");
+      let res = await fetch(
         API_BASE_URL +
           "/driver/deliveries/" +
           currentTarget.delivery_id +
@@ -564,53 +684,56 @@ export default function DriverMapScreen({ route, navigation }) {
         },
       );
       if (res.ok) {
-        var updated = pickups.filter(function (p) {
-          return p.delivery_id !== currentTarget.delivery_id;
-        });
-        setPickups(updated);
-        if (updated.length > 0) {
-          setCurrentTarget(updated[0]);
-        } else {
-          // All picked up - refetch to switch to delivery mode
-          if (driverLocation) {
-            await fetchPickupsAndDeliveries(driverLocation);
-          }
-        }
-        Alert.alert("Picked Up", "Order picked up successfully!");
+        await pushStatusFocusSignal("picked_up", currentTarget.delivery_id);
+
+        setOverlayStatus("success");
+        overlayCallbackRef.current = async () => {
+          const refreshLocation =
+            driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+          await fetchPickupsAndDeliveries(refreshLocation);
+          setUpdating(false);
+        };
       } else {
-        var errData = await res.json().catch(function () {
+        let errData = await res.json().catch(function () {
           return {};
         });
-        Alert.alert("Error", errData.message || "Failed to update status");
+        setOverlayErrorMsg(errData.message || "Failed to update status");
+        setOverlayStatus("error");
+        overlayCallbackRef.current = () => setUpdating(false);
       }
     } catch (e) {
-      Alert.alert("Error", "Failed to mark as picked up");
-    } finally {
-      setUpdating(false);
+      setOverlayErrorMsg("Failed to mark as picked up");
+      setOverlayStatus("error");
+      overlayCallbackRef.current = () => setUpdating(false);
     }
   };
 
   const handleDelivered = async () => {
     if (!currentTarget || updating) return;
+
+    setOverlayActionType("deliver");
+    setOverlayStatus("processing");
+    setOverlayVisible(true);
     setUpdating(true);
+
     try {
-      var token = await AsyncStorage.getItem("token");
-      var statusUrl =
+      let token = await AsyncStorage.getItem("token");
+      let statusUrl =
         API_BASE_URL +
         "/driver/deliveries/" +
         currentTarget.delivery_id +
         "/status";
-      var headers = {
+      let headers = {
         Authorization: "Bearer " + token,
         "Content-Type": "application/json",
       };
-      var locBody = {
+      let locBody = {
         latitude: driverLocation ? driverLocation.latitude : null,
         longitude: driverLocation ? driverLocation.longitude : null,
       };
 
       // Progress through status steps
-      var currentStatus = currentTarget.status || "";
+      let currentStatus = currentTarget.status || "";
       if (currentStatus === "picked_up" || currentStatus === "accepted") {
         await fetch(statusUrl, {
           method: "PATCH",
@@ -634,55 +757,34 @@ export default function DriverMapScreen({ route, navigation }) {
         });
       }
       // Final: delivered
-      var finalRes = await fetch(statusUrl, {
+      let finalRes = await fetch(statusUrl, {
         method: "PATCH",
         headers: headers,
         body: JSON.stringify(Object.assign({ status: "delivered" }, locBody)),
       });
 
       if (finalRes.ok) {
-        var resData = await finalRes.json().catch(function () {
-          return {};
-        });
-        var updated = deliveriesList.filter(function (d) {
-          return d.delivery_id !== currentTarget.delivery_id;
-        });
+        await pushStatusFocusSignal("delivered", currentTarget.delivery_id);
 
-        // If backend promoted another delivery to on_the_way, update its status in the list
-        if (resData.promotedDelivery && updated.length > 0) {
-          var promotedIdx = updated.findIndex(function (d) {
-            return d.delivery_id === resData.promotedDelivery.id;
-          });
-          if (promotedIdx !== -1) {
-            updated[promotedIdx] = Object.assign({}, updated[promotedIdx], {
-              status: "on_the_way",
-            });
-          }
-        }
-
-        setDeliveriesList(updated);
-        if (updated.length > 0) {
-          setCurrentTarget(updated[0]);
-        } else {
-          Alert.alert("All Deliveries Completed!", "Great job!", [
-            {
-              text: "OK",
-              onPress: function () {
-                navigation.navigate("ActiveDeliveries");
-              },
-            },
-          ]);
-        }
+        setOverlayStatus("success");
+        overlayCallbackRef.current = async () => {
+          const refreshLocation =
+            driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+          await fetchPickupsAndDeliveries(refreshLocation);
+          setUpdating(false);
+        };
       } else {
-        var errData = await finalRes.json().catch(function () {
+        let errData = await finalRes.json().catch(function () {
           return {};
         });
-        Alert.alert("Error", errData.message || "Failed to mark as delivered");
+        setOverlayErrorMsg(errData.message || "Failed to mark as delivered");
+        setOverlayStatus("error");
+        overlayCallbackRef.current = () => setUpdating(false);
       }
     } catch (e) {
-      Alert.alert("Error", "Failed to mark as delivered");
-    } finally {
-      setUpdating(false);
+      setOverlayErrorMsg("Failed to mark as delivered");
+      setOverlayStatus("error");
+      overlayCallbackRef.current = () => setUpdating(false);
     }
   };
 
@@ -699,43 +801,120 @@ export default function DriverMapScreen({ route, navigation }) {
 
   const handleRecenter = () => {
     setUserInteracted(false);
+    hasAutoFitRef.current = false;
   };
 
-  // Auto-fit map
+  const handleSheetTouchStart = (e) => {
+    sheetTouchStartY.current = e?.nativeEvent?.pageY ?? null;
+  };
+
+  const handleSheetTouchEnd = (e) => {
+    const startY = sheetTouchStartY.current;
+    const endY = e?.nativeEvent?.pageY;
+    sheetTouchStartY.current = null;
+    if (startY == null || endY == null) return;
+
+    const deltaY = endY - startY;
+    if (deltaY < -40) {
+      setSheetExpanded(true);
+    } else if (deltaY > 40) {
+      setSheetExpanded(false);
+    }
+  };
+
   useEffect(
     function () {
-      if (!userInteracted && driverLocation && targetForMap) {
+      Animated.timing(sheetHeightAnim, {
+        toValue: sheetExpanded ? expandedSheetHeight : collapsedSheetHeight,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    },
+    [sheetExpanded, sheetHeightAnim, collapsedSheetHeight, expandedSheetHeight],
+  );
+
+  // Auto-fit map once per target (or when explicitly recentered)
+  useEffect(
+    function () {
+      if (
+        !userInteracted &&
+        driverLocation &&
+        targetForMap &&
+        !hasAutoFitRef.current
+      ) {
+        const sheetHeight = sheetExpanded
+          ? expandedSheetHeight
+          : collapsedSheetHeight;
+        const fitPoints =
+          routeCoords.length > 1 ? routeCoords : [driverLocation, targetForMap];
+
         setTimeout(function () {
           if (mapRef.current && mapRef.current.fitToCoordinates) {
-            mapRef.current.fitToCoordinates([driverLocation, targetForMap], {
-              edgePadding: { top: 100, right: 50, bottom: 200, left: 50 },
+            mapRef.current.fitToCoordinates(fitPoints, {
+              edgePadding: {
+                top: insets.top + 80,
+                right: 42,
+                bottom: Math.round(sheetHeight + mapTabBarHeight + 16),
+                left: 42,
+              },
             });
+            hasAutoFitRef.current = true;
           }
         }, 400);
       }
     },
-    [driverLocation, targetForMap, userInteracted],
+    [
+      driverLocation,
+      targetForMap,
+      userInteracted,
+      routeCoords,
+      sheetExpanded,
+      insets.top,
+      insets.bottom,
+    ],
+  );
+
+  useEffect(
+    function () {
+      hasAutoFitRef.current = false;
+    },
+    [
+      mode,
+      sheetExpanded,
+      currentTarget?.delivery_id,
+      targetForMap?.latitude,
+      targetForMap?.longitude,
+    ],
   );
 
   // Animate bottom sheet
   useEffect(
     function () {
       if (!loading && currentTarget) {
+        contentFadeAnim.setValue(0);
         Animated.spring(sheetAnim, {
           toValue: 1,
-          useNativeDriver: true,
+          useNativeDriver: false,
           tension: 50,
           friction: 8,
         }).start();
+
+        Animated.timing(contentFadeAnim, {
+          toValue: 1,
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
       }
     },
-    [loading, currentTarget],
+    [loading, currentTarget, contentFadeAnim],
   );
 
   // Google Maps Navigation
   const openGoogleMaps = () => {
     if (!targetForMap) return;
-    var url = Platform.select({
+    let url = Platform.select({
       ios: "maps:0,0?q=" + targetForMap.latitude + "," + targetForMap.longitude,
       android:
         "geo:0,0?q=" + targetForMap.latitude + "," + targetForMap.longitude,
@@ -756,13 +935,18 @@ export default function DriverMapScreen({ route, navigation }) {
   // RENDER
   // ============================================================================
 
+  useEffect(() => {
+    if (loading || currentTarget) return;
+
+    const timer = setTimeout(() => {
+      navigation.replace("DriverTabs");
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [loading, currentTarget, navigation]);
+
   if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#06C168" />
-        <Text style={styles.loadingText}>Loading delivery...</Text>
-      </View>
-    );
+    return <DriverMapSheetLoadingSkeleton />;
   }
 
   if (!currentTarget) {
@@ -777,13 +961,42 @@ export default function DriverMapScreen({ route, navigation }) {
     );
   }
 
-  var translateY = sheetAnim.interpolate({
+  let translateY = sheetAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [400, 0],
   });
 
   return (
-    <View style={styles.container}>
+    <Animated.View
+      style={[
+        styles.container,
+        {
+          opacity: contentFadeAnim,
+          transform: [
+            {
+              translateY: contentFadeAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [8, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <StatusTransitionOverlay
+        visible={overlayVisible}
+        status={overlayStatus}
+        actionType={overlayActionType}
+        errorMessage={overlayErrorMsg}
+        onComplete={() => {
+          setOverlayVisible(false);
+          setOverlayStatus("processing");
+          setOverlayErrorMsg("");
+          overlayCallbackRef.current?.();
+          overlayCallbackRef.current = null;
+        }}
+      />
+
       {/* MAP */}
       {driverLocation && (
         <FreeMapView
@@ -800,14 +1013,14 @@ export default function DriverMapScreen({ route, navigation }) {
               coordinate: driverLocation,
               type: "driver",
               emoji: "\uD83D\uDE97",
+              heading: driverLocation?.heading || 0,
             },
             ...(targetForMap
               ? [
                   {
                     id: "target",
                     coordinate: targetForMap,
-                    type: mode === "pickup" ? "restaurant" : "customer",
-                    emoji: mode === "pickup" ? "\uD83C\uDFEA" : "\uD83D\uDCCD",
+                    type: "destination",
                   },
                 ]
               : []),
@@ -816,10 +1029,16 @@ export default function DriverMapScreen({ route, navigation }) {
             routeCoords.length > 1
               ? [
                   {
+                    id: "route-outline",
+                    coordinates: routeCoords,
+                    strokeColor: "#ffffff",
+                    strokeWidth: 14,
+                  },
+                  {
                     id: "route",
                     coordinates: routeCoords,
-                    strokeColor: mode === "pickup" ? "#EF4444" : "#06C168",
-                    strokeWidth: 4,
+                    strokeColor: "#2563eb",
+                    strokeWidth: 9,
                   },
                 ]
               : []
@@ -828,62 +1047,66 @@ export default function DriverMapScreen({ route, navigation }) {
         />
       )}
 
-      {/* TOP BADGES */}
-      <SafeAreaView style={styles.topContainer} edges={["top"]}>
-        <View style={styles.topBadges}>
+      <DriverScreenSection screenKey="DriverMap" sectionIndex={0}>
+        {/* TOP HEADER */}
+        <SafeAreaView style={styles.topContainer} edges={["top"]}>
           <Pressable
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.backButtonText}>{"← Back"}</Text>
+            <Text style={styles.backButtonText}>{"‹"}</Text>
           </Pressable>
-
-          <View
-            style={[
-              styles.modeBadge,
-              mode === "pickup" ? styles.pickupBadge : styles.deliverBadge,
-            ]}
-          >
-            <Text style={styles.modeBadgeText}>
-              {mode === "pickup" ? "🏪 PICKUP MODE" : "📦 DELIVERY MODE"}
-            </Text>
-          </View>
-
-          <View style={styles.trackingBadge}>
-            <View
-              style={[
-                styles.trackingDot,
-                isTracking && styles.trackingDotActive,
-              ]}
-            />
-            <Text style={styles.trackingText}>
-              {isTracking ? "Live" : "Off"}
-            </Text>
-          </View>
-        </View>
-
-        {routeInfo && (
-          <View style={styles.routeInfoCard}>
-            <Text style={styles.routeInfoText}>
-              {"📍 " +
-                routeInfo.distance_km +
-                " km  •  ⏱️ ~" +
-                routeInfo.duration_min +
-                " min"}
-            </Text>
-          </View>
-        )}
-      </SafeAreaView>
+        </SafeAreaView>
+      </DriverScreenSection>
 
       {/* NAVIGATE BUTTON */}
-      <Pressable style={styles.navigateBtn} onPress={openGoogleMaps}>
-        <Text style={styles.navigateBtnIcon}>🧭</Text>
+      <Pressable
+        style={[
+          styles.navigateBtn,
+          {
+            bottom: sheetExpanded
+              ? SCREEN_HEIGHT * 0.6 + mapTabBarHeight + 12
+              : SCREEN_HEIGHT * 0.4 + mapTabBarHeight + 12,
+          },
+        ]}
+        onPress={openGoogleMaps}
+      >
+        <Svg
+          width={17}
+          height={17}
+          viewBox="0 0 24 24"
+          style={styles.navigateBtnIcon}
+        >
+          <Path
+            d="M21 3 11 13"
+            stroke="#fff"
+            strokeWidth={2.4}
+            strokeLinecap="round"
+          />
+          <Path
+            d="m21 3-6.4 18-3.6-8-8-3.6L21 3Z"
+            stroke="#fff"
+            strokeWidth={2}
+            strokeLinejoin="round"
+            fill="none"
+          />
+        </Svg>
         <Text style={styles.navigateBtnText}>Navigate</Text>
       </Pressable>
 
       {/* RECENTER */}
       {userInteracted && (
-        <Pressable style={styles.recenterBtn} onPress={handleRecenter}>
+        <Pressable
+          style={[
+            styles.recenterBtn,
+            {
+              bottom: sheetExpanded
+                ? SCREEN_HEIGHT * 0.6 + mapTabBarHeight - 40
+                : SCREEN_HEIGHT * 0.4 + mapTabBarHeight + 8,
+            },
+          ]}
+          onPress={handleRecenter}
+        >
           <Text style={styles.recenterBtnIcon}>🎯</Text>
         </Pressable>
       )}
@@ -892,10 +1115,19 @@ export default function DriverMapScreen({ route, navigation }) {
       <Animated.View
         style={[
           styles.bottomSheet,
+          { bottom: mapTabBarHeight },
+          { height: sheetHeightAnim },
+          { paddingBottom: insets.bottom },
           { transform: [{ translateY: translateY }] },
         ]}
       >
-        <View style={styles.dragHandle} />
+        <View
+          style={styles.dragHandleTouch}
+          onTouchStart={handleSheetTouchStart}
+          onTouchEnd={handleSheetTouchEnd}
+        >
+          <View style={styles.dragHandle} />
+        </View>
 
         <ScrollView
           style={styles.sheetScroll}
@@ -906,8 +1138,9 @@ export default function DriverMapScreen({ route, navigation }) {
             <PickupDetails
               target={currentTarget}
               onPickedUp={handlePickedUp}
-              onCall={handleCall}
+              onNavigate={openGoogleMaps}
               updating={updating}
+              swipeTextStyle={styles.pickupSwipeText}
             />
           ) : (
             <DeliveryDetails
@@ -944,18 +1177,6 @@ export default function DriverMapScreen({ route, navigation }) {
                         {"#" + (p.order_number || p.delivery_id)}
                       </Text>
                     </View>
-                    <View style={styles.upcomingRight}>
-                      {p.distance_km ? (
-                        <Text style={styles.upcomingDist}>
-                          {p.distance_km + " km"}
-                        </Text>
-                      ) : null}
-                      {p.estimated_time_minutes ? (
-                        <Text style={styles.upcomingTime}>
-                          {p.estimated_time_minutes + " min"}
-                        </Text>
-                      ) : null}
-                    </View>
                   </Pressable>
                 );
               })}
@@ -988,18 +1209,6 @@ export default function DriverMapScreen({ route, navigation }) {
                         {"#" + (d.order_number || d.delivery_id)}
                       </Text>
                     </View>
-                    <View style={styles.upcomingRight}>
-                      {d.distance_km ? (
-                        <Text style={styles.upcomingDist}>
-                          {d.distance_km + " km"}
-                        </Text>
-                      ) : null}
-                      {d.estimated_time_minutes ? (
-                        <Text style={styles.upcomingTime}>
-                          {d.estimated_time_minutes + " min"}
-                        </Text>
-                      ) : null}
-                    </View>
                   </Pressable>
                 );
               })}
@@ -1023,7 +1232,80 @@ export default function DriverMapScreen({ route, navigation }) {
           <View style={{ height: 40 }} />
         </ScrollView>
       </Animated.View>
-    </View>
+
+      <View
+        style={[
+          styles.driverMapTabBar,
+          {
+            height: mapTabBarHeight,
+            paddingBottom: insets.bottom,
+          },
+        ]}
+      >
+        <TabBarItem
+          label="Home"
+          icon="home"
+          focused={false}
+          onPress={() =>
+            navigation.navigate("DriverTabs", {
+              screen: "Dashboard",
+            })
+          }
+        />
+        <TabBarItem
+          label="Available"
+          icon="list"
+          focused={false}
+          onPress={() =>
+            navigation.navigate("DriverTabs", {
+              screen: "Available",
+            })
+          }
+        />
+        <TabBarItem
+          label="Active"
+          icon="location"
+          focused={true}
+          onPress={() => {}}
+        />
+        <TabBarItem
+          label="Earnings"
+          icon="wallet"
+          focused={false}
+          onPress={() =>
+            navigation.navigate("DriverTabs", {
+              screen: "Earnings",
+            })
+          }
+        />
+        <TabBarItem
+          label="Payment"
+          icon="card"
+          focused={false}
+          onPress={() =>
+            navigation.navigate("DriverTabs", {
+              screen: "Payment",
+            })
+          }
+        />
+      </View>
+    </Animated.View>
+  );
+}
+
+function TabBarItem({ label, icon, focused, onPress }) {
+  return (
+    <Pressable style={styles.tabBarItem} onPress={onPress}>
+      <Ionicons
+        name={icon}
+        size={24}
+        color={focused ? "#06C168" : "#9ca3af"}
+        style={styles.tabBarIcon}
+      />
+      <Text style={[styles.tabBarLabel, focused && styles.tabBarLabelFocused]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -1031,9 +1313,15 @@ export default function DriverMapScreen({ route, navigation }) {
 // PICKUP DETAILS
 // ============================================================================
 
-function PickupDetails({ target, onPickedUp, onCall, updating }) {
-  var restaurant = target.restaurant || {};
-  var orderItems = target.order_items || target.items || [];
+function PickupDetails({
+  target,
+  onPickedUp,
+  onNavigate,
+  updating,
+  swipeTextStyle,
+}) {
+  let restaurant = target.restaurant || {};
+  let orderItems = target.order_items || target.items || [];
 
   return (
     <View style={styles.detailsWrap}>
@@ -1047,18 +1335,14 @@ function PickupDetails({ target, onPickedUp, onCall, updating }) {
         </View>
         <View style={styles.orderHeaderBadges}>
           {target.distance_km ? (
-            <View style={styles.distBadge}>
-              <Text style={styles.distBadgeText}>
-                {"📍 " + target.distance_km + " km"}
-              </Text>
-            </View>
+            <MetricBadge type="distance" value={target.distance_km} unit="km" />
           ) : null}
           {target.estimated_time_minutes ? (
-            <View style={styles.distBadge}>
-              <Text style={styles.distBadgeText}>
-                {"⏱ " + target.estimated_time_minutes + " min"}
-              </Text>
-            </View>
+            <MetricBadge
+              type="time"
+              value={target.estimated_time_minutes}
+              unit="min"
+            />
           ) : null}
         </View>
       </View>
@@ -1067,36 +1351,27 @@ function PickupDetails({ target, onPickedUp, onCall, updating }) {
       <View style={styles.infoCard}>
         <View style={styles.infoCardRow}>
           <View style={styles.infoCardMain}>
-            <Text style={styles.infoCardName}>
+            <Text style={[styles.infoCardName, styles.pickupInfoCardName]}>
               {restaurant.name || target.restaurantname || "Restaurant"}
             </Text>
             <Text style={styles.infoCardAddress}>
               {restaurant.address || target.restaurantaddress || "No address"}
             </Text>
           </View>
-          <View style={styles.infoCardActions}>
-            {restaurant.phone || target.restaurant_phone ? (
-              <Pressable
-                style={styles.iconBtn}
-                onPress={() =>
-                  onCall(restaurant.phone || target.restaurant_phone)
-                }
-              >
-                <Text style={styles.iconBtnText}>📞</Text>
-              </Pressable>
-            ) : null}
-          </View>
+          <Pressable style={styles.navigateIconBtn} onPress={onNavigate}>
+            <Text style={styles.navigateIconBtnText}>⌲</Text>
+          </Pressable>
         </View>
       </View>
 
       {/* Block 3: Order items */}
       {orderItems.length > 0 && (
         <View style={styles.itemsSection}>
-          <Text style={styles.itemsSectionTitle}>{"📦 Order Items"}</Text>
+          <Text style={styles.itemsSectionTitle}>ORDER ITEMS</Text>
           <View style={styles.itemsCard}>
             {orderItems.map(function (item, idx) {
-              var name = item.food_name || item.name || "Item";
-              var qty = item.quantity || 1;
+              let name = item.food_name || item.name || "Item";
+              let qty = item.quantity || 1;
               return (
                 <View
                   key={idx}
@@ -1123,22 +1398,13 @@ function PickupDetails({ target, onPickedUp, onCall, updating }) {
         </View>
       )}
 
-      {/* Action */}
-      <Pressable
-        style={[
-          styles.actionBtn,
-          styles.pickupActionBtn,
-          updating && styles.actionBtnDisabled,
-        ]}
-        onPress={onPickedUp}
+      <SwipeToDeliver
+        onSwipeComplete={onPickedUp}
         disabled={updating}
-      >
-        {updating ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.actionBtnText}>{"✅ Mark as Picked Up"}</Text>
-        )}
-      </Pressable>
+        text="SWIPE TO PICK UP"
+        textStyle={swipeTextStyle}
+        color="#06C168"
+      />
     </View>
   );
 }
@@ -1148,8 +1414,10 @@ function PickupDetails({ target, onPickedUp, onCall, updating }) {
 // ============================================================================
 
 function DeliveryDetails({ target, onDelivered, onCall, updating }) {
-  var customer = target.customer || {};
-  var delivItems = target.items || [];
+  let customer = target.customer || {};
+  let delivItems = target.items || [];
+  const existingProofUrl =
+    target.delivery_proof_url || target.proof_photo_url || null;
 
   return (
     <View style={styles.detailsWrap}>
@@ -1163,18 +1431,14 @@ function DeliveryDetails({ target, onDelivered, onCall, updating }) {
         </View>
         <View style={styles.orderHeaderBadges}>
           {target.distance_km ? (
-            <View style={styles.distBadge}>
-              <Text style={styles.distBadgeText}>
-                {"📍 " + target.distance_km + " km"}
-              </Text>
-            </View>
+            <MetricBadge type="distance" value={target.distance_km} unit="km" />
           ) : null}
           {target.estimated_time_minutes ? (
-            <View style={styles.distBadge}>
-              <Text style={styles.distBadgeText}>
-                {"⏱ " + target.estimated_time_minutes + " min"}
-              </Text>
-            </View>
+            <MetricBadge
+              type="time"
+              value={target.estimated_time_minutes}
+              unit="min"
+            />
           ) : null}
         </View>
       </View>
@@ -1183,14 +1447,19 @@ function DeliveryDetails({ target, onDelivered, onCall, updating }) {
       <View style={styles.infoCard}>
         <View style={styles.infoCardRow}>
           <View style={styles.infoCardMain}>
-            <Text style={styles.infoCardName}>
+            <Text style={[styles.infoCardName, styles.pickupInfoCardName]}>
               {customer.name || target.name || "Customer"}
             </Text>
             <Text style={styles.infoCardAddress}>
               {customer.address || target.delivery_location || "No address"}
             </Text>
             {customer.city ? (
-              <Text style={styles.infoCardCity}>{customer.city}</Text>
+              <Text style={styles.deliveryInfoCity}>{customer.city}</Text>
+            ) : null}
+            {customer.phone || target.phone ? (
+              <Text style={styles.infoCardPhoneText}>
+                {customer.phone || target.phone}
+              </Text>
             ) : null}
           </View>
           <View style={styles.infoCardActions}>
@@ -1199,7 +1468,7 @@ function DeliveryDetails({ target, onDelivered, onCall, updating }) {
                 style={styles.iconBtn}
                 onPress={() => onCall(customer.phone || target.phone)}
               >
-                <Text style={styles.iconBtnText}>📞</Text>
+                <Ionicons name="call" size={34} color="#16a34a" />
               </Pressable>
             ) : null}
           </View>
@@ -1221,11 +1490,11 @@ function DeliveryDetails({ target, onDelivered, onCall, updating }) {
       {/* Block 3: Order items */}
       {delivItems.length > 0 && (
         <View style={styles.itemsSection}>
-          <Text style={styles.itemsSectionTitle}>{"📦 Order Items"}</Text>
+          <Text style={styles.itemsSectionTitle}>ORDER ITEMS</Text>
           <View style={styles.itemsCard}>
             {delivItems.map(function (item, idx) {
-              var name = item.food_name || item.name || "Item";
-              var qty = item.quantity || 1;
+              let name = item.food_name || item.name || "Item";
+              let qty = item.quantity || 1;
               return (
                 <View
                   key={idx}
@@ -1257,7 +1526,7 @@ function DeliveryDetails({ target, onDelivered, onCall, updating }) {
         <View>
           <Text style={styles.totalAmountLabel}>TOTAL AMOUNT</Text>
           <Text style={styles.totalAmountValue}>
-            {"LKR " +
+            {"Rs. " +
               parseFloat(
                 (target.pricing && target.pricing.total) ||
                   parseFloat(target.total_amount || 0) +
@@ -1267,22 +1536,19 @@ function DeliveryDetails({ target, onDelivered, onCall, updating }) {
         </View>
       </View>
 
-      {/* Action */}
-      <Pressable
-        style={[
-          styles.actionBtn,
-          styles.deliverActionBtn,
-          updating && styles.actionBtnDisabled,
-        ]}
-        onPress={onDelivered}
+      <SwipeToDeliver
+        onSwipeComplete={onDelivered}
         disabled={updating}
-      >
-        {updating ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.actionBtnText}>{"✅ Mark as Delivered"}</Text>
-        )}
-      </Pressable>
+        text="SWIPE TO DELIVER"
+        textStyle={styles.pickupSwipeText}
+        color="#06C168"
+      />
+
+      <DeliveryProofUpload
+        deliveryId={target.delivery_id}
+        existingProofUrl={existingProofUrl}
+        onUploaded={() => {}}
+      />
     </View>
   );
 }
@@ -1291,7 +1557,7 @@ function DeliveryDetails({ target, onDelivered, onCall, updating }) {
 // STYLES
 // ============================================================================
 
-var SHADOW = Platform.select({
+let SHADOW = Platform.select({
   ios: {
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
@@ -1330,84 +1596,32 @@ var styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
+    paddingHorizontal: 12,
     zIndex: 10,
   },
-  topBadges: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    gap: 8,
-  },
   backButton: {
+    marginTop: 6,
+    width: 38,
+    height: 38,
     backgroundColor: "#fff",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    ...SHADOW,
-  },
-  backButtonText: { fontSize: 14, fontWeight: "700", color: "#374151" },
-  modeBadge: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    ...SHADOW,
-  },
-  pickupBadge: { backgroundColor: "#FEF3C7" },
-  deliverBadge: { backgroundColor: "#B8F0D0" },
-  modeBadgeText: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#111827",
-    textAlign: "center",
-  },
-  trackingBadge: {
-    flexDirection: "row",
+    borderRadius: 19,
+    justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#fff",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
     ...SHADOW,
   },
-  trackingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#D1D5DB",
-  },
-  trackingDotActive: { backgroundColor: "#06C168" },
-  trackingText: { fontSize: 12, fontWeight: "700", color: "#374151" },
-
-  // Route Info
-  routeInfoCard: {
-    marginHorizontal: 14,
-    marginTop: 8,
-    backgroundColor: "#fff",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 16,
-    ...SHADOW,
-  },
-  routeInfoText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#06C168",
-    textAlign: "center",
-  },
+  backButtonText: { fontSize: 28, lineHeight: 30, color: "#374151" },
 
   // Navigate / Recenter
   navigateBtn: {
     position: "absolute",
-    bottom: SCREEN_HEIGHT * 0.46 + 60,
-    right: 14,
+    bottom: SCREEN_HEIGHT * 0.4 + 12,
+    left: "50%",
+    transform: [{ translateX: -64 }],
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#3B82F6",
-    paddingHorizontal: 16,
-    paddingVertical: 11,
+    backgroundColor: "#2563eb",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderRadius: 25,
     gap: 6,
     zIndex: 10,
@@ -1417,7 +1631,7 @@ var styles = StyleSheet.create({
   navigateBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
   recenterBtn: {
     position: "absolute",
-    bottom: SCREEN_HEIGHT * 0.46 + 8,
+    bottom: SCREEN_HEIGHT * 0.4 + 8,
     right: 14,
     width: 48,
     height: 48,
@@ -1430,13 +1644,51 @@ var styles = StyleSheet.create({
   },
   recenterBtnIcon: { fontSize: 22 },
 
+  driverMapTabBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: 1,
+    borderTopColor: "#f3f4f6",
+    backgroundColor: "#fff",
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    paddingTop: 8,
+    paddingHorizontal: 0,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-around",
+    zIndex: 30,
+  },
+  tabBarItem: {
+    width: 65,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 4,
+  },
+  tabBarIcon: {
+    marginBottom: 4,
+  },
+  tabBarLabel: {
+    fontSize: 11,
+    color: "#9ca3af",
+    fontWeight: "600",
+  },
+  tabBarLabelFocused: {
+    color: "#06C168",
+    fontWeight: "700",
+  },
+
   // Bottom Sheet
   bottomSheet: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    height: SCREEN_HEIGHT * 0.46,
     backgroundColor: "#fff",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -1450,14 +1702,23 @@ var styles = StyleSheet.create({
       android: { elevation: 10 },
     }),
   },
+  bottomSheetCollapsed: {
+    height: SCREEN_HEIGHT * 0.4,
+  },
+  bottomSheetExpanded: {
+    height: SCREEN_HEIGHT * 0.6,
+  },
+  dragHandleTouch: {
+    paddingTop: 10,
+    paddingBottom: 10,
+    alignItems: "center",
+  },
   dragHandle: {
     width: 40,
     height: 4,
     backgroundColor: "#E5E7EB",
     borderRadius: 2,
     alignSelf: "center",
-    marginTop: 10,
-    marginBottom: 10,
   },
   sheetScroll: { flex: 1, paddingHorizontal: 18 },
 
@@ -1480,10 +1741,12 @@ var styles = StyleSheet.create({
 
   // Info Card
   infoCard: {
-    backgroundColor: "#F9FAFB",
-    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
     padding: 16,
     marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
   },
   infoCardHeader: {
     flexDirection: "row",
@@ -1499,16 +1762,19 @@ var styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   infoCardName: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#111827",
+    fontSize: 31,
+    fontWeight: "800",
+    color: "#089345",
     marginBottom: 4,
+  },
+  pickupInfoCardName: {
+    fontSize: 20,
   },
   infoCardAddress: {
     fontSize: 14,
-    color: "#6B7280",
+    color: "#111827",
     lineHeight: 20,
-    marginBottom: 10,
+    marginBottom: 2,
   },
   callBtn: {
     backgroundColor: "#3B82F6",
@@ -1538,15 +1804,21 @@ var styles = StyleSheet.create({
   // Items
   itemsSection: { marginBottom: 14 },
   itemsSectionTitle: {
-    fontSize: 15,
+    fontSize: 12,
     fontWeight: "700",
-    color: "#374151",
+    color: "#6B7280",
+    letterSpacing: 0.6,
     marginBottom: 8,
   },
-  itemsCard: { backgroundColor: "#F9FAFB", borderRadius: 14, padding: 14 },
+  itemsCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+  },
   itemRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8 },
   itemRowBorder: { borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  itemQty: { fontSize: 14, fontWeight: "700", color: "#06C168", width: 36 },
   itemNameText: { flex: 1, fontSize: 14, color: "#374151" },
   itemPrice: { fontSize: 14, fontWeight: "700", color: "#111827" },
 
@@ -1639,12 +1911,12 @@ var styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#F9FAFB",
-    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
     padding: 14,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "#D1D5DB",
   },
   orderHeaderLabel: {
     fontSize: 11,
@@ -1653,41 +1925,66 @@ var styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 2,
   },
-  orderHeaderValue: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  orderHeaderValue: { fontSize: 16, fontWeight: "800", color: "#111827" },
   orderHeaderBadges: { flexDirection: "row", gap: 6 },
-  distBadge: {
-    backgroundColor: "#B8F0D0",
+  metricBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#DCFCE7",
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
   },
-  distBadgeText: { fontSize: 12, fontWeight: "700", color: "#04553C" },
+  metricBadgeText: { fontSize: 12, fontWeight: "700", color: "#065F46" },
 
   // Info card row layout
   infoCardRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "flex-start",
+    justifyContent: "space-between",
   },
   infoCardMain: { flex: 1, marginRight: 10 },
-  infoCardCity: { fontSize: 13, color: "#9CA3AF", marginTop: 2 },
-  infoCardActions: { gap: 8 },
+  infoCardCity: { fontSize: 22, color: "#6B7280", marginTop: 2 },
+  deliveryInfoCity: { fontSize: 14, color: "#6B7280", marginTop: 2 },
+  infoCardPhoneText: {
+    marginTop: 4,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#16a34a",
+  },
+  infoCardActions: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
+  },
+  navigateIconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navigateIconBtnText: {
+    fontSize: 22,
+    color: "#DC143C",
+    lineHeight: 24,
+  },
   iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#06C168",
+    height: 48,
+    width: 48,
+    borderRadius: 24,
     justifyContent: "center",
     alignItems: "center",
   },
-  iconBtnText: { fontSize: 18 },
+  iconBtnText: { fontSize: 28, color: "#16a34a", lineHeight: 30 },
 
   // Item layout
   itemQtyBadge: {
     width: 32,
     height: 32,
-    borderRadius: 10,
-    backgroundColor: "#B8F0D0",
+    borderRadius: 6,
+    backgroundColor: "#06C168",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 10,
@@ -1695,14 +1992,21 @@ var styles = StyleSheet.create({
   itemDetails: { flex: 1 },
   itemSize: { fontSize: 12, color: "#9CA3AF", marginTop: 2 },
 
+  itemQty: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
+
+  pickupSwipeText: {
+    fontSize: 16,
+    letterSpacing: 0.2,
+  },
+
   // Total amount card
   totalAmountCard: {
-    backgroundColor: "#F9FAFB",
-    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "#D1D5DB",
   },
   totalAmountLabel: {
     fontSize: 11,

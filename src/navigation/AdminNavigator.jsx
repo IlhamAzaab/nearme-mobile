@@ -134,7 +134,7 @@ export default function AdminNavigator() {
       initialRouteName={initialRoute}
       screenOptions={{
         headerShown: false,
-        animation: "slide_from_right",
+        animation: "fade",
       }}
     >
       {/* Onboarding Screens - shown first for new admins */}

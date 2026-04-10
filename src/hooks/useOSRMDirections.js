@@ -19,7 +19,7 @@ const useOSRMDirections = () => {
       setLoading(true);
       setError(null);
 
-      const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson&steps=true`;
+      const url = `https://router.project-osrm.org/route/v1/foot/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson&steps=true`;
 
       const response = await fetch(url);
       const data = await response.json();

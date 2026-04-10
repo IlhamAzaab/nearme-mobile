@@ -28,6 +28,83 @@ const MAX_RETRIES = 3;
 
 // Base backoff delay (ms) — doubles each retry
 const BASE_BACKOFF_DELAY = 5000;
+const REQUEST_TIMEOUT_MS = 25000;
+const SLOW_ENDPOINT_TIMEOUT_MS = 65000;
+const DEFAULT_TRANSIENT_RETRIES = 1;
+const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 2000;
+
+const SLOW_ENDPOINTS = new Set([
+  "/driver/deliveries/available/v2",
+  "/driver/deliveries/pickups",
+]);
+
+const isTimeoutOrNetworkError = (error) => {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.name === "TimeoutError" ||
+    message.includes("request timeout") ||
+    message.includes("network request failed") ||
+    message.includes("failed to fetch")
+  );
+};
+
+async function fetchWithTimeout(
+  url,
+  options = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+) {
+  const controller = new AbortController();
+  const externalSignal = options.signal;
+  let timedOut = false;
+
+  let timeoutId;
+  const abortFromExternal = () => controller.abort();
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener("abort", abortFromExternal, {
+        once: true,
+      });
+    }
+  }
+
+  try {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError" && timedOut) {
+      const timeoutError = new Error(`Request timeout after ${timeoutMs}ms`);
+      timeoutError.name = "TimeoutError";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", abortFromExternal);
+    }
+  }
+}
+
+function getTimeoutForEndpoint(endpointKey, timeoutMs) {
+  if (typeof timeoutMs === "number" && timeoutMs > 0) {
+    return timeoutMs;
+  }
+
+  if (SLOW_ENDPOINTS.has(endpointKey)) {
+    return SLOW_ENDPOINT_TIMEOUT_MS;
+  }
+
+  return REQUEST_TIMEOUT_MS;
+}
 
 /**
  * Extract endpoint key from URL (strips query params for throttling)
@@ -70,6 +147,9 @@ export async function rateLimitedFetch(url, options = {}, config = {}) {
     minGap = MIN_REQUEST_GAP,
     deduplicate = true,
     retryOn429 = true,
+    timeoutMs,
+    transientRetries = DEFAULT_TRANSIENT_RETRIES,
+    transientRetryDelayMs = DEFAULT_TRANSIENT_RETRY_DELAY_MS,
   } = config;
 
   const endpointKey = getEndpointKey(url);
@@ -117,7 +197,30 @@ export async function rateLimitedFetch(url, options = {}, config = {}) {
   const executeRequest = async (attempt = 0) => {
     lastRequestTime.set(endpointKey, Date.now());
 
-    const response = await fetch(url, options);
+    let response;
+    try {
+      response = await fetchWithTimeout(
+        url,
+        options,
+        getTimeoutForEndpoint(endpointKey, timeoutMs),
+      );
+    } catch (error) {
+      if (isTimeoutOrNetworkError(error) && attempt < transientRetries) {
+        const retryDelay =
+          transientRetryDelayMs + Math.floor(Math.random() * 350);
+        console.warn(
+          `[RateLimiter] ⚠️ transient error on ${endpointKey}, retrying in ${Math.round(retryDelay / 1000)}s`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        return executeRequest(attempt + 1);
+      }
+
+      if (error?.name === "TimeoutError") {
+        throw new Error(`Request timeout for ${endpointKey}`);
+      }
+
+      throw error;
+    }
 
     if (response.status === 429 && retryOn429 && attempt < MAX_RETRIES) {
       // Parse Retry-After header, or use exponential backoff

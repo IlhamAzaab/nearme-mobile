@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import AuthNavigator from './AuthNavigator';
-import CustomerStack from './CustomerStack';
-import DriverNavigator from './DriverNavigator';
-import ManagerNavigator from './ManagerNavigator';
-import AdminNavigator from './AdminNavigator';
-import SplashScreen from '../screens/SplashScreen';
-import { useAuth } from '../app/providers/AuthProvider';
+import React, { useState, useEffect } from "react";
+import AuthNavigator from "./AuthNavigator";
+import CustomerStack from "./CustomerStack";
+import DriverNavigator from "./DriverNavigator";
+import ManagerNavigator from "./ManagerNavigator";
+import AdminNavigator from "./AdminNavigator";
+import SplashScreen from "../screens/SplashScreen";
+import { useAuth } from "../app/providers/AuthProvider";
 
-const SPLASH_MIN_MS = 2200; // show splash for at least 2.2s (covers animation)
+const SPLASH_MIN_MS = 900; // shorter splash for faster startup on low-end devices
 
 export default function RootNavigator() {
   const { isAuthenticated, userRole, isLoading } = useAuth();
@@ -26,13 +26,13 @@ export default function RootNavigator() {
   // Handle routing based on authentication and user role
   if (isAuthenticated) {
     switch (userRole) {
-      case 'customer':
+      case "customer":
         return <CustomerStack />;
-      case 'driver':
+      case "driver":
         return <DriverNavigator />;
-      case 'manager':
+      case "manager":
         return <ManagerNavigator />;
-      case 'admin':
+      case "admin":
         return <AdminNavigator />;
       default:
         // If role is unknown but authenticated, default to Auth or a generic error

@@ -62,8 +62,20 @@ const AdminPaymentsScreen = () => {
         fetch(`${API_URL}/manager/admin-payments/summary`, { headers }),
         fetch(`${API_URL}/manager/admin-payments/restaurants`, { headers }),
       ]);
-      const summaryData = await summaryRes.json();
-      const restaurantsData = await restaurantsRes.json();
+      const summaryData = await summaryRes.json().catch(() => ({}));
+      const restaurantsData = await restaurantsRes.json().catch(() => ({}));
+
+      if (!summaryRes.ok || !restaurantsRes.ok) {
+        const status = !summaryRes.ok
+          ? summaryRes.status
+          : restaurantsRes.status;
+        const message =
+          summaryData?.message ||
+          restaurantsData?.message ||
+          `Failed to fetch admin payments (${status}).`;
+        throw new Error(message);
+      }
+
       if (summaryData.success) setSummary(summaryData.summary);
       if (restaurantsData.success) setRestaurants(restaurantsData.restaurants);
     } catch (error) {

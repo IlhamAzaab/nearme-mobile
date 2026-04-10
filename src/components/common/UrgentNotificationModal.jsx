@@ -1,13 +1,7 @@
 /**
  * UrgentNotificationModal
- *
- * Full-screen overlay for urgent notifications (new order / new delivery).
- * Shows Accept / Reject buttons. When Reject is tapped (for orders), an
- * inline reason input slides in so the admin can type a reason before
- * submitting — the reason is stored in the orders table.
  */
-
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -25,6 +19,37 @@ import alarmService from "../../services/alarmService";
 
 const { width } = Dimensions.get("window");
 
+const parseAmount = (value) => {
+  const num = Number.parseFloat(value);
+  return Number.isNaN(num) ? 0 : num;
+};
+
+const getOrderItems = (data) => {
+  if (Array.isArray(data?.itemsDetails) && data.itemsDetails.length > 0) {
+    return data.itemsDetails.map((item) => ({
+      quantity: Number(item.quantity || 1),
+      foodName: item.food_name || item.foodName || "Item",
+      size: item.size || "regular",
+      lineTotal: parseAmount(item.total_price ?? item.totalPrice),
+    }));
+  }
+
+  if (typeof data?.itemsSummary === "string" && data.itemsSummary.trim()) {
+    return data.itemsSummary
+      .split(",")
+      .map((raw) => raw.trim())
+      .filter(Boolean)
+      .map((entry) => ({
+        quantity: 1,
+        foodName: entry,
+        size: "regular",
+        lineTotal: 0,
+      }));
+  }
+
+  return [];
+};
+
 export default function UrgentNotificationModal({
   visible,
   title,
@@ -34,107 +59,105 @@ export default function UrgentNotificationModal({
   onReject,
   onDismiss,
 }) {
+  const slideAnim = useRef(new Animated.Value(-220)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const slideAnim = useRef(new Animated.Value(-400)).current;
   const pulseRef = useRef(null);
 
-  // Rejection reason state (only used for new_order)
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const isNewOrder =
+    data?.type === "new_order" || data?.type === "order_reminder";
+  const items = useMemo(() => getOrderItems(data), [data]);
+
+  const totalPrice = useMemo(() => {
+    const directAmount = parseAmount(
+      data?.restaurantTotal ?? data?.totalAmount ?? data?.restaurant_total,
+    );
+    if (directAmount > 0) return directAmount;
+
+    const sum = items.reduce(
+      (acc, item) => acc + parseAmount(item.lineTotal),
+      0,
+    );
+    if (sum > 0) return sum;
+
+    const amountFromBody = String(body || "").match(/Rs\.?\s*([\d,.]+)/i);
+    if (amountFromBody?.[1]) {
+      return parseAmount(amountFromBody[1].replace(/,/g, ""));
+    }
+
+    return 0;
+  }, [body, data, items]);
+
   useEffect(() => {
     if (visible) {
-      // Reset reject state each time modal opens
       setShowRejectInput(false);
       setRejectReason("");
       setSubmitting(false);
 
-      // Start alarm sound (idempotent — no-op if already playing)
       alarmService.start();
 
-      // Slide in from top
       Animated.spring(slideAnim, {
         toValue: 0,
         friction: 8,
-        tension: 50,
+        tension: 62,
         useNativeDriver: true,
       }).start();
 
-      // Pulse animation
       pulseRef.current = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 1.04,
-            duration: 600,
+            toValue: 1.02,
+            duration: 620,
             useNativeDriver: true,
           }),
           Animated.timing(pulseAnim, {
             toValue: 1,
-            duration: 600,
+            duration: 620,
             useNativeDriver: true,
           }),
         ]),
       );
       pulseRef.current.start();
 
-      // Repeating vibration as tactile complement to the audio
-      Vibration.vibrate([0, 500, 200, 500, 200, 500], true);
+      Vibration.vibrate([0, 450, 220, 450], true);
 
       return () => {
         pulseRef.current?.stop();
         Vibration.cancel();
-        // Ensure alarm stops if modal unmounts before accept/reject
         alarmService.stop();
       };
-    } else {
-      slideAnim.setValue(-400);
-      pulseRef.current?.stop();
-      Vibration.cancel();
-      // Safety net: ensure alarm is silenced whenever modal hides
-      alarmService.stop();
     }
-  }, [visible]);
+
+    slideAnim.setValue(-220);
+    pulseRef.current?.stop();
+    Vibration.cancel();
+    alarmService.stop();
+  }, [pulseAnim, slideAnim, visible]);
 
   if (!visible) return null;
 
-  const isNewOrder =
-    data?.type === "new_order" || data?.type === "order_reminder";
-  const isNewDelivery = data?.type === "new_delivery";
-  const hasTip = data?.tipAmount && parseFloat(data.tipAmount) > 0;
+  const silenceAlarmNow = () => {
+    Vibration.cancel();
+    alarmService.stop();
+  };
 
-  const icon = isNewOrder ? "🔔" : isNewDelivery ? "🚗" : "📢";
-  const accentColor = isNewOrder
-    ? "#06C168"
-    : isNewDelivery
-      ? "#3b82f6"
-      : "#f59e0b";
-
-  // ── Dismiss (X button) - stop alarm but leave order status unchanged ────
   const handleDismiss = () => {
     silenceAlarmNow();
     onDismiss?.();
   };
 
-  // ── Shared: immediately silence alarm + vibration on any user action ────
-  const silenceAlarmNow = () => {
-    Vibration.cancel();
-    alarmService.stop(); // fire-and-forget — stops audio immediately
-  };
-
-  // ── Reject button pressed ─────────────────────────────────────
   const handleRejectPress = () => {
     silenceAlarmNow();
     if (isNewOrder) {
-      // Show inline reason input
       setShowRejectInput(true);
-    } else {
-      // Driver just dismisses — no reason needed
-      onReject?.(data, null);
+      return;
     }
+    onReject?.(data, null);
   };
 
-  // ── Submit rejection reason ───────────────────────────────────
   const handleSubmitReject = async () => {
     if (!rejectReason.trim() || submitting) return;
     silenceAlarmNow();
@@ -143,163 +166,145 @@ export default function UrgentNotificationModal({
     setSubmitting(false);
   };
 
+  const orderTitle =
+    (typeof title === "string" ? title.trim() : "") || "New Order Arrived!";
+
   return (
     <KeyboardAvoidingView
       style={styles.overlay}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <Animated.View
         style={[
-          styles.modal,
+          styles.card,
           {
             transform: [{ translateY: slideAnim }, { scale: pulseAnim }],
-            borderColor: accentColor,
           },
         ]}
       >
-        {/* X Dismiss Button */}
         <TouchableOpacity
           style={styles.dismissButton}
           onPress={handleDismiss}
-          activeOpacity={0.7}
+          activeOpacity={0.75}
         >
-          <Text style={styles.dismissButtonText}>✕</Text>
+          <Text style={styles.dismissText}>x</Text>
         </TouchableOpacity>
 
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Icon */}
-          <View
-            style={[styles.iconCircle, { backgroundColor: accentColor + "20" }]}
-          >
-            <Text style={styles.icon}>{icon}</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.headerLeft}>
+            <Text style={styles.titleText}>{orderTitle}</Text>
+            {data?.orderNumber ? (
+              <Text style={styles.orderNoText}>#{data.orderNumber}</Text>
+            ) : null}
           </View>
 
-          {/* Title & Body */}
-          <Text style={styles.title}>{title || "Urgent Notification"}</Text>
-          <Text style={styles.body}>{body || ""}</Text>
+          <View style={styles.headerPriceWrap}>
+            <Text style={styles.priceLabel}>PRICE</Text>
+            <Text style={styles.priceValue}>Rs.{totalPrice.toFixed(2)}</Text>
+          </View>
+        </View>
 
-          {/* Date and Time - only for orders */}
-          {isNewOrder && (data?.orderDate || data?.orderTime) && (
-            <View style={styles.dateTimeContainer}>
-              <View style={styles.dateTimeRow}>
-                <Text style={styles.dateTimeIcon}>📅</Text>
-                <Text style={styles.dateTimeText}>
-                  {data.orderDate} at {data.orderTime}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {isNewOrder && data?.waitingMinutes && (
-            <View style={styles.waitingContainer}>
-              <Text style={styles.waitingText}>
-                ⏰ Waiting {Number(data.waitingMinutes)} min
-              </Text>
-            </View>
-          )}
-
-          {/* Food items list */}
-          {isNewOrder && data?.itemsSummary ? (
-            <View style={styles.itemsContainer}>
-              <Text style={styles.itemsHeader}>🍽️ Items Ordered</Text>
-              {data.itemsSummary.split(",").map((item, i) => (
-                <View key={i} style={styles.itemRow}>
-                  <Text style={styles.itemBullet}>•</Text>
-                  <Text style={styles.itemText}>{item.trim()}</Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-
-          {/* Tip badge */}
-          {hasTip && (
-            <View style={[styles.tipBadge, { backgroundColor: "#f59e0b20" }]}>
-              <Text style={styles.tipText}>
-                💰 Tip: Rs. {parseFloat(data.tipAmount).toFixed(2)}
-              </Text>
-            </View>
-          )}
-
-          {/* ── Inline rejection reason ── */}
-          {showRejectInput ? (
-            <View style={styles.reasonBox}>
-              <Text style={styles.reasonLabel}>
-                Reason for rejection <Text style={styles.required}>*</Text>
-              </Text>
-              <TextInput
-                style={styles.reasonInput}
-                placeholder="e.g. Item not available, restaurant closed..."
-                placeholderTextColor="#9ca3af"
-                value={rejectReason}
-                onChangeText={setRejectReason}
-                multiline
-                numberOfLines={3}
-                autoFocus
-                textAlignVertical="top"
-              />
-              <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  style={[styles.button, styles.cancelReasonButton]}
-                  onPress={() => {
-                    setShowRejectInput(false);
-                    setRejectReason("");
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.cancelReasonText}>← Back</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.button,
-                    styles.submitRejectButton,
-                    (!rejectReason.trim() || submitting) &&
-                      styles.disabledButton,
-                  ]}
-                  onPress={handleSubmitReject}
-                  activeOpacity={0.7}
-                  disabled={!rejectReason.trim() || submitting}
-                >
-                  <Text style={styles.submitRejectText}>
-                    {submitting ? "Submitting..." : "Submit Rejection"}
+        <ScrollView
+          style={styles.itemsArea}
+          contentContainerStyle={styles.itemsAreaContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {items.length > 0 ? (
+            items.map((item, index) => {
+              const qty = Number(item.quantity || 1);
+              const sizeText =
+                item.size && item.size !== "regular" ? ` (${item.size})` : "";
+              return (
+                <View key={`${item.foodName}-${index}`} style={styles.itemRow}>
+                  <Text style={styles.itemText} numberOfLines={2}>
+                    {qty}x {item.foodName}
+                    {sizeText}
                   </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+                  {item.lineTotal > 0 ? (
+                    <Text style={styles.itemAmount}>
+                      Rs.{item.lineTotal.toFixed(2)}
+                    </Text>
+                  ) : null}
+                </View>
+              );
+            })
           ) : (
-            /* ── Accept / Reject buttons ── */
-            <View style={styles.buttonRow}>
+            <Text style={styles.bodyText}>
+              {body || "You have a new order."}
+            </Text>
+          )}
+
+          {data?.waitingMinutes ? (
+            <Text style={styles.waitingText}>
+              Waiting {Number(data.waitingMinutes)} min
+            </Text>
+          ) : null}
+        </ScrollView>
+
+        {showRejectInput ? (
+          <View style={styles.reasonWrap}>
+            <Text style={styles.reasonLabel}>Reason for rejection *</Text>
+            <TextInput
+              style={styles.reasonInput}
+              value={rejectReason}
+              onChangeText={setRejectReason}
+              placeholder="Out of stock, item unavailable..."
+              placeholderTextColor="#9ca3af"
+              multiline
+              numberOfLines={3}
+              autoFocus
+              textAlignVertical="top"
+            />
+
+            <View style={styles.actionsRow}>
               <TouchableOpacity
-                style={[styles.button, styles.rejectButton]}
-                onPress={handleRejectPress}
-                activeOpacity={0.7}
+                style={styles.secondaryButton}
+                onPress={() => {
+                  setShowRejectInput(false);
+                  setRejectReason("");
+                }}
+                activeOpacity={0.8}
               >
-                <Text style={styles.rejectButtonText}>
-                  {isNewOrder ? "✕ Reject" : "✕ Decline"}
-                </Text>
+                <Text style={styles.secondaryButtonText}>Back</Text>
               </TouchableOpacity>
+
               <TouchableOpacity
                 style={[
-                  styles.button,
-                  styles.acceptButton,
-                  { backgroundColor: accentColor },
+                  styles.primaryButton,
+                  (!rejectReason.trim() || submitting) && styles.disabledButton,
                 ]}
-                onPress={() => {
-                  silenceAlarmNow();
-                  onAccept?.(data);
-                }}
-                activeOpacity={0.7}
+                onPress={handleSubmitReject}
+                activeOpacity={0.8}
+                disabled={!rejectReason.trim() || submitting}
               >
-                <Text style={styles.acceptButtonText}>
-                  {isNewOrder ? "✓ Accept Order" : "✓ Accept"}
+                <Text style={styles.primaryButtonText}>
+                  {submitting ? "Rejecting..." : "Confirm Reject"}
                 </Text>
               </TouchableOpacity>
             </View>
-          )}
-        </ScrollView>
+          </View>
+        ) : (
+          <View style={styles.actionsRow}>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={() => {
+                silenceAlarmNow();
+                onAccept?.(data);
+              }}
+              activeOpacity={0.82}
+            >
+              <Text style={styles.primaryButtonText}>Accept Order</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={handleRejectPress}
+              activeOpacity={0.82}
+            >
+              <Text style={styles.secondaryButtonText}>Reject</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </Animated.View>
     </KeyboardAvoidingView>
   );
@@ -308,225 +313,174 @@ export default function UrgentNotificationModal({
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.75)",
     justifyContent: "flex-start",
     alignItems: "center",
-    paddingTop: 60,
+    paddingTop: 52,
+    paddingHorizontal: 14,
+    backgroundColor: "rgba(0,0,0,0.35)",
     zIndex: 9999,
     elevation: 9999,
   },
-  modal: {
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    width: width - 48,
-    maxWidth: 420,
-    borderWidth: 2,
+  card: {
+    width: Math.min(width - 20, 420),
+    backgroundColor: "#ffffff",
+    borderRadius: 14,
+    borderWidth: 1.8,
+    borderColor: "#06C168",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 20,
-    maxHeight: "85%",
+    shadowOpacity: 0.18,
+    shadowRadius: 15,
+    elevation: 16,
   },
   dismissButton: {
     position: "absolute",
-    top: 12,
-    right: 12,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(0, 0, 0, 0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
-  dismissButtonText: {
-    fontSize: 18,
-    color: "#6b7280",
-    fontWeight: "600",
-  },
-  scrollContent: {
-    padding: 24,
-    alignItems: "center",
-  },
-  iconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 14,
-  },
-  icon: { fontSize: 36 },
-  title: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#1f2937",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  body: {
-    fontSize: 15,
-    color: "#4b5563",
-    textAlign: "center",
-    lineHeight: 22,
-    marginBottom: 14,
-  },
-  itemsContainer: {
-    width: "100%",
-    backgroundColor: "#f9fafb",
+    top: 6,
+    right: 8,
+    width: 24,
+    height: 24,
     borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 5,
   },
-  itemsHeader: {
+  dismissText: {
+    fontSize: 15,
+    color: "#6b7280",
+    fontWeight: "700",
+  },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingRight: 22,
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  titleText: {
+    fontSize: 22,
+    lineHeight: 25,
+    color: "#111827",
+    fontWeight: "800",
+  },
+  orderNoText: {
+    marginTop: 3,
+    color: "#06C168",
     fontSize: 13,
     fontWeight: "700",
-    color: "#374151",
-    marginBottom: 6,
+  },
+  headerPriceWrap: {
+    alignItems: "flex-end",
+  },
+  priceLabel: {
+    fontSize: 9,
+    letterSpacing: 0.8,
+    fontWeight: "700",
+    color: "#9ca3af",
+  },
+  priceValue: {
+    marginTop: 2,
+    fontSize: 33,
+    lineHeight: 34,
+    fontWeight: "800",
+    color: "#06C168",
+  },
+  itemsArea: {
+    marginTop: 8,
+    maxHeight: 150,
+  },
+  itemsAreaContent: {
+    paddingRight: 3,
+    gap: 6,
   },
   itemRow: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 3,
-  },
-  itemBullet: {
-    fontSize: 14,
-    color: "#6b7280",
-    marginRight: 6,
-    lineHeight: 20,
+    gap: 8,
   },
   itemText: {
-    fontSize: 14,
-    color: "#374151",
     flex: 1,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#4b5563",
+    fontWeight: "500",
   },
-  tipBadge: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginBottom: 14,
+  itemAmount: {
+    fontSize: 13,
+    color: "#06C168",
+    fontWeight: "700",
   },
-  tipText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#f59e0b",
-  },
-  // ── Date and Time ──────────────────────────────────────────────
-  dateTimeContainer: {
-    width: "100%",
-    backgroundColor: "#eff6ff",
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-  },
-  dateTimeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dateTimeIcon: {
-    fontSize: 16,
-    marginRight: 8,
-  },
-  dateTimeText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#1e40af",
-  },
-  waitingContainer: {
-    width: "100%",
-    backgroundColor: "#fffbeb",
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#fde68a",
+  bodyText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#4b5563",
   },
   waitingText: {
-    fontSize: 14,
+    marginTop: 4,
+    fontSize: 12,
     fontWeight: "700",
     color: "#b45309",
-    textAlign: "center",
   },
-  // ── Reason input ──────────────────────────────────────────────
-  reasonBox: {
-    width: "100%",
-    marginTop: 4,
+  reasonWrap: {
+    marginTop: 10,
   },
   reasonLabel: {
-    fontSize: 14,
+    fontSize: 12,
+    color: "#4b5563",
+    marginBottom: 6,
     fontWeight: "600",
-    color: "#374151",
-    marginBottom: 8,
   },
-  required: { color: "#ef4444" },
   reasonInput: {
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#d1d5db",
     borderRadius: 10,
-    padding: 12,
-    fontSize: 14,
-    color: "#1f2937",
-    minHeight: 80,
+    minHeight: 72,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: "#111827",
     backgroundColor: "#f9fafb",
-    marginBottom: 12,
   },
-  cancelReasonButton: {
-    backgroundColor: "#f3f4f6",
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-  },
-  cancelReasonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#374151",
-  },
-  submitRejectButton: {
-    backgroundColor: "#ef4444",
-  },
-  submitRejectText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  disabledButton: { opacity: 0.4 },
-  // ── Action buttons ────────────────────────────────────────────
-  buttonRow: {
+  actionsRow: {
+    marginTop: 10,
     flexDirection: "row",
-    gap: 10,
-    width: "100%",
+    gap: 9,
   },
-  button: {
+  primaryButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
+    backgroundColor: "#06C168",
+    borderRadius: 11,
+    minHeight: 40,
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: 10,
   },
-  rejectButton: {
-    backgroundColor: "#fef2f2",
-    borderWidth: 1,
-    borderColor: "#ef4444",
+  primaryButtonText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "800",
   },
-  rejectButtonText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#ef4444",
+  secondaryButton: {
+    minWidth: 92,
+    borderRadius: 11,
+    borderWidth: 1.4,
+    borderColor: "#06C168",
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    minHeight: 40,
   },
-  acceptButton: {
-    shadowColor: "#06C168",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  acceptButtonText: {
-    fontSize: 15,
+  secondaryButtonText: {
+    color: "#06C168",
+    fontSize: 16,
     fontWeight: "700",
-    color: "#fff",
+  },
+  disabledButton: {
+    opacity: 0.45,
   },
 });

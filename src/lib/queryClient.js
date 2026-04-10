@@ -23,8 +23,8 @@ export const mobileQueryClient = new QueryClient({
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
       refetchOnMount: true,
-      refetchInterval: () => 30 * 1000,
-      refetchIntervalInBackground: true,
+      refetchInterval: false,
+      refetchIntervalInBackground: false,
     },
     mutations: {
       retry: (failureCount, error) => {

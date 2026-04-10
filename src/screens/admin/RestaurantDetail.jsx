@@ -10,6 +10,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -65,6 +66,7 @@ export default function RestaurantDetail() {
   const [editing, setEditing] = useState(false);
   const [uploading, setUploading] = useState(null); // 'logo' | 'cover' | null
   const [locating, setLocating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [formData, setFormData] = useState({
     restaurant_name: "",
     address: "",
@@ -170,7 +172,6 @@ export default function RestaurantDetail() {
 
       if (!result.canceled && result.assets[0]) {
         setUploading(imageType);
-        setError(null);
 
         try {
           const token = await getAccessToken();
@@ -213,6 +214,15 @@ export default function RestaurantDetail() {
 
   const handleSave = async () => {
     saveRestaurantMutation.mutate(formData);
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await restaurantQuery.refetch();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const handleCancel = () => {
@@ -389,7 +399,7 @@ export default function RestaurantDetail() {
             <Text style={styles.errorText}>{error}</Text>
             <TouchableOpacity
               style={styles.retryButton}
-              onPress={fetchRestaurant}
+              onPress={() => restaurantQuery.refetch()}
             >
               <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
@@ -434,6 +444,14 @@ export default function RestaurantDetail() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing || restaurantQuery.isFetching}
+              onRefresh={onRefresh}
+              colors={["#06C168"]}
+              tintColor="#06C168"
+            />
+          }
         >
           {/* Edit Mode Actions */}
           {editing && (
@@ -834,11 +852,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
     borderWidth: 1,
     borderColor: "#dcfce7",
   },
@@ -949,11 +962,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderRadius: 16,
     padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
   },
   mapHeader: {
     marginBottom: 12,

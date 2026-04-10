@@ -23,13 +23,17 @@ const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 // ============================================================================
 async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
+    const url = `https://router.project-osrm.org/route/v1/foot/${lon1},${lat1};${lon2},${lat2}?overview=false`;
     const res = await fetch(url);
     const data = await res.json();
 
     if (data.code === "Ok" && data.routes?.length) {
       const r = data.routes[0];
-      return { success: true, distance: r.distance / 1000, duration: r.duration / 60 };
+      return {
+        success: true,
+        distance: r.distance / 1000,
+        duration: r.duration / 60,
+      };
     }
     return { success: false, error: "No route found" };
   } catch (e) {
@@ -74,7 +78,6 @@ export default function CheckoutScreen({ route, navigation }) {
 
   // Order
   const [placing, setPlacing] = useState(false);
-
 
   const MINIMUM_SUBTOTAL = 300;
   const PRIORITY_FEE = 49;
@@ -125,7 +128,7 @@ export default function CheckoutScreen({ route, navigation }) {
         Alert.alert(
           "Permission Denied",
           "Please enable location permission to use this feature",
-          [{ text: "OK" }]
+          [{ text: "OK" }],
         );
         setFetchingLocation(false);
         return;
@@ -145,11 +148,14 @@ export default function CheckoutScreen({ route, navigation }) {
 
       // Animate map to new location
       if (mapRef.current) {
-        mapRef.current.animateToRegion({
-          ...newPosition,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        }, 1000);
+        mapRef.current.animateToRegion(
+          {
+            ...newPosition,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+          },
+          1000,
+        );
       }
 
       // Try to get address from coordinates (reverse geocoding)
@@ -165,7 +171,7 @@ export default function CheckoutScreen({ route, navigation }) {
           if (geocode.street) addressParts.push(geocode.street);
           if (geocode.district) addressParts.push(geocode.district);
           if (geocode.subregion) addressParts.push(geocode.subregion);
-          
+
           const newAddress = addressParts.join(", ") || geocode.name || "";
           const newCity = geocode.city || geocode.region || "";
 
@@ -187,7 +193,11 @@ export default function CheckoutScreen({ route, navigation }) {
   // ✅ route calc when customer position / restaurant changes
   useEffect(() => {
     const run = async () => {
-      if (!position || !cart?.restaurant?.latitude || !cart?.restaurant?.longitude) {
+      if (
+        !position ||
+        !cart?.restaurant?.latitude ||
+        !cart?.restaurant?.longitude
+      ) {
         setRouteInfo(null);
         return;
       }
@@ -197,10 +207,11 @@ export default function CheckoutScreen({ route, navigation }) {
         position.latitude,
         position.longitude,
         parseFloat(cart.restaurant.latitude),
-        parseFloat(cart.restaurant.longitude)
+        parseFloat(cart.restaurant.longitude),
       );
 
-      if (result.success) setRouteInfo({ distance: result.distance, duration: result.duration });
+      if (result.success)
+        setRouteInfo({ distance: result.distance, duration: result.duration });
       else setRouteInfo(null);
 
       setRouteLoading(false);
@@ -232,18 +243,26 @@ export default function CheckoutScreen({ route, navigation }) {
 
       // web போல parallel calls
       const [cartRes, profileRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/cart`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_BASE_URL}/cart/customer-profile`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE_URL}/cart`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API_BASE_URL}/cart/customer-profile`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
       ]);
 
       const cartData = await cartRes.json().catch(() => ({}));
       const profileData = await profileRes.json().catch(() => ({}));
 
-      if (!cartRes.ok) throw new Error(cartData.message || "Failed to fetch cart");
-      if (!profileRes.ok) throw new Error(profileData.message || "Failed to fetch profile");
+      if (!cartRes.ok)
+        throw new Error(cartData.message || "Failed to fetch cart");
+      if (!profileRes.ok)
+        throw new Error(profileData.message || "Failed to fetch profile");
 
       // cartId match (string vs number fix)
-      const selected = (cartData.carts || []).find((c) => String(c.id) === String(cartId));
+      const selected = (cartData.carts || []).find(
+        (c) => String(c.id) === String(cartId),
+      );
       if (!selected) throw new Error("Cart not found");
 
       setCart(selected);
@@ -267,7 +286,11 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
-  const saveAddressAndLocation = async ({ newAddress, newCity, newPosition }) => {
+  const saveAddressAndLocation = async ({
+    newAddress,
+    newCity,
+    newPosition,
+  }) => {
     try {
       setSavingAddress(true);
       const token = await AsyncStorage.getItem("token");
@@ -302,12 +325,15 @@ export default function CheckoutScreen({ route, navigation }) {
 
   const handlePlaceOrder = async () => {
     try {
-      if (!phone || !address || !position) throw new Error("Please fill address & location");
+      if (!phone || !address || !position)
+        throw new Error("Please fill address & location");
       if (!cart) throw new Error("Cart missing");
 
       const subtotal = Number(cart.cart_total) || 0;
-      if (subtotal < MINIMUM_SUBTOTAL) throw new Error(`Minimum order amount is Rs. ${MINIMUM_SUBTOTAL}`);
-      if (!routeInfo) throw new Error("Please wait for delivery fee calculation");
+      if (subtotal < MINIMUM_SUBTOTAL)
+        throw new Error(`Minimum order amount is Rs. ${MINIMUM_SUBTOTAL}`);
+      if (!routeInfo)
+        throw new Error("Please wait for delivery fee calculation");
 
       setPlacing(true);
       setError("");
@@ -374,11 +400,14 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
-  const subtotal = useMemo(() => (cart ? Number(cart.cart_total) || 0 : 0), [cart]);
+  const subtotal = useMemo(
+    () => (cart ? Number(cart.cart_total) || 0 : 0),
+    [cart],
+  );
   const serviceFee = useMemo(() => calculateServiceFee(subtotal), [subtotal]);
   const deliveryFee = useMemo(
     () => (routeInfo ? calculateDeliveryFee(routeInfo.distance) : null),
-    [routeInfo]
+    [routeInfo],
   );
 
   const isSubtotalValid = subtotal >= MINIMUM_SUBTOTAL;
@@ -409,7 +438,10 @@ export default function CheckoutScreen({ route, navigation }) {
       <View style={[styles.page, styles.center]}>
         <Text style={styles.errTitle}>Error</Text>
         <Text style={styles.errText}>{error}</Text>
-        <Pressable onPress={() => navigation.navigate("MainTabs", { screen: "Cart" })} style={styles.primaryBtn}>
+        <Pressable
+          onPress={() => navigation.navigate("MainTabs", { screen: "Cart" })}
+          style={styles.primaryBtn}
+        >
           <Text style={styles.primaryText}>Back to Cart</Text>
         </Pressable>
       </View>
@@ -420,7 +452,12 @@ export default function CheckoutScreen({ route, navigation }) {
     <View style={styles.page}>
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
         {/* ✅ Map */}
-        <View style={[styles.mapWrap, isMapEditMode ? { height: 280 } : { height: 200 }]}>
+        <View
+          style={[
+            styles.mapWrap,
+            isMapEditMode ? { height: 280 } : { height: 200 },
+          ]}
+        >
           <OSMMapView
             ref={mapRef}
             style={{ flex: 1 }}
@@ -494,7 +531,9 @@ export default function CheckoutScreen({ route, navigation }) {
           <View style={styles.rowBetween}>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Delivery Address</Text>
-              <Text style={styles.value}>{address || "Add delivery address"}</Text>
+              <Text style={styles.value}>
+                {address || "Add delivery address"}
+              </Text>
               {!!city && <Text style={styles.muted}>{city}</Text>}
             </View>
 
@@ -521,7 +560,11 @@ export default function CheckoutScreen({ route, navigation }) {
         <View style={styles.card}>
           <Text style={styles.label}>Estimated Delivery</Text>
           <Text style={styles.value}>
-            {routeLoading ? "Calculating..." : routeInfo ? `~${Math.ceil(routeInfo.duration) + 15} mins` : "—"}
+            {routeLoading
+              ? "Calculating..."
+              : routeInfo
+                ? `~${Math.ceil(routeInfo.duration) + 15} mins`
+                : "—"}
           </Text>
         </View>
 
@@ -532,18 +575,29 @@ export default function CheckoutScreen({ route, navigation }) {
           <Row label="Subtotal" value={formatPrice(subtotal)} />
           <Row
             label={`Delivery fee${routeInfo ? ` (${routeInfo.distance.toFixed(1)} km)` : ""}`}
-            value={routeLoading ? "..." : deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
+            value={
+              routeLoading
+                ? "..."
+                : deliveryFee !== null
+                  ? formatPrice(deliveryFee)
+                  : "--"
+            }
           />
           <Row label="Service fee" value={formatPrice(serviceFee)} />
 
           <View style={styles.divider} />
-          <Row label="Total" value={finalTotal !== null ? formatPrice(finalTotal) : "--"} isBold />
+          <Row
+            label="Total"
+            value={finalTotal !== null ? formatPrice(finalTotal) : "--"}
+            isBold
+          />
         </View>
 
         {!isSubtotalValid && (
           <View style={styles.warn}>
             <Text style={styles.warnText}>
-              Minimum order: Rs. {MINIMUM_SUBTOTAL}. Add Rs. {(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more.
+              Minimum order: Rs. {MINIMUM_SUBTOTAL}. Add Rs.{" "}
+              {(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more.
             </Text>
           </View>
         )}
@@ -559,32 +613,60 @@ export default function CheckoutScreen({ route, navigation }) {
       <View style={styles.bottomBar}>
         <Pressable
           onPress={handlePlaceOrder}
-          disabled={!isSubtotalValid || deliveryFee === null || routeLoading || placing || !phone || !address}
+          disabled={
+            !isSubtotalValid ||
+            deliveryFee === null ||
+            routeLoading ||
+            placing ||
+            !phone ||
+            !address
+          }
           style={[
             styles.cta,
-            (!isSubtotalValid || deliveryFee === null || routeLoading || placing || !phone || !address) && styles.ctaDisabled,
+            (!isSubtotalValid ||
+              deliveryFee === null ||
+              routeLoading ||
+              placing ||
+              !phone ||
+              !address) &&
+              styles.ctaDisabled,
           ]}
         >
-          <Text style={[styles.ctaText, (!isSubtotalValid || deliveryFee === null || routeLoading || placing || !phone || !address) && { color: "#6EDE9A" }]}>
+          <Text
+            style={[
+              styles.ctaText,
+              (!isSubtotalValid ||
+                deliveryFee === null ||
+                routeLoading ||
+                placing ||
+                !phone ||
+                !address) && { color: "#6EDE9A" },
+            ]}
+          >
             {placing
               ? "Placing..."
               : routeLoading
-              ? "Calculating..."
-              : !isSubtotalValid
-              ? `Add Rs. ${(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more`
-              : finalTotal !== null
-              ? `Place Order • ${formatPrice(finalTotal)}`
-              : "Place Order"}
+                ? "Calculating..."
+                : !isSubtotalValid
+                  ? `Add Rs. ${(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more`
+                  : finalTotal !== null
+                    ? `Place Order • ${formatPrice(finalTotal)}`
+                    : "Place Order"}
           </Text>
         </Pressable>
 
-        <Text style={styles.tiny}>By placing this order, you agree to our terms.</Text>
+        <Text style={styles.tiny}>
+          By placing this order, you agree to our terms.
+        </Text>
       </View>
 
       {/* ✅ Address Modal */}
       <Modal transparent visible={showAddressModal} animationType="slide">
         <View style={styles.modalWrap}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setShowAddressModal(false)} />
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setShowAddressModal(false)}
+          />
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Edit Delivery Address</Text>
 
@@ -598,7 +680,12 @@ export default function CheckoutScreen({ route, navigation }) {
             />
 
             <Text style={styles.inputLabel}>City</Text>
-            <TextInput value={editCity} onChangeText={setEditCity} placeholder="Enter city" style={styles.input} />
+            <TextInput
+              value={editCity}
+              onChangeText={setEditCity}
+              placeholder="Enter city"
+              style={styles.input}
+            />
 
             <Pressable
               disabled={savingAddress}
@@ -616,10 +703,15 @@ export default function CheckoutScreen({ route, navigation }) {
               }}
               style={[styles.primaryBtn, savingAddress && { opacity: 0.7 }]}
             >
-              <Text style={styles.primaryText}>{savingAddress ? "Saving..." : "Save"}</Text>
+              <Text style={styles.primaryText}>
+                {savingAddress ? "Saving..." : "Save"}
+              </Text>
             </Pressable>
 
-            <Pressable onPress={() => setShowAddressModal(false)} style={styles.outlineBtn}>
+            <Pressable
+              onPress={() => setShowAddressModal(false)}
+              style={styles.outlineBtn}
+            >
               <Text style={styles.outlineText}>Cancel</Text>
             </Pressable>
           </View>
@@ -632,13 +724,17 @@ export default function CheckoutScreen({ route, navigation }) {
 function Row({ label, value, isBold }) {
   return (
     <View style={styles.rowBetween}>
-      <Text style={[styles.rowLabel, isBold && { fontWeight: "900" }]}>{label}</Text>
-      <Text style={[styles.rowValue, isBold && { fontWeight: "900" }]}>{value}</Text>
+      <Text style={[styles.rowLabel, isBold && { fontWeight: "900" }]}>
+        {label}
+      </Text>
+      <Text style={[styles.rowValue, isBold && { fontWeight: "900" }]}>
+        {value}
+      </Text>
     </View>
   );
 }
 
-const GREEN = "#06C168";     // main
+const GREEN = "#06C168"; // main
 const GREEN_DARK = "#0F7A34";
 const GREEN_SOFT = "#DCFCE7";
 const TEXT = "#111827";
@@ -646,7 +742,12 @@ const MUTED = "#6B7280";
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#F9FAFB" },
-  center: { alignItems: "center", justifyContent: "center", padding: 18, gap: 10 },
+  center: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    gap: 10,
+  },
 
   muted: { color: MUTED },
 
@@ -705,9 +806,19 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: MUTED },
   value: { marginTop: 2, fontSize: 15, fontWeight: "900", color: TEXT },
 
-  sectionTitle: { fontSize: 14, fontWeight: "900", color: TEXT, marginBottom: 10 },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: TEXT,
+    marginBottom: 10,
+  },
 
-  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  rowBetween: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
   rowLabel: { color: MUTED },
   rowValue: { color: TEXT, fontWeight: "800" },
 
@@ -813,14 +924,22 @@ const styles = StyleSheet.create({
   },
 
   modalWrap: { flex: 1, justifyContent: "flex-end" },
-  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.45)" },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
   modalCard: {
     backgroundColor: "#fff",
     padding: 16,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
   },
-  modalTitle: { fontSize: 16, fontWeight: "900", color: TEXT, marginBottom: 10 },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: TEXT,
+    marginBottom: 10,
+  },
   inputLabel: { color: MUTED, fontSize: 12, marginTop: 10, marginBottom: 6 },
   input: {
     borderWidth: 1,

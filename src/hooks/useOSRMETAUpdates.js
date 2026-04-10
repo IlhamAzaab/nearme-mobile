@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { formatETA } from '../utils/etaFormatter';
+import { useState, useEffect, useRef, useCallback } from "react";
+import { formatETA } from "../utils/etaFormatter";
 
 /**
  * Hook for OSRM-based real-time ETA updates (uses OSRM routing backend)
@@ -7,10 +7,15 @@ import { formatETA } from '../utils/etaFormatter';
  * @returns {Object} { eta, etaText, distance, routeCoordinates, loading, error, refresh }
  */
 const useOSRMETAUpdates = (options = {}) => {
-  const { origin, destination, refreshInterval = 30000, enabled = true } = options;
+  const {
+    origin,
+    destination,
+    refreshInterval = 30000,
+    enabled = true,
+  } = options;
 
   const [eta, setEta] = useState(null);
-  const [etaText, setEtaText] = useState('Calculating...');
+  const [etaText, setEtaText] = useState("Calculating...");
   const [distance, setDistance] = useState(null);
   const [routeCoordinates, setRouteCoordinates] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -24,7 +29,7 @@ const useOSRMETAUpdates = (options = {}) => {
       setLoading(true);
       setError(null);
 
-      const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
+      const url = `https://router.project-osrm.org/route/v1/foot/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
 
       const response = await fetch(url);
       const data = await response.json();
@@ -49,7 +54,7 @@ const useOSRMETAUpdates = (options = {}) => {
       }
     } catch (err) {
       setError(err.message);
-      console.warn('[useOSRMETAUpdates] Error:', err.message);
+      console.warn("[useOSRMETAUpdates] Error:", err.message);
     } finally {
       setLoading(false);
     }

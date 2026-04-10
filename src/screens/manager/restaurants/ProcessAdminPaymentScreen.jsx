@@ -17,6 +17,21 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../../config/env";
 
+const parseStoredLocalDate = (dateStr) => {
+  if (!dateStr) return null;
+
+  const matched = String(dateStr).match(
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/,
+  );
+
+  if (matched) {
+    return new Date(`${matched[1]}T${matched[2]}`);
+  }
+
+  const fallback = new Date(dateStr);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+};
+
 const ProcessAdminPaymentScreen = ({ navigation, route }) => {
   const { restaurantId } = route.params || {};
 
@@ -81,6 +96,45 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
 
   const handleMaxAmount = () => {
     if (restaurant) setAmount(restaurant.withdrawal_balance.toFixed(2));
+  };
+
+  const getReceiptImageUrl = (proofUrl, proofType) => {
+    if (!proofUrl) return "";
+
+    const isPdfProof = proofType === "pdf" || /\.pdf(\?|$)/i.test(proofUrl);
+    if (!isPdfProof) return proofUrl;
+
+    let imageUrl = proofUrl;
+    if (imageUrl.includes("/raw/upload/")) {
+      imageUrl = imageUrl.replace("/raw/upload/", "/image/upload/");
+    }
+    if (imageUrl.includes("/upload/")) {
+      imageUrl = imageUrl.replace("/upload/", "/upload/f_jpg,pg_1,q_auto/");
+    }
+    if (!/\.pdf(\?|$)/i.test(imageUrl)) {
+      imageUrl = `${imageUrl}.pdf`;
+    }
+
+    return imageUrl;
+  };
+
+  const formatSriLankaDateTime = (dateStr) => {
+    const localDate = parseStoredLocalDate(dateStr);
+    if (!localDate) return "-";
+
+    return localDate.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const formatTransferId = (id) => {
+    if (!id) return "-";
+    return String(id).substring(0, 12).toUpperCase();
   };
 
   const handleSubmit = async () => {
@@ -263,7 +317,7 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
             </Text>
           </TouchableOpacity>
           <Text style={styles.uploadHint}>
-            JPEG, PNG, WebP, or PDF. Max 5MB
+            JPEG, PNG, WebP, or PDF. Max 5MB (PDF saves as first-page image)
           </Text>
 
           {file && file.mimeType?.startsWith("image/") && (
@@ -320,7 +374,10 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
                         Rs.{parseFloat(p.amount).toFixed(2)}
                       </Text>
                       <Text style={styles.historyDate}>
-                        {new Date(p.created_at).toLocaleString()}
+                        {formatSriLankaDateTime(p.created_at)}
+                      </Text>
+                      <Text style={styles.historyTxnId}>
+                        Transfer ID: {formatTransferId(p.id)}
                       </Text>
                       {p.note ? (
                         <Text style={styles.historyNote}>{p.note}</Text>
@@ -328,7 +385,11 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
                     </View>
                     {p.proof_url && (
                       <TouchableOpacity
-                        onPress={() => Linking.openURL(p.proof_url)}
+                        onPress={() =>
+                          Linking.openURL(
+                            getReceiptImageUrl(p.proof_url, p.proof_type),
+                          )
+                        }
                       >
                         <Ionicons
                           name="eye-outline"
@@ -557,6 +618,13 @@ const styles = StyleSheet.create({
   },
   historyAmount: { fontSize: 14, fontWeight: "700", color: "#111827" },
   historyDate: { fontSize: 10, color: "#9CA3AF", marginTop: 2 },
+  historyTxnId: {
+    fontSize: 10,
+    color: "#4B5563",
+    marginTop: 3,
+    fontFamily: "monospace",
+    fontWeight: "700",
+  },
   historyNote: { fontSize: 11, color: "#6B7280", marginTop: 4 },
 });
 

@@ -14,11 +14,15 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useIsFocused } from "@react-navigation/native";
+import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   FlatList,
@@ -29,9 +33,13 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import FreeMapView from "../../components/maps/FreeMapView";
+import { DriverMapSheetLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import { API_BASE_URL } from "../../constants/api";
+import { useSocket } from "../../context/SocketContext";
+import { approximateDistanceMeters } from "../../utils/osrmClient";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -42,9 +50,11 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 const CACHE_KEY = "available_deliveries_cache";
 const CACHE_EXPIRY = 60000; // 1 minute cache
-const DATA_REFRESH_THRESHOLD = 100; // Only fetch API data when driver moves 100m+
+const DATA_REFRESH_THRESHOLD = 200; // Only fetch API data when driver moves 200m+
 const LIVE_TRACKING_INTERVAL = 3000; // 3 seconds - smooth driver marker updates
-const SAFETY_REFRESH_INTERVAL = 120000; // 120 second fallback (was 60s)
+const LOCATION_MAX_ACCURACY_METERS = 250;
+const LOCATION_MAX_RETRIES = 3;
+const LOCATION_RETRY_DELAY_MS = 1200;
 
 // Default driver location (Kinniya, Sri Lanka)
 const DEFAULT_DRIVER_LOCATION = {
@@ -55,6 +65,9 @@ const DEFAULT_DRIVER_LOCATION = {
 // Carto Voyager tiles (FREE - no API key needed)
 const CARTO_TILE_URL =
   "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png";
+
+// Keep first-visit loading UX strict: full skeleton only on first screen visit.
+let hasVisitedAvailableDeliveriesScreen = false;
 
 // ============================================================================
 // CACHE HELPERS
@@ -86,22 +99,41 @@ const saveCacheData = async (data) => {
   }
 };
 
-// ============================================================================
-// HAVERSINE DISTANCE CALCULATION
-// ============================================================================
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const calculateDistance = (lat1, lng1, lat2, lng2) => {
-  const R = 6371000; // Earth's radius in meters
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; // Distance in meters
+const isFiniteNumber = (value) =>
+  typeof value === "number" && Number.isFinite(value);
+
+const isValidLocation = (location) => {
+  if (!location) return false;
+  const { latitude, longitude } = location;
+  if (!isFiniteNumber(latitude) || !isFiniteNumber(longitude)) return false;
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return false;
+
+  // Guard against null-island style fallback coordinates.
+  if (Math.abs(latitude) < 0.0001 && Math.abs(longitude) < 0.0001) return false;
+  return true;
+};
+
+const toValidLocation = (lat, lng) => {
+  const parsed = {
+    latitude: Number.parseFloat(lat),
+    longitude: Number.parseFloat(lng),
+  };
+  return isValidLocation(parsed) ? parsed : null;
+};
+
+const hasValidDeliveryCoordinates = (delivery) => {
+  const restaurantPoint = toValidLocation(
+    delivery?.restaurant?.latitude,
+    delivery?.restaurant?.longitude,
+  );
+  const customerPoint = toValidLocation(
+    delivery?.customer?.latitude,
+    delivery?.customer?.longitude,
+  );
+
+  return Boolean(restaurantPoint && customerPoint);
 };
 
 // ============================================================================
@@ -110,7 +142,29 @@ const calculateDistance = (lat1, lng1, lat2, lng2) => {
 
 export default function AvailableDeliveriesScreen({ navigation }) {
   const isFocused = useIsFocused();
+  const insets = useSafeAreaInsets();
+  const rawTabBarHeight = useBottomTabBarHeight();
+  const tabBarHeight = useMemo(
+    () => Math.max(rawTabBarHeight || 0, 76 + insets.bottom),
+    [rawTabBarHeight, insets.bottom],
+  );
+  const queryClient = useQueryClient();
+  const { on, off, isConnected } = useSocket();
   const isFocusedRef = useRef(true);
+  const viewportHeight = useMemo(
+    () => Math.max(320, SCREEN_HEIGHT - insets.top),
+    [insets.top],
+  );
+  const mapViewportHeight = useMemo(
+    () => Math.round(viewportHeight * 0.46),
+    [viewportHeight],
+  );
+
+  const [userId, setUserId] = useState("default");
+  const deliveriesQueryKey = useMemo(
+    () => ["driver", "available-deliveries", userId],
+    [userId],
+  );
 
   // Keep ref in sync (so callbacks see latest value without re-creating)
   useEffect(() => {
@@ -120,11 +174,18 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   // Initialize with cached data for instant display
   const [deliveries, setDeliveries] = useState([]);
   const [declinedIds, setDeclinedIds] = useState(new Set());
-  const [initialLoading, setInitialLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(
+    () => !hasVisitedAvailableDeliveriesScreen,
+  );
   const [hasCompletedFirstFetch, setHasCompletedFirstFetch] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isDeliveriesSyncing, setIsDeliveriesSyncing] = useState(false);
   const [accepting, setAccepting] = useState(null);
-  const [driverLocation, setDriverLocation] = useState(DEFAULT_DRIVER_LOCATION);
+  const [driverLocation, setDriverLocation] = useState(null);
+  const [isLocationResolved, setIsLocationResolved] = useState(false);
+  const [locationStatusMessage, setLocationStatusMessage] = useState(
+    "Loading available deliveries...",
+  );
   const [inDeliveringMode, setInDeliveringMode] = useState(false);
   const [currentRoute, setCurrentRoute] = useState({
     total_stops: 0,
@@ -135,18 +196,60 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   const [showNewDeliveryBanner, setShowNewDeliveryBanner] = useState(false);
   const [isLoadingAfterAccept, setIsLoadingAfterAccept] = useState(false);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const [isMapInteracting, setIsMapInteracting] = useState(false);
+  const [currentVisibleIndex, setCurrentVisibleIndex] = useState(0);
+  const deliveryMetaRef = useRef(new Map());
+  const arrivalSeqRef = useRef(0);
+  const viewabilityConfigRef = useRef({ itemVisiblePercentThreshold: 60 });
+  const onViewableItemsChangedRef = useRef(({ viewableItems }) => {
+    if (!viewableItems?.length) return;
+    const next = viewableItems[0]?.index;
+    if (typeof next === "number") {
+      setCurrentVisibleIndex(next);
+    }
+  });
 
   // Refs
   const flatListRef = useRef(null);
   const abortControllerRef = useRef(null);
   const locationIntervalRef = useRef(null);
-  const dataFetchIntervalRef = useRef(null);
   const lastFetchLocationRef = useRef(null);
   const fetchPendingDeliveriesRef = useRef(null);
   const locationSubscriptionRef = useRef(null);
+  const fetchInFlightRef = useRef(false);
+
+  const syncDeliveryMeta = useCallback((incomingDeliveries) => {
+    const meta = deliveryMetaRef.current;
+    const idsInList = new Set();
+
+    incomingDeliveries.forEach((delivery) => {
+      const id = delivery.delivery_id;
+      idsInList.add(id);
+      if (!meta.has(id)) {
+        meta.set(id, {
+          priorityTs: ++arrivalSeqRef.current,
+        });
+      }
+    });
+
+    for (const id of meta.keys()) {
+      if (!idsInList.has(id)) {
+        meta.delete(id);
+      }
+    }
+  }, []);
+
+  const applyPrioritizedSort = useCallback(
+    (incomingDeliveries) => {
+      syncDeliveryMeta(incomingDeliveries);
+      return incomingDeliveries;
+    },
+    [syncDeliveryMeta],
+  );
 
   // Animation for toast
   const toastAnim = useRef(new Animated.Value(0)).current;
+  const listFadeAnim = useRef(new Animated.Value(0)).current;
 
   // ============================================================================
   // INITIALIZATION
@@ -157,47 +260,142 @@ export default function AvailableDeliveriesScreen({ navigation }) {
     return () => cleanup();
   }, []);
 
+  useEffect(() => {
+    if (!isFocused || !isLocationResolved || !hasCompletedFirstFetch) return;
+    fetchDeliveriesWithCurrentLocation(true, "screen_focus");
+  }, [
+    isFocused,
+    isLocationResolved,
+    hasCompletedFirstFetch,
+    fetchDeliveriesWithCurrentLocation,
+  ]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      const storedUserId = (await AsyncStorage.getItem("userId")) || "default";
+      if (mounted) {
+        setUserId(storedUserId);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const cachedQueryData = queryClient.getQueryData(deliveriesQueryKey);
+    if (!cachedQueryData) return;
+
+    const cachedDeliveries = cachedQueryData.deliveries || [];
+    setDeliveries(applyPrioritizedSort(cachedDeliveries));
+    setCurrentRoute(
+      cachedQueryData.currentRoute || { total_stops: 0, active_deliveries: 0 },
+    );
+
+    if (isValidLocation(cachedQueryData.driverLocation)) {
+      setDriverLocation(cachedQueryData.driverLocation);
+    }
+  }, [deliveriesQueryKey, queryClient, applyPrioritizedSort]);
+
   const initScreen = async () => {
-    // Load cached data for instant display
-    const cached = await loadCachedData();
-    if (cached) {
-      setDeliveries(cached.deliveries || []);
-      setCurrentRoute(
-        cached.currentRoute || { total_stops: 0, active_deliveries: 0 },
-      );
-      if (cached.driverLocation) setDriverLocation(cached.driverLocation);
-      setHasCompletedFirstFetch(true);
+    setLocationStatusMessage("Loading available deliveries...");
+
+    if (hasVisitedAvailableDeliveriesScreen) {
       setInitialLoading(false);
     }
 
-    // Check if driver is in delivering mode
-    await checkDeliveringMode();
+    let hydratedFromCache = false;
 
-    // Get initial location and fetch deliveries
+    const querySnapshot = queryClient.getQueryData(deliveriesQueryKey);
+    if (querySnapshot?.deliveries?.length) {
+      const cachedDeliveries = (querySnapshot.deliveries || []).filter(
+        hasValidDeliveryCoordinates,
+      );
+      setDeliveries(applyPrioritizedSort(cachedDeliveries));
+      setCurrentRoute(
+        querySnapshot.currentRoute || { total_stops: 0, active_deliveries: 0 },
+      );
+      setHasCompletedFirstFetch(true);
+      setInitialLoading(false);
+      hasVisitedAvailableDeliveriesScreen = true;
+      hydratedFromCache = true;
+    }
+
+    if (!hydratedFromCache) {
+      const storageSnapshot = await loadCachedData();
+      if (storageSnapshot?.deliveries?.length) {
+        const cachedDeliveries = (storageSnapshot.deliveries || []).filter(
+          hasValidDeliveryCoordinates,
+        );
+        setDeliveries(applyPrioritizedSort(cachedDeliveries));
+        setCurrentRoute(
+          storageSnapshot.currentRoute || {
+            total_stops: 0,
+            active_deliveries: 0,
+          },
+        );
+        if (isValidLocation(storageSnapshot.driverLocation)) {
+          setDriverLocation(storageSnapshot.driverLocation);
+          lastFetchLocationRef.current = storageSnapshot.driverLocation;
+        }
+        setHasCompletedFirstFetch(true);
+        setInitialLoading(false);
+        hasVisitedAvailableDeliveriesScreen = true;
+        hydratedFromCache = true;
+      }
+    }
+
     const location = await getLocation();
+    if (!isValidLocation(location)) {
+      if (!hydratedFromCache) {
+        setFetchError(
+          "Unable to confirm your current location. Turn on GPS and try again.",
+        );
+        // Avoid infinite skeleton when location cannot be resolved on first load.
+        setHasCompletedFirstFetch(true);
+        setInitialLoading(false);
+        hasVisitedAvailableDeliveriesScreen = true;
+      }
+      // Still try to start watcher so the app can recover as soon as GPS is available.
+      startLocationTracking();
+      return;
+    }
+
     setDriverLocation(location);
+    setIsLocationResolved(true);
     lastFetchLocationRef.current = location;
-    await fetchPendingDeliveriesWithLocation(location, !cached);
+
+    // Check if driver is in delivering mode
+    await checkDeliveringMode(location);
+
+    if (!hydratedFromCache) {
+      await fetchPendingDeliveriesWithLocation(location, true, "screen_init");
+    }
 
     // Start location tracking every 3 seconds
     startLocationTracking();
-
-    // Safety fallback refresh every 120 seconds (only when focused)
-    dataFetchIntervalRef.current = setInterval(() => {
-      if (!isFocusedRef.current) return;
-      console.log("[DATA REFRESH] Safety fallback check (120s interval)...");
-      fetchDeliveriesWithCurrentLocation(true);
-    }, SAFETY_REFRESH_INTERVAL);
   };
+
+  useEffect(() => {
+    if (!hasCompletedFirstFetch || initialLoading || deliveries.length === 0) {
+      listFadeAnim.setValue(0);
+      return;
+    }
+
+    Animated.timing(listFadeAnim, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [deliveries.length, hasCompletedFirstFetch, initialLoading, listFadeAnim]);
 
   const cleanup = () => {
     if (locationIntervalRef.current) {
       clearInterval(locationIntervalRef.current);
       locationIntervalRef.current = null;
-    }
-    if (dataFetchIntervalRef.current) {
-      clearInterval(dataFetchIntervalRef.current);
-      dataFetchIntervalRef.current = null;
     }
     if (locationSubscriptionRef.current) {
       locationSubscriptionRef.current.remove();
@@ -216,19 +414,63 @@ export default function AvailableDeliveriesScreen({ navigation }) {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
-        console.log("[LOCATION] Permission denied, using default");
-        return DEFAULT_DRIVER_LOCATION;
+        console.log("[LOCATION] Permission denied");
+        setLocationStatusMessage("Location permission is required");
+        return null;
       }
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
+
+      for (let attempt = 1; attempt <= LOCATION_MAX_RETRIES; attempt += 1) {
+        setLocationStatusMessage(
+          `Confirming your current location (${attempt}/${LOCATION_MAX_RETRIES})...`,
+        );
+
+        const position = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.BestForNavigation,
+          maximumAge: 0,
+          mayShowUserSettingsDialog: true,
+        });
+
+        const candidate = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        };
+
+        const accuracy = Number(position.coords.accuracy || Infinity);
+        const hasGoodAccuracy = accuracy <= LOCATION_MAX_ACCURACY_METERS;
+
+        if (isValidLocation(candidate) && hasGoodAccuracy) {
+          setLocationStatusMessage("Location confirmed");
+          return candidate;
+        }
+
+        if (attempt < LOCATION_MAX_RETRIES) {
+          await sleep(LOCATION_RETRY_DELAY_MS);
+        }
+      }
+
+      // Last fallback: recent last-known location if it is reasonably accurate.
+      const lastKnown = await Location.getLastKnownPositionAsync({
+        maxAge: 10000,
+        requiredAccuracy: LOCATION_MAX_ACCURACY_METERS,
       });
-      return {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-      };
+
+      if (lastKnown) {
+        const fallbackLocation = {
+          latitude: lastKnown.coords.latitude,
+          longitude: lastKnown.coords.longitude,
+        };
+        if (isValidLocation(fallbackLocation)) {
+          setLocationStatusMessage("Using recently confirmed location");
+          return fallbackLocation;
+        }
+      }
+
+      setLocationStatusMessage("Unable to confirm location");
+      return null;
     } catch (err) {
       console.error("[LOCATION] Error:", err);
-      return DEFAULT_DRIVER_LOCATION;
+      setLocationStatusMessage("Unable to confirm location");
+      return null;
     }
   };
 
@@ -251,16 +493,17 @@ export default function AvailableDeliveriesScreen({ navigation }) {
             longitude: position.coords.longitude,
           };
 
+          if (!isValidLocation(location)) return;
+
           // Always update driver marker on map (smooth live tracking every 3s)
           setDriverLocation(location);
+          setIsLocationResolved(true);
 
-          // Only fetch API data when moved 100m+ from last fetch
+          // Only fetch API data when moved 200m+ from last fetch
           if (lastFetchLocationRef.current) {
-            const distanceMoved = calculateDistance(
-              lastFetchLocationRef.current.latitude,
-              lastFetchLocationRef.current.longitude,
-              location.latitude,
-              location.longitude,
+            const distanceMoved = approximateDistanceMeters(
+              lastFetchLocationRef.current,
+              location,
             );
 
             if (distanceMoved >= DATA_REFRESH_THRESHOLD) {
@@ -271,7 +514,11 @@ export default function AvailableDeliveriesScreen({ navigation }) {
               );
               lastFetchLocationRef.current = location;
               if (fetchPendingDeliveriesRef.current) {
-                fetchPendingDeliveriesRef.current(location, true);
+                fetchPendingDeliveriesRef.current(
+                  location,
+                  true,
+                  "movement_200m",
+                );
               }
             }
           }
@@ -282,29 +529,53 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       // Fallback to interval-based updates
       locationIntervalRef.current = setInterval(async () => {
         const location = await getLocation();
+        if (!isValidLocation(location)) return;
         setDriverLocation(location);
-      }, LOCATION_UPDATE_INTERVAL);
+        setIsLocationResolved(true);
+      }, LIVE_TRACKING_INTERVAL);
     }
   };
 
   const fetchDeliveriesWithCurrentLocation = useCallback(
-    async (isBackgroundRefresh = false) => {
+    async (isBackgroundRefresh = false, triggerReason = "manual") => {
       const location = await getLocation();
+      if (!isValidLocation(location)) {
+        setFetchError(
+          "Unable to confirm your location. Please enable GPS and retry.",
+        );
+        if (!hasCompletedFirstFetch) {
+          setHasCompletedFirstFetch(true);
+          setInitialLoading(false);
+        }
+        return;
+      }
       setDriverLocation(location);
+      setIsLocationResolved(true);
       lastFetchLocationRef.current = location;
-      await fetchPendingDeliveriesWithLocation(location, isBackgroundRefresh);
+      await fetchPendingDeliveriesWithLocation(
+        location,
+        isBackgroundRefresh,
+        triggerReason,
+      );
     },
-    [],
+    [hasCompletedFirstFetch],
   );
 
   // ============================================================================
   // CHECK DELIVERING MODE
   // ============================================================================
 
-  const checkDeliveringMode = async () => {
+  const checkDeliveringMode = async (verifiedLocation) => {
     try {
       const token = await AsyncStorage.getItem("token");
-      const currentLoc = driverLocation || DEFAULT_DRIVER_LOCATION;
+      const currentLoc =
+        verifiedLocation && isValidLocation(verifiedLocation)
+          ? verifiedLocation
+          : driverLocation;
+
+      if (!isValidLocation(currentLoc)) {
+        return;
+      }
 
       const res = await rateLimitedFetch(
         `${API_BASE_URL}/driver/deliveries/pickups?driver_latitude=${currentLoc.latitude}&driver_longitude=${currentLoc.longitude}`,
@@ -329,7 +600,17 @@ export default function AvailableDeliveriesScreen({ navigation }) {
             );
             if (hasDeliveringOrders) {
               setInDeliveringMode(true);
-              setTimeout(() => navigation.navigate("Active"), 100);
+              const preferredDelivery =
+                activeData.deliveries?.find((d) =>
+                  ["picked_up", "on_the_way", "at_customer"].includes(d.status),
+                ) || activeData.deliveries?.[0];
+              setTimeout(
+                () =>
+                  navigation.navigate("DriverMap", {
+                    deliveryId: preferredDelivery?.delivery_id,
+                  }),
+                100,
+              );
             }
           }
         }
@@ -346,25 +627,40 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   const fetchPendingDeliveriesWithLocation = async (
     location,
     showLoading = true,
+    triggerReason = "manual",
   ) => {
+    if (!isValidLocation(location)) {
+      setFetchError("Cannot fetch deliveries without a valid driver location.");
+      setInitialLoading(false);
+      return;
+    }
+
+    if (fetchInFlightRef.current) return;
+
     // Cancel any pending request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     abortControllerRef.current = new AbortController();
+    fetchInFlightRef.current = true;
 
     try {
+      setIsDeliveriesSyncing(true);
+
       if (!hasCompletedFirstFetch && showLoading) {
-        setInitialLoading(true);
+        if (!hasVisitedAvailableDeliveriesScreen) {
+          setInitialLoading(true);
+        }
       } else if (!showLoading) {
         setIsRefreshing(true);
       }
 
       const token = await AsyncStorage.getItem("token");
-      const currentLoc = location || DEFAULT_DRIVER_LOCATION;
+      const currentLoc = location;
 
-      const url = `${API_BASE_URL}/driver/deliveries/available/v2?driver_latitude=${currentLoc.latitude}&driver_longitude=${currentLoc.longitude}`;
+      const url = `${API_BASE_URL}/driver/deliveries/available/v2?driver_latitude=${currentLoc.latitude}&driver_longitude=${currentLoc.longitude}&trigger_reason=${encodeURIComponent(triggerReason)}`;
 
+      console.log(`[FETCH] Trigger: ${triggerReason}`);
       console.log("[FETCH] Requesting available deliveries from:", url);
 
       const res = await rateLimitedFetch(url, {
@@ -387,7 +683,23 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       });
 
       const deliveriesArray = data.available_deliveries || [];
-      setDeliveries(deliveriesArray);
+      const validDeliveries = deliveriesArray.filter(
+        hasValidDeliveryCoordinates,
+      );
+      const skippedInvalidCount =
+        deliveriesArray.length - validDeliveries.length;
+
+      if (skippedInvalidCount > 0) {
+        console.warn(
+          `[FETCH] Skipped ${skippedInvalidCount} deliveries with invalid restaurant/customer coordinates`,
+        );
+      }
+
+      setDeclinedIds((prev) => {
+        const availableIds = new Set(validDeliveries.map((d) => d.delivery_id));
+        return new Set([...prev].filter((id) => availableIds.has(id)));
+      });
+      setDeliveries(applyPrioritizedSort(validDeliveries));
 
       const newCurrentRoute = data.current_route || {
         total_stops: 0,
@@ -395,18 +707,31 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       };
       setCurrentRoute(newCurrentRoute);
 
-      const newDriverLocation = data.driver_location || currentLoc;
+      const newDriverLocation = isValidLocation(currentLoc)
+        ? currentLoc
+        : toValidLocation(
+            data?.driver_location?.latitude,
+            data?.driver_location?.longitude,
+          );
       setDriverLocation(newDriverLocation);
+      setIsLocationResolved(true);
 
       // Save to cache
       await saveCacheData({
-        deliveries: deliveriesArray,
+        deliveries: validDeliveries,
+        currentRoute: newCurrentRoute,
+        driverLocation: newDriverLocation,
+      });
+
+      queryClient.setQueryData(deliveriesQueryKey, {
+        deliveries: validDeliveries,
         currentRoute: newCurrentRoute,
         driverLocation: newDriverLocation,
       });
 
       setFetchError(null);
       setHasCompletedFirstFetch(true);
+      hasVisitedAvailableDeliveriesScreen = true;
     } catch (e) {
       if (e.name === "AbortError") return;
       console.error("❌ [FRONTEND] Failed to fetch deliveries:", e);
@@ -420,24 +745,88 @@ export default function AvailableDeliveriesScreen({ navigation }) {
             : e.message || "Failed to fetch deliveries";
 
       setFetchError(errorMessage);
+      if (!hasCompletedFirstFetch) {
+        setHasCompletedFirstFetch(true);
+        hasVisitedAvailableDeliveriesScreen = true;
+      }
     } finally {
+      setIsDeliveriesSyncing(false);
       setInitialLoading(false);
       setIsRefreshing(false);
+      fetchInFlightRef.current = false;
     }
   };
 
   // Store fetch function in ref
   fetchPendingDeliveriesRef.current = fetchPendingDeliveriesWithLocation;
 
+  useEffect(() => {
+    setIsSocketConnected(Boolean(isConnected));
+  }, [isConnected]);
+
+  useEffect(() => {
+    if (!on || !off) return;
+
+    const handleNewDelivery = () => {
+      if (!isFocusedRef.current) return;
+      setShowNewDeliveryBanner(true);
+      fetchDeliveriesWithCurrentLocation(true, "socket_new_delivery");
+    };
+
+    const handleTipUpdated = () => {
+      if (!isFocusedRef.current) return;
+      fetchDeliveriesWithCurrentLocation(true, "socket_tip_update");
+    };
+
+    const handleDeliveryTaken = (payload) => {
+      const takenId = payload?.delivery_id;
+      if (!takenId) return;
+
+      setDeliveries((prev) => prev.filter((d) => d.delivery_id !== takenId));
+
+      setDeclinedIds((prev) => {
+        if (!prev.has(takenId)) return prev;
+        const next = new Set(prev);
+        next.delete(takenId);
+        return next;
+      });
+    };
+
+    on("delivery:new", handleNewDelivery);
+    on("delivery:tip_updated", handleTipUpdated);
+    on("delivery:taken", handleDeliveryTaken);
+
+    return () => {
+      off("delivery:new", handleNewDelivery);
+      off("delivery:tip_updated", handleTipUpdated);
+      off("delivery:taken", handleDeliveryTaken);
+    };
+  }, [
+    on,
+    off,
+    queryClient,
+    deliveriesQueryKey,
+    currentRoute,
+    driverLocation,
+    fetchDeliveriesWithCurrentLocation,
+  ]);
+
   // ============================================================================
   // ACTIONS
   // ============================================================================
 
-  const handleAcceptDelivery = async (deliveryId) => {
+  const handleAcceptDelivery = async (deliveryId, deliverySnapshot = null) => {
+    if (isDeliveriesSyncing || isLoadingAfterAccept) {
+      showToast("Updating requests...", "error");
+      return;
+    }
+
     setAccepting(deliveryId);
     try {
       const token = await AsyncStorage.getItem("token");
-      const delivery = deliveries.find((d) => d.delivery_id === deliveryId);
+      const delivery =
+        deliverySnapshot ||
+        deliveries.find((d) => d.delivery_id === deliveryId);
 
       const body = {
         driver_latitude: driverLocation?.latitude,
@@ -478,18 +867,18 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       const data = await res.json();
 
       if (res.ok) {
-        showToast("✅ Delivery accepted!");
-
-        // Clear ALL deliveries immediately
-        setDeliveries([]);
         setIsLoadingAfterAccept(true);
-
-        // Fetch updated deliveries
-        setTimeout(async () => {
-          await fetchPendingDeliveriesWithLocation(driverLocation, false);
-          setIsLoadingAfterAccept(false);
-        }, 500);
+        showToast("✅ Delivery accepted!");
+        await fetchDeliveriesWithCurrentLocation(true, "delivery_accepted");
+        navigation.navigate("DriverMap", { deliveryId });
       } else {
+        if (data?.driver_status === "suspended") {
+          Alert.alert(
+            "Account Suspended",
+            data.message ||
+              "Deposit the collected money to the Meezo platform before accepting new deliveries.",
+          );
+        }
         showToast(data.message || "Failed to accept delivery", "error");
       }
     } catch (e) {
@@ -497,16 +886,21 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       showToast("Failed to accept delivery", "error");
     } finally {
       setAccepting(null);
+      setIsLoadingAfterAccept(false);
     }
   };
 
-  const handleDecline = (deliveryId) => {
+  const handleDecline = (deliveryId, cardIndex) => {
     setDeclinedIds((prev) => new Set([...prev, deliveryId]));
 
-    // Scroll to top
-    if (flatListRef.current) {
-      flatListRef.current.scrollToOffset({ offset: 0, animated: true });
-    }
+    // Keep flow continuous: move declined card to bottom and focus adjacent card.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!flatListRef.current || typeof cardIndex !== "number") return;
+        const nextIndex = Math.max(0, cardIndex);
+        flatListRef.current.scrollToIndex({ index: nextIndex, animated: true });
+      });
+    });
   };
 
   const showToast = (message, type = "success") => {
@@ -527,21 +921,82 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   };
 
   const onRefresh = useCallback(() => {
-    fetchDeliveriesWithCurrentLocation(true);
+    fetchDeliveriesWithCurrentLocation(true, "pull_to_refresh");
+  }, []);
+
+  const getTipAmount = useCallback((delivery) => {
+    return Number.parseFloat(delivery?.pricing?.tip_amount || 0);
+  }, []);
+
+  const getCreatedAtTimestamp = useCallback((delivery) => {
+    const candidates = [
+      delivery?.created_at,
+      delivery?.delivery_created_at,
+      delivery?.orders?.created_at,
+      delivery?.orders?.[0]?.created_at,
+    ];
+
+    for (const raw of candidates) {
+      if (!raw) continue;
+      const ts = new Date(raw).getTime();
+      if (Number.isFinite(ts)) return ts;
+    }
+
+    return Number.MAX_SAFE_INTEGER;
   }, []);
 
   // ============================================================================
   // RENDER HELPERS
   // ============================================================================
 
-  // Sort deliveries: non-declined first, then declined
+  // Sort deliveries: non-declined first, then tip-provided first, then oldest first.
   const sortedDeliveries = useMemo(() => {
-    const nonDeclined = deliveries.filter(
-      (d) => !declinedIds.has(d.delivery_id),
+    const meta = deliveryMetaRef.current;
+    const deduped = [];
+    const seen = new Set();
+    for (const delivery of deliveries) {
+      if (!delivery?.delivery_id || seen.has(delivery.delivery_id)) continue;
+      seen.add(delivery.delivery_id);
+      deduped.push(delivery);
+    }
+
+    const originalIndex = new Map(
+      deduped.map((delivery, index) => [delivery.delivery_id, index]),
     );
-    const declined = deliveries.filter((d) => declinedIds.has(d.delivery_id));
-    return [...nonDeclined, ...declined];
-  }, [deliveries, declinedIds]);
+
+    return [...deduped].sort((a, b) => {
+      const aDeclined = declinedIds.has(a.delivery_id);
+      const bDeclined = declinedIds.has(b.delivery_id);
+      if (aDeclined !== bDeclined) return aDeclined ? 1 : -1;
+
+      const aTip = getTipAmount(a);
+      const bTip = getTipAmount(b);
+      const aHasTip = aTip > 0;
+      const bHasTip = bTip > 0;
+      if (aHasTip !== bHasTip) return aHasTip ? -1 : 1;
+
+      const aCreatedAt = getCreatedAtTimestamp(a);
+      const bCreatedAt = getCreatedAtTimestamp(b);
+      if (aCreatedAt !== bCreatedAt) return aCreatedAt - bCreatedAt;
+
+      const priorityA = Number(meta.get(a.delivery_id)?.priorityTs || 0);
+      const priorityB = Number(meta.get(b.delivery_id)?.priorityTs || 0);
+      if (priorityA !== priorityB) return priorityB - priorityA;
+
+      return (
+        (originalIndex.get(a.delivery_id) || 0) -
+        (originalIndex.get(b.delivery_id) || 0)
+      );
+    });
+  }, [deliveries, declinedIds, getCreatedAtTimestamp, getTipAmount]);
+
+  const displayOrderById = useMemo(() => {
+    const orderMap = new Map();
+    sortedDeliveries.forEach((delivery, index) => {
+      orderMap.set(delivery.delivery_id, index);
+    });
+    return orderMap;
+  }, [sortedDeliveries]);
 
   const renderDeliveryCard = ({ item, index }) => {
     const isDeclined = declinedIds.has(item.delivery_id);
@@ -554,12 +1009,23 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       <DeliveryCard
         delivery={item}
         driverLocation={driverLocation}
+        viewportHeight={viewportHeight}
+        mapViewportHeight={mapViewportHeight}
+        tabBarHeight={tabBarHeight}
+        onMapInteractionStart={() => setIsMapInteracting(true)}
+        onMapInteractionEnd={() => setIsMapInteracting(false)}
         accepting={accepting === item.delivery_id}
+        isSyncing={isDeliveriesSyncing || isLoadingAfterAccept}
         onAccept={handleAcceptDelivery}
         onDecline={handleDecline}
         hasActiveDeliveries={currentRoute.active_deliveries > 0}
         isFirstDelivery={isFirstNonDeclined}
         isDeclined={isDeclined}
+        cardIndex={displayOrderById.get(item.delivery_id) ?? index}
+        currentIndex={(displayOrderById.get(item.delivery_id) ?? index) + 1}
+        totalAvailable={sortedDeliveries.length || deliveries.length}
+        isMapActive={Math.abs(index - currentVisibleIndex) <= 1}
+        onBack={() => navigation.goBack()}
       />
     );
   };
@@ -569,7 +1035,14 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   // ============================================================================
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: insets.top,
+        },
+      ]}
+    >
       {/* Toast Notification */}
       {toast && (
         <Animated.View
@@ -616,126 +1089,126 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       {fetchError && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>⚠️ {fetchError}</Text>
-          <Pressable onPress={() => fetchDeliveriesWithCurrentLocation(false)}>
+          <Pressable
+            onPress={() =>
+              fetchDeliveriesWithCurrentLocation(false, "banner_refresh")
+            }
+          >
             <Text style={styles.errorRetry}>Retry</Text>
           </Pressable>
         </View>
       )}
 
-      {/* Header */}
-      <SafeAreaView edges={["top"]} style={styles.header}>
-        <View style={styles.headerContent}>
-          <Pressable
-            style={styles.backBtn}
-            onPress={() => navigation.navigate("Active")}
-          >
-            <Text style={styles.backBtnText}>←</Text>
-          </Pressable>
-          <View style={styles.headerTitleWrap}>
-            <Text style={styles.headerTitle}>New Delivery Request</Text>
-            <View style={styles.headerSubRow}>
-              <Text style={styles.headerSubtitle}>
-                {deliveries.length} available
+      <DriverScreenSection
+        screenKey="AvailableDeliveries"
+        sectionIndex={0}
+        style={{ flex: 1 }}
+      >
+        {/* Content */}
+        {inDeliveringMode ? (
+          <View style={styles.deliveringContainer}>
+            <Text style={styles.deliveringEmoji}></Text>
+            <Text style={styles.deliveringTitle}>Currently Delivering</Text>
+            <Text style={styles.deliveringSubtitle}>
+              Complete current deliveries first
+            </Text>
+            <Pressable
+              style={styles.goToActiveBtn}
+              onPress={() => navigation.navigate("Active")}
+            >
+              <Text style={styles.goToActiveBtnText}>
+                Go to Active Deliveries
               </Text>
-              {isRefreshing && (
-                <ActivityIndicator
-                  size="small"
-                  color="#13ec37"
-                  style={{ marginLeft: 8 }}
-                />
+            </Pressable>
+          </View>
+        ) : !hasVisitedAvailableDeliveriesScreen &&
+          initialLoading &&
+          !hasCompletedFirstFetch ? (
+          <DriverMapSheetLoadingSkeleton />
+        ) : deliveries.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyEmoji}>📦</Text>
+            <Text style={styles.emptyTitle}>No Deliveries Near You</Text>
+            <Text style={styles.emptySubtitle}>
+              {currentRoute.active_deliveries >= 5
+                ? "You've reached the maximum of 5 deliveries. Complete some deliveries first."
+                : "No delivery requests available in your area right now. We'll notify you when new orders come in!"}
+            </Text>
+            <View style={styles.emptyButtons}>
+              <Pressable
+                style={styles.refreshBtn}
+                onPress={() => {
+                  fetchDeliveriesWithCurrentLocation(false, "retry_button");
+                }}
+              >
+                <Text style={styles.refreshBtnText}>Refresh</Text>
+              </Pressable>
+              {currentRoute.active_deliveries > 0 && (
+                <Pressable
+                  style={styles.viewActiveBtn}
+                  onPress={() => navigation.navigate("Active")}
+                >
+                  <Text style={styles.viewActiveBtnText}>
+                    View Active ({currentRoute.active_deliveries})
+                  </Text>
+                </Pressable>
               )}
             </View>
           </View>
-          {currentRoute.active_deliveries > 0 && (
-            <View style={styles.activeBadge}>
-              <Text style={styles.activeBadgeText}>
-                {currentRoute.active_deliveries} Active
-              </Text>
-            </View>
-          )}
-        </View>
-      </SafeAreaView>
-
-      {/* Content */}
-      {inDeliveringMode ? (
-        <View style={styles.deliveringContainer}>
-          <Text style={styles.deliveringEmoji}></Text>
-          <Text style={styles.deliveringTitle}>Currently Delivering</Text>
-          <Text style={styles.deliveringSubtitle}>
-            Complete current deliveries first
-          </Text>
-          <Pressable
-            style={styles.goToActiveBtn}
-            onPress={() => navigation.navigate("Active")}
+        ) : (
+          <Animated.View
+            style={{
+              flex: 1,
+              opacity: listFadeAnim,
+              transform: [
+                {
+                  translateY: listFadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [10, 0],
+                  }),
+                },
+              ],
+            }}
           >
-            <Text style={styles.goToActiveBtnText}>
-              Go to Active Deliveries
-            </Text>
-          </Pressable>
-        </View>
-      ) : initialLoading || !hasCompletedFirstFetch || isLoadingAfterAccept ? (
-        <ScrollView style={styles.loadingContainer}>
-          <SkeletonCard withHeartbeat={isLoadingAfterAccept} />
-          <SkeletonCard withHeartbeat={isLoadingAfterAccept} />
-          <SkeletonCard withHeartbeat={isLoadingAfterAccept} />
-          {isLoadingAfterAccept && (
-            <Text style={styles.loadingText}>
-              Loading available deliveries...
-            </Text>
-          )}
-        </ScrollView>
-      ) : deliveries.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyEmoji}>📦</Text>
-          <Text style={styles.emptyTitle}>No Deliveries Near You</Text>
-          <Text style={styles.emptySubtitle}>
-            {currentRoute.active_deliveries >= 5
-              ? "You've reached the maximum of 5 deliveries. Complete some deliveries first."
-              : "No delivery requests available in your area right now. We'll notify you when new orders come in!"}
-          </Text>
-          <View style={styles.emptyButtons}>
-            <Pressable
-              style={styles.refreshBtn}
-              onPress={() => {
-                setIsLoadingAfterAccept(true);
-                fetchPendingDeliveriesWithLocation(
-                  driverLocation,
-                  false,
-                ).finally(() => setIsLoadingAfterAccept(false));
-              }}
-            >
-              <Text style={styles.refreshBtnText}>Refresh</Text>
-            </Pressable>
-            {currentRoute.active_deliveries > 0 && (
-              <Pressable
-                style={styles.viewActiveBtn}
-                onPress={() => navigation.navigate("Active")}
-              >
-                <Text style={styles.viewActiveBtnText}>
-                  View Active ({currentRoute.active_deliveries})
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
-      ) : (
-        <FlatList
-          ref={flatListRef}
-          data={sortedDeliveries}
-          renderItem={renderDeliveryCard}
-          keyExtractor={(item) => item.delivery_id.toString()}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={onRefresh}
-              tintColor="#13ec37"
-              colors={["#13ec37"]}
+            <FlatList
+              ref={flatListRef}
+              data={sortedDeliveries}
+              renderItem={renderDeliveryCard}
+              scrollEnabled={!isMapInteracting}
+              keyExtractor={(item) => item.delivery_id.toString()}
+              showsVerticalScrollIndicator={false}
+              pagingEnabled={true}
+              snapToInterval={viewportHeight}
+              snapToAlignment="start"
+              disableIntervalMomentum={true}
+              decelerationRate="fast"
+              bounces={false}
+              directionalLockEnabled
+              scrollEventThrottle={32}
+              initialNumToRender={1}
+              maxToRenderPerBatch={1}
+              windowSize={2}
+              removeClippedSubviews={true}
+              onViewableItemsChanged={onViewableItemsChangedRef.current}
+              viewabilityConfig={viewabilityConfigRef.current}
+              getItemLayout={(_, index) => ({
+                length: viewportHeight,
+                offset: viewportHeight * index,
+                index,
+              })}
+              refreshControl={
+                <RefreshControl
+                  refreshing={isRefreshing}
+                  onRefresh={onRefresh}
+                  tintColor="#13ec37"
+                  colors={["#13ec37"]}
+                />
+              }
+              contentContainerStyle={{ paddingBottom: 0 }}
             />
-          }
-          contentContainerStyle={{ paddingBottom: 100 }}
-        />
-      )}
+          </Animated.View>
+        )}
+      </DriverScreenSection>
     </View>
   );
 }
@@ -747,12 +1220,23 @@ export default function AvailableDeliveriesScreen({ navigation }) {
 function DeliveryCard({
   delivery,
   driverLocation,
+  viewportHeight,
+  mapViewportHeight,
+  tabBarHeight = 0,
+  onMapInteractionStart,
+  onMapInteractionEnd,
   accepting,
+  isSyncing = false,
   onAccept,
   onDecline,
+  onBack,
   hasActiveDeliveries,
   isFirstDelivery = false,
   isDeclined = false,
+  cardIndex = 0,
+  currentIndex = 1,
+  totalAvailable = 1,
+  isMapActive = true,
 }) {
   const {
     delivery_id,
@@ -783,6 +1267,11 @@ function DeliveryCard({
   } = route_impact || {};
 
   const mapRef = useRef(null);
+  const hasInitialFitRef = useRef(false);
+  const cardHeight = viewportHeight || SCREEN_HEIGHT;
+  const mapHeight = mapViewportHeight || Math.round(cardHeight * 0.41);
+  const overlayHeight = Math.max(370, cardHeight - mapHeight);
+  const contentBottomInset = Math.max(16, Math.round(tabBarHeight * 0.18));
   const totalItems = order_items.reduce(
     (sum, item) => sum + (item.quantity || 0),
     0,
@@ -849,6 +1338,21 @@ function DeliveryCard({
 
   const hasPolylineData =
     driverToRestaurantPath.length > 0 || restaurantToCustomerPath.length > 0;
+
+  const pickupAddress =
+    restaurant?.address ||
+    delivery?.pickup_address ||
+    delivery?.restaurant_address ||
+    restaurant?.city ||
+    "No pickup address";
+
+  const dropoffAddress =
+    customer?.address ||
+    delivery?.dropoff_address ||
+    delivery?.delivery_address ||
+    delivery?.customer_address ||
+    customer?.city ||
+    "No drop-off address";
 
   // Generate curved path for stacked deliveries (fallback)
   const generateCurvedPath = useCallback((start, end, numPoints = 50) => {
@@ -918,56 +1422,87 @@ function DeliveryCard({
     );
   }, [restaurant, customer, generateCurvedPath]);
 
-  // Fit map to markers
-  useEffect(() => {
-    if (mapRef.current && restaurant && customer) {
-      const coordinates = [];
-      if (driverLocation) {
-        coordinates.push({
-          latitude: driverLocation.latitude,
-          longitude: driverLocation.longitude,
-        });
-      }
-      coordinates.push({
+  const fitCoordinates = useMemo(() => {
+    const points = [];
+
+    if (driverLocation) {
+      points.push({
+        latitude: driverLocation.latitude,
+        longitude: driverLocation.longitude,
+      });
+    }
+
+    if (restaurant?.latitude && restaurant?.longitude) {
+      points.push({
         latitude: parseFloat(restaurant.latitude),
         longitude: parseFloat(restaurant.longitude),
       });
-      coordinates.push({
+    }
+
+    if (customer?.latitude && customer?.longitude) {
+      points.push({
         latitude: parseFloat(customer.latitude),
         longitude: parseFloat(customer.longitude),
       });
-
-      setTimeout(() => {
-        mapRef.current?.fitToCoordinates(coordinates, {
-          edgePadding: { top: 60, right: 40, bottom: 60, left: 40 },
-          animated: true,
-        });
-      }, 300);
     }
-  }, [restaurant, customer, driverLocation]);
+
+    driverToRestaurantPath.forEach((p) => points.push(p));
+    restaurantToCustomerPath.forEach((p) => points.push(p));
+    driverToRestaurantCurved.forEach((p) => points.push(p));
+    restaurantToCustomerCurved.forEach((p) => points.push(p));
+
+    return points;
+  }, [
+    driverLocation,
+    restaurant,
+    customer,
+    driverToRestaurantPath,
+    restaurantToCustomerPath,
+    driverToRestaurantCurved,
+    restaurantToCustomerCurved,
+  ]);
+
+  // Fit once per card so map can be freely dragged after initial load.
+  useEffect(() => {
+    if (
+      !mapRef.current ||
+      hasInitialFitRef.current ||
+      fitCoordinates.length < 2
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      mapRef.current?.fitToCoordinates(fitCoordinates, {
+        edgePadding: {
+          top: 40,
+          right: 40,
+          bottom: Math.round(overlayHeight + 24),
+          left: 40,
+        },
+        animated: true,
+      });
+      hasInitialFitRef.current = true;
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [fitCoordinates, delivery_id, overlayHeight]);
+
+  useEffect(() => {
+    hasInitialFitRef.current = false;
+  }, [delivery_id]);
 
   return (
     <View
       style={[
         styles.card,
+        { height: cardHeight },
         isDeclined && styles.cardDeclined,
         !can_accept && styles.cardDisabled,
       ]}
     >
-      {/* Declined Badge */}
-      {isDeclined && (
-        <View style={styles.declinedBanner}>
-          <Text style={styles.declinedBannerIcon}>⏱️</Text>
-          <Text style={styles.declinedBannerText}>Moved to bottom</Text>
-          <Text style={styles.declinedBannerHint}>
-            Still available to accept
-          </Text>
-        </View>
-      )}
-
-      {/* Map Section */}
-      <View style={styles.mapContainer}>
-        {restaurant && customer ? (
+      <View style={styles.mapFullScreen}>
+        {isMapActive && restaurant && customer ? (
           <FreeMapView
             ref={mapRef}
             style={styles.map}
@@ -977,8 +1512,10 @@ function DeliveryCard({
               latitudeDelta: 0.05,
               longitudeDelta: 0.05,
             }}
-            scrollEnabled={false}
-            zoomEnabled={false}
+            scrollEnabled={true}
+            zoomEnabled={true}
+            onInteractionStart={onMapInteractionStart}
+            onInteractionEnd={onMapInteractionEnd}
             markers={[
               ...(driverLocation
                 ? [
@@ -989,7 +1526,7 @@ function DeliveryCard({
                         longitude: driverLocation.longitude,
                       },
                       type: "driver",
-                      emoji: "🛵",
+                      emoji: "➤",
                     },
                   ]
                 : []),
@@ -1000,7 +1537,7 @@ function DeliveryCard({
                   longitude: parseFloat(restaurant.longitude),
                 },
                 type: "restaurant",
-                emoji: "🏪",
+                emoji: "⌂",
               },
               {
                 id: "customer",
@@ -1009,7 +1546,7 @@ function DeliveryCard({
                   longitude: parseFloat(customer.longitude),
                 },
                 type: "customer",
-                emoji: "📍",
+                emoji: "⌖",
               },
             ]}
             polylines={[
@@ -1022,6 +1559,7 @@ function DeliveryCard({
                       coordinates: driverToRestaurantPath,
                       strokeColor: "#1a1a1a",
                       strokeWidth: 4,
+                      dashArray: isStackedDelivery ? "10 8" : "",
                     },
                   ]
                 : []),
@@ -1034,6 +1572,7 @@ function DeliveryCard({
                       coordinates: restaurantToCustomerPath,
                       strokeColor: "#1a1a1a",
                       strokeWidth: 3,
+                      dashArray: isStackedDelivery ? "10 8" : "",
                     },
                   ]
                 : []),
@@ -1046,6 +1585,7 @@ function DeliveryCard({
                       coordinates: driverToRestaurantCurved,
                       strokeColor: "#1a1a1a",
                       strokeWidth: 4,
+                      dashArray: isStackedDelivery ? "10 8" : "",
                     },
                   ]
                 : []),
@@ -1058,6 +1598,7 @@ function DeliveryCard({
                       coordinates: restaurantToCustomerCurved,
                       strokeColor: "#1a1a1a",
                       strokeWidth: 3,
+                      dashArray: isStackedDelivery ? "10 8" : "",
                     },
                   ]
                 : []),
@@ -1068,6 +1609,7 @@ function DeliveryCard({
                       coordinates: driverToRestaurantCurved,
                       strokeColor: "#1a1a1a",
                       strokeWidth: 4,
+                      dashArray: "10 8",
                     },
                   ]
                 : []),
@@ -1078,6 +1620,7 @@ function DeliveryCard({
                       coordinates: restaurantToCustomerCurved,
                       strokeColor: "#1a1a1a",
                       strokeWidth: 4,
+                      dashArray: "10 8",
                     },
                   ]
                 : []),
@@ -1085,25 +1628,36 @@ function DeliveryCard({
           />
         ) : (
           <View style={styles.mapLoading}>
-            <ActivityIndicator size="large" color="#13ec37" />
-            <Text style={styles.mapLoadingText}>Loading map...</Text>
+            <Text style={styles.mapLoadingText}>Map preview</Text>
           </View>
-        )}
-
-        {/* Decline Button */}
-        {onDecline && !isDeclined && (
-          <Pressable
-            style={styles.declineBtn}
-            onPress={() => onDecline(delivery_id)}
-          >
-            <Text style={styles.declineBtnIcon}>🗑️</Text>
-            <Text style={styles.declineBtnText}>Decline</Text>
-          </Pressable>
         )}
       </View>
 
-      {/* Content Card */}
-      <View style={styles.cardContent}>
+      {onBack && (
+        <Pressable style={styles.floatingBackBtn} onPress={onBack}>
+          <Text style={styles.floatingBackBtnText}>←</Text>
+        </Pressable>
+      )}
+
+      {onDecline && !isDeclined && (
+        <Pressable
+          style={styles.floatingDeclineBtn}
+          onPress={() => onDecline(delivery_id, cardIndex)}
+        >
+          <Text style={styles.declineBtnIcon}>✕</Text>
+          <Text style={styles.declineBtnText}>Decline</Text>
+        </Pressable>
+      )}
+
+      <View
+        style={[
+          styles.cardContentOverlay,
+          {
+            height: overlayHeight,
+            paddingBottom: contentBottomInset,
+          },
+        ]}
+      >
         {/* Cannot Accept Warning */}
         {!can_accept && reason && (
           <View style={styles.warningBox}>
@@ -1111,69 +1665,77 @@ function DeliveryCard({
           </View>
         )}
 
-        {/* Tip Amount Badge */}
-        {tipAmount > 0 && (
-          <View style={styles.tipBox}>
-            <View style={styles.tipLeft}>
-              <Text style={styles.tipIcon}>💰</Text>
-              <Text style={styles.tipLabel}>Manager Tip Included</Text>
-            </View>
-            <Text style={styles.tipValue}>+Rs.{tipAmount.toFixed(0)}</Text>
-          </View>
-        )}
+        {/* Earnings Section (Website Parity) */}
+        <View style={styles.earningsHero}>
+          <Text style={styles.earningsAmount}>
+            {`Rs. ${(isStackedDelivery
+              ? extra_earnings + bonus_amount + tipAmount
+              : total_trip_earnings + tipAmount || driverEarnings
+            ).toFixed(2)}`}
+          </Text>
+          <Text style={styles.earningsLabel}>Total Earnings</Text>
+        </View>
 
-        {/* Stacked Delivery: Bonus Box */}
-        {isStackedDelivery && Number(bonus_amount) > 0 && (
-          <View style={styles.bonusBox}>
-            <Text style={styles.bonusLabel}>Bonus For This Delivery</Text>
-            <Text style={styles.bonusValue}>
-              +Rs.{Number(bonus_amount).toFixed(2)}
+        <View style={styles.breakdownRow}>
+          <View style={styles.breakdownPill}>
+            <Text style={styles.breakdownPillText}>
+              Delivery: Rs.
+              {(isStackedDelivery
+                ? extra_earnings || 0
+                : total_trip_earnings || driverEarnings || 0
+              ).toFixed(0)}
             </Text>
           </View>
-        )}
-
-        {/* Earnings Section */}
-        <View style={styles.earningsRow}>
-          <View>
-            <Text style={styles.earningsAmount}>
-              {isStackedDelivery
-                ? `+Rs.${Number(extra_earnings || 0).toFixed(2)}`
-                : `Rs. ${Number(total_trip_earnings || driverEarnings || 0).toFixed(2)}`}
-            </Text>
-            <Text style={styles.earningsLabel}>
-              {isStackedDelivery ? "Extra Earnings" : "Total Earnings"}
-            </Text>
-          </View>
-          <View style={styles.statsColumn}>
-            <View style={styles.statBadge}>
-              <Text style={styles.statIcon}>🗺️</Text>
-              <Text style={styles.statValue}>
-                {isStackedDelivery
-                  ? `+${Number(extra_distance_km || 0).toFixed(1)} km`
-                  : `${Number(total_delivery_distance_km || r1_distance_km || 0).toFixed(1)} km`}
+          {tipAmount > 0 && (
+            <View style={[styles.breakdownPill, styles.breakdownPillDark]}>
+              <Text style={styles.breakdownPillTextOnDark}>
+                Tip: Rs.{tipAmount.toFixed(0)}
               </Text>
             </View>
-            <View style={styles.statBadge}>
-              <Text style={styles.statIcon}>⏱️</Text>
-              <Text style={styles.statValue}>
-                {isStackedDelivery
-                  ? `+${Number(extra_time_minutes || 0).toFixed(0)} mins`
-                  : `${estimated_time_minutes || 0} mins`}
+          )}
+          {Number(bonus_amount) > 0 && (
+            <View style={[styles.breakdownPill, styles.breakdownPillBonus]}>
+              <Text style={styles.breakdownPillTextOnDark}>
+                Bonus: Rs.{Number(bonus_amount).toFixed(0)}
               </Text>
             </View>
+          )}
+        </View>
+
+        <View style={styles.statsRowCompact}>
+          <View style={styles.statItemCompact}>
+            <Ionicons name="map-outline" size={16} color="#6B7280" />
+            <Text style={styles.statValueCompact}>
+              {isStackedDelivery ? "+" : ""}
+              {Number(
+                isStackedDelivery
+                  ? extra_distance_km
+                  : total_delivery_distance_km || r1_distance_km || 0,
+              ).toFixed(1)}{" "}
+              km
+            </Text>
+          </View>
+          <View style={styles.statItemCompact}>
+            <Ionicons name="time-outline" size={16} color="#6B7280" />
+            <Text style={styles.statValueCompact}>
+              {isStackedDelivery ? "+" : ""}
+              {Number(
+                isStackedDelivery
+                  ? extra_time_minutes
+                  : estimated_time_minutes || 0,
+              ).toFixed(0)}{" "}
+              mins
+            </Text>
           </View>
         </View>
 
-        {/* Route Details Header */}
-        <Text style={styles.sectionTitle}>Route Details</Text>
-
-        {/* Timeline */}
+        {/* Timeline (Website Parity) */}
         <View style={styles.timeline}>
           {/* Pickup */}
           <View style={styles.timelineItem}>
             <View style={styles.timelineIconWrap}>
               <View style={styles.timelineIcon}>
-                <Text style={styles.timelineIconText}>🏢</Text>
+                <Ionicons name="business-outline" size={20} color="#13ec37" />
               </View>
               <View style={styles.timelineLine} />
             </View>
@@ -1182,8 +1744,8 @@ function DeliveryCard({
                 Pickup:{" "}
                 <Text style={styles.timelineName}>{restaurant?.name}</Text>
               </Text>
-              <Text style={styles.timelineAddress} numberOfLines={2}>
-                {restaurant?.address}
+              <Text style={styles.timelineAddress} numberOfLines={1}>
+                {pickupAddress}
               </Text>
             </View>
           </View>
@@ -1192,7 +1754,7 @@ function DeliveryCard({
           <View style={styles.timelineItem}>
             <View style={styles.timelineIconWrap}>
               <View style={styles.timelineIcon}>
-                <Text style={styles.timelineIconText}>📍</Text>
+                <Ionicons name="location-outline" size={20} color="#13ec37" />
               </View>
             </View>
             <View style={styles.timelineContent}>
@@ -1202,55 +1764,52 @@ function DeliveryCard({
                   {customer?.name || "Customer"}
                 </Text>
               </Text>
-              <Text style={styles.timelineAddress} numberOfLines={2}>
-                {customer?.address || "No address"}
+              <Text style={styles.timelineAddress} numberOfLines={1}>
+                {dropoffAddress}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* Items Badge */}
-        {totalItems > 0 && (
-          <View style={styles.badgesRow}>
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>
-                🛒 {totalItems} item{totalItems !== 1 ? "s" : ""}
-              </Text>
-            </View>
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>#{order_number}</Text>
-            </View>
+        {/* Accept/Live Row (Website Parity) */}
+        <View style={styles.acceptRow}>
+          <View style={styles.livePill}>
+            <View style={styles.liveDot} />
+            <Text style={styles.livePillText}>Live</Text>
           </View>
-        )}
-
-        {/* Accept Button */}
-        <Pressable
-          style={[
-            styles.acceptBtn,
-            !can_accept && styles.acceptBtnDisabled,
-            accepting && styles.acceptBtnLoading,
-          ]}
-          onPress={() => onAccept(delivery_id)}
-          disabled={accepting || !can_accept}
-        >
-          {accepting ? (
-            <>
-              <ActivityIndicator size="small" color="#111812" />
-              <Text style={styles.acceptBtnText}>Accepting...</Text>
-            </>
-          ) : !can_accept ? (
-            <Text style={styles.acceptBtnTextDisabled}>Cannot Accept</Text>
-          ) : (
-            <>
-              <Text style={styles.acceptBtnText}>
-                {isStackedDelivery
-                  ? "Accept Stacked Delivery"
-                  : "Accept Delivery"}
-              </Text>
-              <Text style={styles.acceptBtnArrow}>→</Text>
-            </>
-          )}
-        </Pressable>
+          <Pressable
+            style={[
+              styles.acceptBtn,
+              !can_accept && styles.acceptBtnDisabled,
+              (accepting || isSyncing) && styles.acceptBtnLoading,
+            ]}
+            onPress={() => onAccept(delivery_id, delivery)}
+            disabled={accepting || isSyncing || !can_accept}
+          >
+            {accepting ? (
+              <>
+                <ActivityIndicator size="small" color="#111812" />
+                <Text style={styles.acceptBtnText}>Accepting...</Text>
+              </>
+            ) : isSyncing ? (
+              <>
+                <ActivityIndicator size="small" color="#111812" />
+                <Text style={styles.acceptBtnText}>Updating...</Text>
+              </>
+            ) : !can_accept ? (
+              <Text style={styles.acceptBtnTextDisabled}>Cannot Accept</Text>
+            ) : (
+              <>
+                <Text style={styles.acceptBtnText}>
+                  {isStackedDelivery
+                    ? "Accept Stacked Delivery"
+                    : "Accept Delivery"}
+                </Text>
+                <Text style={styles.acceptBtnArrow}>→</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -1532,62 +2091,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  // Header
-  header: {
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  headerContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#F3F4F6",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backBtnText: {
-    fontSize: 22,
-    color: "#374151",
-    fontWeight: "600",
-  },
-  headerTitleWrap: {
-    flex: 1,
-    alignItems: "center",
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#111827",
-    textAlign: "center",
-  },
-  headerSubRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: "#6B7280",
-  },
-  activeBadge: {
-    backgroundColor: "#13ec37",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  activeBadgeText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-
   // Delivering Mode
   deliveringContainer: {
     flex: 1,
@@ -1749,6 +2252,8 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     marginBottom: 0,
+    height: SCREEN_HEIGHT,
+    overflow: "hidden",
   },
   cardDeclined: {
     opacity: 0.6,
@@ -1786,9 +2291,11 @@ const styles = StyleSheet.create({
 
   // Map Container
   mapContainer: {
-    height: SCREEN_HEIGHT * 0.4,
-    minHeight: 220,
+    flex: 1,
     backgroundColor: "#E5E7EB",
+  },
+  mapFullScreen: {
+    ...StyleSheet.absoluteFillObject,
   },
   map: {
     flex: 1,
@@ -1797,16 +2304,43 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#F8FAFC",
   },
   mapLoadingText: {
-    marginTop: 12,
-    color: "#6B7280",
+    color: "#9CA3AF",
     fontSize: 14,
+    fontWeight: "600",
   },
 
   // Decline Button
   declineBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  floatingBackBtn: {
+    position: "absolute",
+    top: 16,
+    left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 50,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  floatingBackBtnText: {
+    fontSize: 22,
+    color: "#111827",
+    fontWeight: "700",
+  },
+  floatingDeclineBtn: {
     position: "absolute",
     top: 16,
     right: 16,
@@ -1855,14 +2389,23 @@ const styles = StyleSheet.create({
   },
 
   // Card Content
-  cardContent: {
+  cardContentOverlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     backgroundColor: "#fff",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    marginTop: -28,
     paddingHorizontal: 20,
     paddingTop: 24,
-    paddingBottom: 20,
+    paddingBottom: 24,
+    maxHeight: SCREEN_HEIGHT * 0.65,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 20,
   },
 
   // Warning Box
@@ -1880,116 +2423,73 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  // Tip Box
-  tipBox: {
-    backgroundColor: "#FFFBEB",
-    borderWidth: 2,
-    borderColor: "#FCD34D",
-    borderStyle: "dashed",
-    borderRadius: 12,
-    padding: 12,
-    flexDirection: "row",
-    justifyContent: "space-between",
+  // Earnings Hero
+  earningsHero: {
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  tipLeft: {
+  breakdownRow: {
     flexDirection: "row",
-    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "center",
     gap: 8,
+    marginBottom: 14,
   },
-  tipIcon: {
-    fontSize: 18,
+  breakdownPill: {
+    backgroundColor: "#F3F4F6",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
-  tipLabel: {
-    fontSize: 14,
+  breakdownPillBonus: {
+    backgroundColor: "#13ec37",
+  },
+  breakdownPillDark: {
+    backgroundColor: "#111827",
+  },
+  breakdownPillText: {
+    fontSize: 11,
     fontWeight: "700",
     color: "#374151",
   },
-  tipValue: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#D97706",
+  breakdownPillTextOnDark: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#fff",
   },
-
-  // Bonus Box
-  bonusBox: {
-    backgroundColor: "#EDFBF2",
-    borderWidth: 2,
-    borderColor: "#13ec37",
-    borderStyle: "dashed",
-    borderRadius: 12,
-    padding: 12,
+  statsRowCompact: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "center",
     alignItems: "center",
-    marginBottom: 16,
+    gap: 14,
+    marginBottom: 14,
   },
-  bonusLabel: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#374151",
-  },
-  bonusValue: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#13ec37",
-  },
-
-  // Earnings Row
-  earningsRow: {
+  statItemCompact: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-    marginBottom: 16,
+    alignItems: "center",
+    gap: 6,
+  },
+  statValueCompact: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#4B5563",
   },
   earningsAmount: {
-    fontSize: 28,
+    fontSize: 36,
     fontWeight: "800",
     color: "#13ec37",
+    textAlign: "center",
   },
   earningsLabel: {
-    fontSize: 14,
-    color: "#111812",
-    fontWeight: "500",
-    marginTop: 2,
-  },
-  statsColumn: {
-    alignItems: "flex-end",
-    gap: 6,
-  },
-  statBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F3F4F6",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
-  },
-  statIcon: {
-    fontSize: 14,
-  },
-  statValue: {
     fontSize: 13,
+    color: "#6B7280",
     fontWeight: "700",
-    color: "#111812",
-  },
-
-  // Section Title
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 16,
+    marginTop: 1,
   },
 
   // Timeline
   timeline: {
-    marginBottom: 16,
+    marginBottom: 10,
   },
   timelineItem: {
     flexDirection: "row",
@@ -1999,15 +2499,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   timelineIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(19, 236, 55, 0.1)",
+    width: 22,
+    height: 22,
     alignItems: "center",
     justifyContent: "center",
-  },
-  timelineIconText: {
-    fontSize: 18,
   },
   timelineLine: {
     width: 2,
@@ -2057,8 +2552,17 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
+  acceptRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 2,
+    zIndex: 2,
+  },
   // Accept Button
   acceptBtn: {
+    flex: 1,
     height: 56,
     backgroundColor: "#13ec37",
     borderRadius: 28,
@@ -2088,6 +2592,26 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111812",
   },
+  livePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F3F4F6",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#13ec37",
+  },
+  livePillText: {
+    fontSize: 12,
+    color: "#374151",
+    fontWeight: "700",
+  },
 
   // ============================================================================
   // SKELETON STYLES
@@ -2097,6 +2621,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     marginBottom: 16,
     overflow: "hidden",
+    minHeight: SCREEN_HEIGHT,
   },
   skeletonMap: {
     height: SCREEN_HEIGHT * 0.4,

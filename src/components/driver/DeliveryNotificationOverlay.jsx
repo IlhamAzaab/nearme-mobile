@@ -1,7 +1,13 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import React from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Dimensions,
+} from "react-native";
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 /**
  * DeliveryNotificationOverlay - Full-screen overlay for incoming delivery requests
@@ -15,10 +21,41 @@ const DeliveryNotificationOverlay = ({
 }) => {
   if (!visible) return null;
 
+  const isStackedDelivery =
+    Number(delivery.delivery_sequence || 1) > 1 ||
+    parseFloat(delivery.extra_distance_km || 0) > 0 ||
+    parseFloat(delivery.extra_time_minutes || 0) > 0 ||
+    parseFloat(delivery.extra_earnings || 0) > 0 ||
+    parseFloat(delivery.bonus_amount || 0) > 0;
+
+  const mainEarnings = isStackedDelivery
+    ? parseFloat(delivery.extra_earnings || 0) +
+      parseFloat(delivery.bonus_amount || 0)
+    : parseFloat(
+        delivery.base_amount ||
+          delivery.driver_earnings ||
+          delivery.total_trip_earnings ||
+          delivery.earnings ||
+          0,
+      );
+
+  const tipValue = parseFloat(delivery.tip_amount || 0);
+  const totalEarnings = mainEarnings + tipValue;
+  const displayDistance = isStackedDelivery
+    ? parseFloat(delivery.extra_distance_km || 0)
+    : parseFloat(delivery.total_distance_km || delivery.distance || 0);
+  const displayTime = isStackedDelivery
+    ? parseFloat(delivery.extra_time_minutes || 0)
+    : parseFloat(delivery.estimated_time || 0);
+
   return (
     <View style={styles.overlay}>
       <View style={styles.card}>
-        <Text style={styles.header}>🛵 New Delivery Request!</Text>
+        <Text style={styles.header}>
+          {isStackedDelivery
+            ? "🛵 Stacked Delivery Request!"
+            : "🛵 New Delivery Request!"}
+        </Text>
 
         <View style={styles.timer}>
           <Text style={styles.timerText}>{timeRemaining}s</Text>
@@ -27,23 +64,41 @@ const DeliveryNotificationOverlay = ({
         <View style={styles.details}>
           <View style={styles.row}>
             <Text style={styles.label}>Restaurant</Text>
-            <Text style={styles.value}>{delivery.restaurantName || 'N/A'}</Text>
+            <Text style={styles.value}>{delivery.restaurantName || "N/A"}</Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.label}>Pickup</Text>
-            <Text style={styles.value} numberOfLines={2}>{delivery.pickupAddress || 'N/A'}</Text>
+            <Text style={styles.value} numberOfLines={2}>
+              {delivery.pickupAddress || "N/A"}
+            </Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.label}>Dropoff</Text>
-            <Text style={styles.value} numberOfLines={2}>{delivery.dropoffAddress || 'N/A'}</Text>
+            <Text style={styles.value} numberOfLines={2}>
+              {delivery.dropoffAddress || "N/A"}
+            </Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.label}>Distance</Text>
-            <Text style={styles.value}>{delivery.distance ? `${delivery.distance} km` : 'N/A'}</Text>
+            <Text style={styles.value}>
+              {Number.isFinite(displayDistance) && displayDistance > 0
+                ? `${isStackedDelivery ? "+" : ""}${displayDistance.toFixed(1)} km`
+                : "N/A"}
+            </Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>ETA</Text>
+            <Text style={styles.value}>
+              {Number.isFinite(displayTime) && displayTime > 0
+                ? `${isStackedDelivery ? "+" : ""}${Math.round(displayTime)} min`
+                : "N/A"}
+            </Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.label}>Earnings</Text>
-            <Text style={[styles.value, styles.earnings]}>ETB {delivery.earnings || '0'}</Text>
+            <Text style={[styles.value, styles.earnings]}>
+              Rs. {totalEarnings.toFixed(2)}
+            </Text>
           </View>
         </View>
 
@@ -63,57 +118,68 @@ const DeliveryNotificationOverlay = ({
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
     zIndex: 9999,
   },
   card: {
     width: SCREEN_WIDTH - 40,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 20,
     padding: 24,
   },
-  header: { fontSize: 20, fontWeight: '800', textAlign: 'center', marginBottom: 12 },
+  header: {
+    fontSize: 20,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 12,
+  },
   timer: {
-    alignSelf: 'center',
+    alignSelf: "center",
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#FEF3C7',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#FEF3C7",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
   },
-  timerText: { fontSize: 20, fontWeight: '800', color: '#D97706' },
+  timerText: { fontSize: 20, fontWeight: "800", color: "#D97706" },
   details: { marginBottom: 20 },
   row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: "#f0f0f0",
   },
-  label: { fontSize: 14, color: '#6B7280', flex: 1 },
-  value: { fontSize: 14, fontWeight: '600', color: '#1a1a1a', flex: 2, textAlign: 'right' },
-  earnings: { color: '#06C168', fontSize: 16 },
-  actions: { flexDirection: 'row', gap: 12 },
+  label: { fontSize: 14, color: "#6B7280", flex: 1 },
+  value: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1a1a1a",
+    flex: 2,
+    textAlign: "right",
+  },
+  earnings: { color: "#06C168", fontSize: 16 },
+  actions: { flexDirection: "row", gap: 12 },
   rejectBtn: {
     flex: 1,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: '#FEE2E2',
-    alignItems: 'center',
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
   },
-  rejectText: { color: '#DC2626', fontWeight: '700', fontSize: 16 },
+  rejectText: { color: "#DC2626", fontWeight: "700", fontSize: 16 },
   acceptBtn: {
     flex: 1,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: '#06C168',
-    alignItems: 'center',
+    backgroundColor: "#06C168",
+    alignItems: "center",
   },
-  acceptText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  acceptText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 });
 
 export default DeliveryNotificationOverlay;

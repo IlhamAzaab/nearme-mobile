@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_URL } from "../../config/env";
+import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
 import { getAccessToken } from "../../lib/authStorage";
 
 const fetchAdminProfile = async () => {
@@ -220,8 +221,7 @@ export default function Profile() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const translateYAnim = useRef(new Animated.Value(18)).current;
+  const pageEnterStyle = usePageEnterAnimation();
   const skeletonOpacity = useRef(new Animated.Value(0.55)).current;
 
   const profileQuery = useQuery({
@@ -254,21 +254,6 @@ export default function Profile() {
   const isInitialLoading =
     (profileQuery.isLoading && !profileQuery.data) ||
     (restaurantQuery.isLoading && !restaurantQuery.data);
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateYAnim, {
-        toValue: 0,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [fadeAnim, translateYAnim]);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -321,13 +306,7 @@ export default function Profile() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <Animated.View
-        style={{
-          flex: 1,
-          opacity: fadeAnim,
-          transform: [{ translateY: translateYAnim }],
-        }}
-      >
+      <Animated.View style={[styles.pageAnimationWrap, pageEnterStyle]}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -490,6 +469,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#F8FAFC",
+  },
+  pageAnimationWrap: {
+    flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 12,

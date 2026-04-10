@@ -5,7 +5,7 @@
  * - Online/Offline status toggle with working time validation
  * - Today's earnings and deliveries stats
  * - Active time tracking
- * - Nearby delivery requests with mini map previews
+ * - Nearby delivery requests list
  * - Working time based status (full_time, day, night)
  * - Manual override for outside working hours
  */
@@ -13,12 +13,14 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useIsFocused } from "@react-navigation/native";
+import { useQueryClient } from "@tanstack/react-query";
+import * as Location from "expo-location";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   AppState,
-  Dimensions,
   Image,
   Modal,
   Pressable,
@@ -31,13 +33,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AnimatedAlert from "../../components/common/AnimatedAlert";
-import FreeMapView from "../../components/maps/FreeMapView";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
+import { DriverDashboardLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_URL } from "../../config/env";
 import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNotificationContext";
+import { useSocket } from "../../context/SocketContext";
+import { approximateDistanceMeters } from "../../utils/osrmClient";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 // Working time display labels
 const WORKING_TIME_LABELS = {
@@ -47,119 +50,108 @@ const WORKING_TIME_LABELS = {
 };
 
 // Default driver location (Kinniya, Sri Lanka)
-const DEFAULT_LOCATION = { latitude: 8.5017, longitude: 81.2377 };
+const AVAILABLE_CACHE_KEY = "available_deliveries_cache";
+const AVAILABLE_CACHE_EXPIRY = 60000;
+const DASHBOARD_ASYNC_CACHE_KEY = "driver_dashboard_snapshot_cache";
+const DASHBOARD_ASYNC_CACHE_EXPIRY = 120000;
+const LOCATION_MAX_ACCURACY_METERS = 250;
+const LOCATION_MAX_RETRIES = 3;
+const LOCATION_RETRY_DELAY_MS = 1200;
+const DRIVER_STATUS_ENDPOINT = "/driver/working-hours-status";
+const NEARBY_PAGE_SIZE = 5;
+const DASHBOARD_CACHE_KEY = ["driver", "dashboard", "snapshot"];
+const AVAILABLE_SYNC_MOVEMENT_THRESHOLD = 200;
+const DRIVER_STATUS_FOCUS_SIGNAL_KEY = "driver_status_focus_signal";
+const DRIVER_STATUS_FOCUS_WINDOW_MS = 120000;
 
-// ============================================================================
-// Mini Map Component for delivery preview
-// ============================================================================
+// Full-screen skeleton should only appear on the first visit to this screen.
+let hasVisitedDriverDashboardScreen = false;
 
-function MiniDeliveryMap({ delivery }) {
-  const restaurant = delivery.restaurant;
-  const customerLocation = delivery.delivery || delivery.customer;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const center = useMemo(() => {
-    if (restaurant?.latitude && restaurant?.longitude) {
-      return {
-        latitude: restaurant.latitude,
-        longitude: restaurant.longitude,
-      };
-    }
-    return DEFAULT_LOCATION;
-  }, [restaurant]);
+const isFiniteNumber = (value) =>
+  typeof value === "number" && Number.isFinite(value);
 
-  const hasMarkers =
-    restaurant?.latitude &&
-    restaurant?.longitude &&
-    customerLocation?.latitude &&
-    customerLocation?.longitude;
+const isValidLocation = (location) => {
+  if (!location) return false;
+  const { latitude, longitude } = location;
+  if (!isFiniteNumber(latitude) || !isFiniteNumber(longitude)) return false;
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return false;
+  if (Math.abs(latitude) < 0.0001 && Math.abs(longitude) < 0.0001) return false;
+  return true;
+};
 
-  if (!hasMarkers) {
-    return (
-      <View style={styles.miniMapPlaceholder}>
-        <Ionicons name="map-outline" size={24} color="#cbd5e1" />
-      </View>
-    );
-  }
+const toValidLocation = (lat, lng) => {
+  const parsed = {
+    latitude: Number.parseFloat(lat),
+    longitude: Number.parseFloat(lng),
+  };
+  return isValidLocation(parsed) ? parsed : null;
+};
 
-  // Prepare markers array
-  const markers = [];
-
-  // Add restaurant marker
-  if (restaurant?.latitude && restaurant?.longitude) {
-    markers.push({
-      id: "restaurant",
-      coordinate: {
-        latitude: restaurant.latitude,
-        longitude: restaurant.longitude,
-      },
-      type: "restaurant",
-      emoji: "🏪",
-      title: restaurant.name || "Restaurant",
-    });
-  }
-
-  // Add customer marker
-  if (customerLocation?.latitude && customerLocation?.longitude) {
-    markers.push({
-      id: "customer",
-      coordinate: {
-        latitude: customerLocation.latitude,
-        longitude: customerLocation.longitude,
-      },
-      type: "customer",
-      emoji: "📍",
-      title: "Customer",
-    });
-  }
-
-  // Prepare polylines array
-  const polylines = [];
-  const restaurantToCustomerRoute = delivery.restaurant_to_customer_route;
-
-  if (restaurantToCustomerRoute?.coordinates) {
-    // Use route coordinates
-    const coordinates = restaurantToCustomerRoute.coordinates.map((c) => ({
-      latitude: c[1],
-      longitude: c[0],
-    }));
-    polylines.push({
-      id: "route",
-      coordinates,
-      strokeColor: "#06C168",
-      strokeWidth: 3,
-    });
-  } else if (restaurant?.latitude && customerLocation?.latitude) {
-    // Fallback: straight line
-    polylines.push({
-      id: "route",
-      coordinates: [
-        { latitude: restaurant.latitude, longitude: restaurant.longitude },
-        {
-          latitude: customerLocation.latitude,
-          longitude: customerLocation.longitude,
-        },
-      ],
-      strokeColor: "#06C168",
-      strokeWidth: 2,
-    });
-  }
-
-  return (
-    <View style={styles.miniMapContainer}>
-      <FreeMapView
-        initialRegion={{
-          ...center,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
-        }}
-        scrollEnabled={false}
-        zoomEnabled={false}
-        markers={markers}
-        polylines={polylines}
-      />
-    </View>
+const hasValidDeliveryCoordinates = (delivery) => {
+  const restaurantPoint = toValidLocation(
+    delivery?.restaurant?.latitude,
+    delivery?.restaurant?.longitude,
   );
-}
+  const customerPoint = toValidLocation(
+    delivery?.customer?.latitude,
+    delivery?.customer?.longitude,
+  );
+  return Boolean(restaurantPoint && customerPoint);
+};
+
+const loadAvailableCache = async () => {
+  try {
+    const raw = await AsyncStorage.getItem(AVAILABLE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.data || !parsed?.timestamp) return null;
+    return {
+      isFresh: Date.now() - parsed.timestamp < AVAILABLE_CACHE_EXPIRY,
+      data: parsed.data,
+    };
+  } catch (e) {
+    return null;
+  }
+};
+
+const saveAvailableCache = async (payload) => {
+  try {
+    await AsyncStorage.setItem(
+      AVAILABLE_CACHE_KEY,
+      JSON.stringify({ data: payload, timestamp: Date.now() }),
+    );
+  } catch (e) {
+    // no-op
+  }
+};
+
+const loadDashboardAsyncCache = async () => {
+  try {
+    const raw = await AsyncStorage.getItem(DASHBOARD_ASYNC_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.data || !parsed?.timestamp) return null;
+    return {
+      isFresh: Date.now() - parsed.timestamp < DASHBOARD_ASYNC_CACHE_EXPIRY,
+      data: parsed.data,
+    };
+  } catch (e) {
+    return null;
+  }
+};
+
+const saveDashboardAsyncCache = async (payload) => {
+  try {
+    await AsyncStorage.setItem(
+      DASHBOARD_ASYNC_CACHE_KEY,
+      JSON.stringify({ data: payload, timestamp: Date.now() }),
+    );
+  } catch (e) {
+    // no-op
+  }
+};
 
 // ============================================================================
 // Main Dashboard Component
@@ -167,6 +159,8 @@ function MiniDeliveryMap({ delivery }) {
 
 export default function DashboardScreen({ navigation }) {
   const isFocused = useIsFocused();
+  const queryClient = useQueryClient();
+  const { on, off } = useSocket();
   const { logout } = useAuth();
   const [isOnline, setIsOnline] = useState(false);
   const [statusInfo, setStatusInfo] = useState(null);
@@ -174,12 +168,19 @@ export default function DashboardScreen({ navigation }) {
     todayEarnings: 0,
     todayDeliveries: 0,
   });
+  const [balanceToReceive, setBalanceToReceive] = useState(0);
   const [monthlyStats, setMonthlyStats] = useState({
     earnings: 0,
     deliveries: 0,
   });
   const [recentDeliveries, setRecentDeliveries] = useState([]);
   const [availableDeliveries, setAvailableDeliveries] = useState([]);
+  const [nearbyVisibleCount, setNearbyVisibleCount] =
+    useState(NEARBY_PAGE_SIZE);
+  const [isNearbySyncing, setIsNearbySyncing] = useState(false);
+  const [hasNearbyInitialSyncCompleted, setHasNearbyInitialSyncCompleted] =
+    useState(false);
+  const [nearbySyncError, setNearbySyncError] = useState(null);
   const [activeDeliveries, setActiveDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -191,18 +192,99 @@ export default function DashboardScreen({ navigation }) {
   const [showOverrideModal, setShowOverrideModal] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [togglingStatus, setTogglingStatus] = useState(false);
+  const [hasDashboardSnapshot, setHasDashboardSnapshot] = useState(false);
   const [alert, setAlert] = useState({
     visible: false,
     type: "info",
     message: "",
   });
+  const statusToastAnim = useRef(new Animated.Value(0)).current;
+  const dashboardContentFadeAnim = useRef(new Animated.Value(1)).current;
 
   // Driver notification context - to sync online status
   const { setDriverOnline } = useDriverDeliveryNotifications();
 
   const workingHoursCheckRef = useRef(null);
   const driverLocationRef = useRef(null);
+  const nearbyLastSyncLocationRef = useRef(null);
   const hasInitializedRef = useRef(false);
+  const nearbySyncInFlightRef = useRef(false);
+
+  const applyDashboardSnapshot = useCallback((snapshot) => {
+    if (!snapshot || typeof snapshot !== "object") return;
+
+    setStats(snapshot.stats || { todayEarnings: 0, todayDeliveries: 0 });
+    setMonthlyStats(snapshot.monthlyStats || { earnings: 0, deliveries: 0 });
+    setRecentDeliveries(snapshot.recentDeliveries || []);
+    setActiveDeliveries(snapshot.activeDeliveries || []);
+    setBalanceToReceive(Number(snapshot.balanceToReceive || 0));
+    setHasDashboardSnapshot(true);
+  }, []);
+
+  const consumeStatusFocusSignal = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(DRIVER_STATUS_FOCUS_SIGNAL_KEY);
+      if (!raw) return null;
+
+      await AsyncStorage.removeItem(DRIVER_STATUS_FOCUS_SIGNAL_KEY);
+      const parsed = JSON.parse(raw);
+      const timestamp = Number(parsed?.timestamp || 0);
+      if (
+        !timestamp ||
+        Date.now() - timestamp > DRIVER_STATUS_FOCUS_WINDOW_MS
+      ) {
+        return null;
+      }
+
+      const status = String(parsed?.status || "")
+        .trim()
+        .toLowerCase();
+      if (!status) return null;
+
+      return {
+        status,
+        delivery_id: parsed?.delivery_id || null,
+      };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const applySnapshot = (snapshot) => {
+      if (!snapshot || !Array.isArray(snapshot.deliveries)) return;
+
+      const next = snapshot.deliveries.filter(hasValidDeliveryCoordinates);
+      setAvailableDeliveries(next);
+      setHasNearbyInitialSyncCompleted(true);
+    };
+
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      const query = event?.query;
+      if (!query) return;
+
+      const key = query.queryKey;
+      if (!Array.isArray(key)) return;
+      if (key[0] !== "driver" || key[1] !== "available-deliveries") return;
+
+      const data = query.state?.data;
+      if (!data) return;
+      applySnapshot(data);
+    });
+
+    const existing = queryClient.getQueriesData({
+      queryKey: ["driver", "available-deliveries"],
+    });
+    for (let i = existing.length - 1; i >= 0; i -= 1) {
+      const snapshot = existing[i]?.[1];
+      if (snapshot?.deliveries) {
+        applySnapshot(snapshot);
+        break;
+      }
+    }
+
+    return () => unsubscribe();
+  }, [queryClient]);
 
   // Alert helpers
   const showAlertMessage = (type, message) => {
@@ -248,26 +330,6 @@ export default function DashboardScreen({ navigation }) {
   }, [setDriverOnline]);
 
   // ============================================================================
-  // APP STATE LISTENER - Re-fetch status when app returns to foreground
-  // ============================================================================
-
-  useEffect(() => {
-    const appStateRef = { current: AppState.currentState };
-    const subscription = AppState.addEventListener("change", (nextAppState) => {
-      if (
-        appStateRef.current.match(/inactive|background/) &&
-        nextAppState === "active"
-      ) {
-        // App came to foreground - re-fetch server status (source of truth)
-        fetchStatusInfo();
-        fetchDashboardData();
-      }
-      appStateRef.current = nextAppState;
-    });
-    return () => subscription?.remove();
-  }, [fetchStatusInfo, fetchDashboardData]);
-
-  // ============================================================================
   // FETCH STATUS INFO (matches web version)
   // ============================================================================
 
@@ -276,19 +338,64 @@ export default function DashboardScreen({ navigation }) {
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
 
-      const res = await rateLimitedFetch(`${API_URL}/driver/status-info`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await rateLimitedFetch(
+        `${API_URL}${DRIVER_STATUS_ENDPOINT}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
 
       if (res.ok) {
         const data = await res.json();
-        setStatusInfo(data);
-        const serverOnline = data.currentStatus === "active";
-        setIsOnline(serverOnline);
-        setWithinWorkingHours(data.shouldBeActive || false);
-        // Sync server truth to storage & notification context
-        AsyncStorage.setItem("driver_is_online", JSON.stringify(serverOnline));
-        setDriverOnline(serverOnline);
+
+        const normalizedStatus = String(
+          data?.currentStatus || data?.driver_status || data?.status || "",
+        )
+          .trim()
+          .toLowerCase();
+
+        const withinHoursValue =
+          typeof data?.within_working_hours === "boolean"
+            ? data.within_working_hours
+            : typeof data?.shouldBeActive === "boolean"
+              ? data.shouldBeActive
+              : false;
+
+        const shouldBeActive =
+          typeof data?.shouldBeActive === "boolean"
+            ? data.shouldBeActive
+            : withinHoursValue || Boolean(data?.manual_override);
+
+        const canToggleToActive =
+          typeof data?.canToggleToActive === "boolean"
+            ? data.canToggleToActive
+            : shouldBeActive;
+
+        const canToggleToInactive =
+          typeof data?.canToggleToInactive === "boolean"
+            ? data.canToggleToInactive
+            : true;
+
+        setStatusInfo({
+          ...data,
+          currentStatus: normalizedStatus,
+          shouldBeActive,
+          canToggleToActive,
+          canToggleToInactive,
+        });
+
+        if (normalizedStatus === "active" || normalizedStatus === "inactive") {
+          const serverOnline = normalizedStatus === "active";
+          setIsOnline(serverOnline);
+          // Sync server truth to storage & notification context
+          AsyncStorage.setItem(
+            "driver_is_online",
+            JSON.stringify(serverOnline),
+          );
+          setDriverOnline(serverOnline);
+        }
+
+        setWithinWorkingHours(withinHoursValue);
       }
     } catch (error) {
       console.error("Status info fetch error:", error);
@@ -320,7 +427,7 @@ export default function DashboardScreen({ navigation }) {
       if (res.ok) {
         const data = await res.json();
         setDriverProfile(data.driver);
-        // Don't set isOnline here anymore - use status-info endpoint
+        // Don't set isOnline here anymore - use working-hours-status endpoint
         setManualOverrideActive(data.driver.manual_status_override || false);
       }
     } catch (error) {
@@ -349,11 +456,45 @@ export default function DashboardScreen({ navigation }) {
 
       if (res.ok) {
         const data = await res.json();
-        setWithinWorkingHours(data.within_working_hours);
+
+        const normalizedStatus = String(
+          data?.currentStatus || data?.driver_status || data?.status || "",
+        )
+          .trim()
+          .toLowerCase();
+
+        const withinHoursValue =
+          typeof data?.within_working_hours === "boolean"
+            ? data.within_working_hours
+            : typeof data?.shouldBeActive === "boolean"
+              ? data.shouldBeActive
+              : false;
+
+        const shouldBeActive =
+          typeof data?.shouldBeActive === "boolean"
+            ? data.shouldBeActive
+            : withinHoursValue || Boolean(data?.manual_override);
+
+        setStatusInfo((prev) => ({
+          ...(prev || {}),
+          ...data,
+          currentStatus: normalizedStatus,
+          shouldBeActive,
+          canToggleToActive:
+            typeof data?.canToggleToActive === "boolean"
+              ? data.canToggleToActive
+              : shouldBeActive,
+          canToggleToInactive:
+            typeof data?.canToggleToInactive === "boolean"
+              ? data.canToggleToInactive
+              : true,
+        }));
+
+        setWithinWorkingHours(withinHoursValue);
         setManualOverrideActive(data.manual_override);
 
         if (data.auto_updated) {
-          setIsOnline(data.driver_status === "active");
+          setIsOnline(normalizedStatus === "active");
           setStatusMessage(
             data.message || "Status changed due to working hours",
           );
@@ -369,6 +510,150 @@ export default function DashboardScreen({ navigation }) {
   // FETCH DASHBOARD DATA
   // ============================================================================
 
+  const resolveVerifiedDriverLocation = useCallback(async () => {
+    if (isValidLocation(driverLocationRef.current)) {
+      return driverLocationRef.current;
+    }
+
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== "granted") {
+      return null;
+    }
+
+    for (let attempt = 1; attempt <= LOCATION_MAX_RETRIES; attempt += 1) {
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.BestForNavigation,
+        maximumAge: 0,
+        mayShowUserSettingsDialog: true,
+      });
+
+      const candidate = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      };
+      const accuracy = Number(position.coords.accuracy || Infinity);
+
+      if (
+        isValidLocation(candidate) &&
+        accuracy <= LOCATION_MAX_ACCURACY_METERS
+      ) {
+        return candidate;
+      }
+
+      if (attempt < LOCATION_MAX_RETRIES) {
+        await sleep(LOCATION_RETRY_DELAY_MS);
+      }
+    }
+
+    const lastKnown = await Location.getLastKnownPositionAsync({
+      maxAge: 10000,
+      requiredAccuracy: LOCATION_MAX_ACCURACY_METERS,
+    });
+
+    if (lastKnown) {
+      const fallback = {
+        latitude: lastKnown.coords.latitude,
+        longitude: lastKnown.coords.longitude,
+      };
+      if (isValidLocation(fallback)) {
+        return fallback;
+      }
+    }
+
+    return null;
+  }, []);
+
+  const syncAvailableDeliveriesInBackground = useCallback(
+    async (token, reason = "dashboard_open") => {
+      if (nearbySyncInFlightRef.current) return;
+
+      const forceReasons = new Set([
+        "new_delivery",
+        "tip_updated",
+        "delivery_accepted",
+      ]);
+
+      const currentLocation = await resolveVerifiedDriverLocation();
+      if (!isValidLocation(currentLocation)) {
+        setNearbySyncError("Unable to confirm your location.");
+        return;
+      }
+
+      const movedDistance = nearbyLastSyncLocationRef.current
+        ? approximateDistanceMeters(
+            nearbyLastSyncLocationRef.current,
+            currentLocation,
+          )
+        : Infinity;
+
+      const shouldSync =
+        forceReasons.has(reason) ||
+        !hasNearbyInitialSyncCompleted ||
+        movedDistance >= AVAILABLE_SYNC_MOVEMENT_THRESHOLD;
+
+      if (!shouldSync) {
+        return;
+      }
+
+      nearbySyncInFlightRef.current = true;
+      setIsNearbySyncing(true);
+      setNearbySyncError(null);
+
+      try {
+        driverLocationRef.current = currentLocation;
+        setDriverLocation(currentLocation);
+
+        const availableRes = await rateLimitedFetch(
+          `${API_URL}/driver/deliveries/available/v2?driver_latitude=${currentLocation.latitude}&driver_longitude=${currentLocation.longitude}&trigger_reason=${encodeURIComponent(reason)}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
+
+        if (!availableRes.ok) {
+          throw new Error(
+            `Available deliveries sync failed (${availableRes.status})`,
+          );
+        }
+
+        const deliveriesData = await availableRes.json();
+        const nextAvailableRaw =
+          deliveriesData.available_deliveries ||
+          deliveriesData.deliveries ||
+          [];
+        const nextAvailable = nextAvailableRaw.filter(
+          hasValidDeliveryCoordinates,
+        );
+
+        setAvailableDeliveries(nextAvailable);
+
+        const payload = {
+          deliveries: nextAvailable,
+          currentRoute: deliveriesData.current_route || {
+            total_stops: 0,
+            active_deliveries: 0,
+          },
+          driverLocation: currentLocation,
+        };
+
+        await saveAvailableCache(payload);
+        queryClient.setQueriesData(
+          { queryKey: ["driver", "available-deliveries"] },
+          payload,
+        );
+        setHasNearbyInitialSyncCompleted(true);
+        nearbyLastSyncLocationRef.current = currentLocation;
+      } catch (error) {
+        console.error("Available deliveries background sync error:", error);
+        setNearbySyncError(error.message || "Failed to update nearby requests");
+      } finally {
+        setIsNearbySyncing(false);
+        nearbySyncInFlightRef.current = false;
+      }
+    },
+    [queryClient, resolveVerifiedDriverLocation, hasNearbyInitialSyncCompleted],
+  );
+
   const fetchDashboardData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem("token");
@@ -377,74 +662,165 @@ export default function DashboardScreen({ navigation }) {
         return;
       }
 
-      // Get driver's current location
-      let currentLocation = driverLocationRef.current || DEFAULT_LOCATION;
-      driverLocationRef.current = currentLocation;
-      setDriverLocation(currentLocation);
+      const statusFocusSignal = await consumeStatusFocusSignal();
+
+      const cachedDashboard = queryClient.getQueryData(DASHBOARD_CACHE_KEY);
+      if (cachedDashboard) {
+        applyDashboardSnapshot(cachedDashboard);
+        setLoading(false);
+      } else {
+        const dashboardAsyncCache = await loadDashboardAsyncCache();
+        if (dashboardAsyncCache?.data) {
+          applyDashboardSnapshot(dashboardAsyncCache.data);
+          setLoading(false);
+        }
+      }
+
+      const cachedAvailable = await loadAvailableCache();
+      if (Array.isArray(cachedAvailable?.data?.deliveries)) {
+        const cachedDeliveries = (cachedAvailable.data.deliveries || []).filter(
+          hasValidDeliveryCoordinates,
+        );
+        setAvailableDeliveries(cachedDeliveries);
+        setHasNearbyInitialSyncCompleted(true);
+      }
 
       const headers = { Authorization: `Bearer ${token}` };
+      let nextStats = cachedDashboard?.stats || {
+        todayEarnings: 0,
+        todayDeliveries: 0,
+      };
+      let nextMonthlyStats = cachedDashboard?.monthlyStats || {
+        earnings: 0,
+        deliveries: 0,
+      };
+      let nextRecentDeliveries = cachedDashboard?.recentDeliveries || [];
+      let nextActiveDeliveries = cachedDashboard?.activeDeliveries || [];
+      let nextBalanceToReceive = Number(cachedDashboard?.balanceToReceive || 0);
 
       // Batch all dashboard API calls in parallel
       const [
         statsRes,
         monthlyStatsRes,
         recentRes,
-        deliveriesRes,
         activeDeliveriesRes,
+        withdrawalsSummaryRes,
       ] = await Promise.all([
         rateLimitedFetch(`${API_URL}/driver/stats/today`, { headers }),
         rateLimitedFetch(`${API_URL}/driver/stats/monthly`, { headers }),
         rateLimitedFetch(`${API_URL}/driver/deliveries/recent?limit=5`, {
           headers,
         }),
-        rateLimitedFetch(
-          `${API_URL}/driver/deliveries/available/v2?driver_latitude=${currentLocation.latitude}&driver_longitude=${currentLocation.longitude}`,
-          { headers },
-        ),
         rateLimitedFetch(`${API_URL}/driver/deliveries/active`, { headers }),
+        rateLimitedFetch(`${API_URL}/driver/withdrawals/my/summary`, {
+          headers,
+        }),
       ]);
 
       if (statsRes.ok) {
         const statsData = await statsRes.json();
-        setStats({
+        nextStats = {
           todayEarnings: statsData.earnings || 0,
           todayDeliveries: statsData.deliveries || 0,
-        });
+        };
+        setStats(nextStats);
       }
 
       if (monthlyStatsRes.ok) {
         const monthlyData = await monthlyStatsRes.json();
-        setMonthlyStats({
+        nextMonthlyStats = {
           earnings: monthlyData.earnings || 0,
           deliveries: monthlyData.deliveries || 0,
-        });
+        };
+        setMonthlyStats(nextMonthlyStats);
       }
 
       if (recentRes.ok) {
         const recentData = await recentRes.json();
-        setRecentDeliveries(recentData.deliveries || []);
-      }
-
-      if (deliveriesRes.ok) {
-        const deliveriesData = await deliveriesRes.json();
-        setAvailableDeliveries(
-          deliveriesData.available_deliveries ||
-            deliveriesData.deliveries ||
-            [],
-        );
+        nextRecentDeliveries = recentData.deliveries || [];
+        setRecentDeliveries(nextRecentDeliveries);
       }
 
       if (activeDeliveriesRes.ok) {
         const activeDeliveriesData = await activeDeliveriesRes.json();
-        setActiveDeliveries(activeDeliveriesData.deliveries || []);
+        nextActiveDeliveries = activeDeliveriesData.deliveries || [];
+        setActiveDeliveries(nextActiveDeliveries);
       }
+
+      if (
+        statusFocusSignal?.status === "picked_up" ||
+        statusFocusSignal?.status === "delivered"
+      ) {
+        // Swipe-driven status changes should prioritize active workflow freshness first.
+        setHasNearbyInitialSyncCompleted(true);
+      } else {
+        syncAvailableDeliveriesInBackground(token, "dashboard_open");
+      }
+
+      if (withdrawalsSummaryRes.ok) {
+        const withdrawalsSummaryData = await withdrawalsSummaryRes.json();
+        nextBalanceToReceive = Number(
+          withdrawalsSummaryData?.summary?.remaining_balance || 0,
+        );
+        setBalanceToReceive(nextBalanceToReceive);
+      }
+
+      queryClient.setQueryData(DASHBOARD_CACHE_KEY, {
+        stats: nextStats,
+        monthlyStats: nextMonthlyStats,
+        recentDeliveries: nextRecentDeliveries,
+        activeDeliveries: nextActiveDeliveries,
+        balanceToReceive: nextBalanceToReceive,
+      });
+
+      saveDashboardAsyncCache({
+        stats: nextStats,
+        monthlyStats: nextMonthlyStats,
+        recentDeliveries: nextRecentDeliveries,
+        activeDeliveries: nextActiveDeliveries,
+        balanceToReceive: nextBalanceToReceive,
+      }).catch(() => {});
     } catch (error) {
       console.error("Dashboard fetch error:", error);
     } finally {
+      hasVisitedDriverDashboardScreen = true;
       setLoading(false);
       setRefreshing(false);
     }
-  }, [navigation]);
+  }, [
+    navigation,
+    queryClient,
+    syncAvailableDeliveriesInBackground,
+    applyDashboardSnapshot,
+    consumeStatusFocusSignal,
+  ]);
+
+  // ============================================================================
+  // APP STATE LISTENER - Re-fetch status when app returns to foreground
+  // ============================================================================
+
+  useEffect(() => {
+    const appStateRef = { current: AppState.currentState };
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (
+        appStateRef.current.match(/inactive|background/) &&
+        nextAppState === "active"
+      ) {
+        // App came to foreground - re-fetch server status (source of truth)
+        fetchStatusInfo();
+        fetchDashboardData();
+      }
+      appStateRef.current = nextAppState;
+    });
+    return () => subscription?.remove();
+  }, [fetchStatusInfo, fetchDashboardData]);
+
+  useEffect(() => {
+    if (!isFocused) return;
+
+    fetchStatusInfo();
+    fetchDashboardData();
+  }, [isFocused, fetchStatusInfo, fetchDashboardData]);
 
   useEffect(() => {
     fetchDriverProfile();
@@ -466,6 +842,64 @@ export default function DashboardScreen({ navigation }) {
       clearInterval(dataInterval);
     };
   }, [fetchDriverProfile, fetchStatusInfo, fetchDashboardData, isFocused]);
+
+  useEffect(() => {
+    if (!on || !off) return;
+
+    const handleNewDelivery = async () => {
+      if (!isFocused) return;
+      const token = await AsyncStorage.getItem("token");
+      if (!token) return;
+      syncAvailableDeliveriesInBackground(token, "new_delivery");
+    };
+
+    const handleTipUpdated = async () => {
+      if (!isFocused) return;
+      const token = await AsyncStorage.getItem("token");
+      if (!token) return;
+      syncAvailableDeliveriesInBackground(token, "tip_updated");
+    };
+
+    const handleDeliveryTaken = (payload) => {
+      const deliveryId = payload?.delivery_id;
+      if (!deliveryId) return;
+
+      setAvailableDeliveries((prev) => {
+        const next = prev.filter((d) => d.delivery_id !== deliveryId);
+        const cachedSnapshots = queryClient.getQueriesData({
+          queryKey: ["driver", "available-deliveries"],
+        });
+        const latestSnapshot =
+          cachedSnapshots?.[cachedSnapshots.length - 1]?.[1];
+
+        const payloadForCache = {
+          deliveries: next,
+          currentRoute: latestSnapshot?.currentRoute || {
+            total_stops: 0,
+            active_deliveries: 0,
+          },
+          driverLocation: driverLocationRef.current,
+        };
+
+        queryClient.setQueriesData(
+          { queryKey: ["driver", "available-deliveries"] },
+          payloadForCache,
+        );
+        saveAvailableCache(payloadForCache).catch(() => {});
+        return next;
+      });
+    };
+
+    on("delivery:new", handleNewDelivery);
+    on("delivery:tip_updated", handleTipUpdated);
+    on("delivery:taken", handleDeliveryTaken);
+
+    return () => {
+      off("delivery:new", handleNewDelivery);
+      off("delivery:tip_updated", handleTipUpdated);
+      off("delivery:taken", handleDeliveryTaken);
+    };
+  }, [on, off, isFocused, queryClient, syncAvailableDeliveriesInBackground]);
 
   // ============================================================================
   // WORKING HOURS CHECK (every minute)
@@ -554,6 +988,11 @@ export default function DashboardScreen({ navigation }) {
   // ============================================================================
 
   const handleAcceptDelivery = async (deliveryId) => {
+    if (isNearbySyncing) {
+      showError("Requests are updating. Please wait a moment.");
+      return;
+    }
+
     setAcceptingOrder(deliveryId);
     try {
       const token = await AsyncStorage.getItem("token");
@@ -598,9 +1037,17 @@ export default function DashboardScreen({ navigation }) {
       );
 
       if (res.ok) {
-        navigation.navigate("ActiveDeliveries");
+        syncAvailableDeliveriesInBackground(token, "delivery_accepted");
+        navigation.navigate("DriverMap", { deliveryId });
       } else {
         const data = await res.json();
+        if (data?.driver_status === "suspended") {
+          Alert.alert(
+            "Account Suspended",
+            data.message ||
+              "Deposit the collected money to the Meezo platform before accepting new deliveries.",
+          );
+        }
         showError(data.message || "Failed to accept delivery");
       }
     } catch (error) {
@@ -615,613 +1062,999 @@ export default function DashboardScreen({ navigation }) {
   // HELPER FUNCTIONS
   // ============================================================================
 
-  const calculateDistance = (delivery) => {
-    const routeImpact = delivery.route_impact || {};
-    if (routeImpact.total_delivery_distance_km) {
-      return parseFloat(routeImpact.total_delivery_distance_km).toFixed(1);
-    }
-    if (routeImpact.r1_distance_km) {
-      return parseFloat(routeImpact.r1_distance_km).toFixed(1);
-    }
-    if (delivery.distance_km) {
-      return parseFloat(delivery.distance_km).toFixed(1);
-    }
-    return "—";
+  const openActiveMap = () => {
+    navigation.navigate("DriverMap");
   };
 
+  const isFirstDeliveryRequest = useCallback((delivery) => {
+    const routeImpact = delivery?.route_impact || {};
+
+    if (routeImpact.is_first_delivery === true) return true;
+    if (routeImpact.is_first_delivery === false) return false;
+
+    const sequence = Number(
+      routeImpact.delivery_sequence ?? delivery?.delivery_sequence ?? 1,
+    );
+
+    if (Number.isFinite(sequence)) {
+      return sequence <= 1;
+    }
+
+    return true;
+  }, []);
+
   const getDeliveryEarnings = (delivery) => {
+    const isFirst = isFirstDeliveryRequest(delivery);
     const routeImpact = delivery.route_impact || {};
     const pricing = delivery.pricing || {};
-    return Number(
-      routeImpact.total_trip_earnings ||
+
+    const baseAmount = Number(
+      routeImpact.base_amount ||
+        pricing.base_amount ||
+        routeImpact.total_trip_earnings ||
         pricing.total_trip_earnings ||
         pricing.driver_earnings ||
         delivery.delivery_fee ||
         0,
+    );
+    const extraAmount = Number(routeImpact.extra_earnings || 0);
+    const bonusAmount = Number(routeImpact.bonus_amount || 0);
+    const tipAmount = Number(pricing.tip_amount || 0);
+
+    return (
+      isFirst ? baseAmount + tipAmount : extraAmount + bonusAmount + tipAmount
     ).toFixed(2);
   };
 
-  const getEstimatedTime = (delivery) => {
+  const getEarningsBreakdown = (delivery) => {
+    const isFirst = isFirstDeliveryRequest(delivery);
     const routeImpact = delivery.route_impact || {};
+    const pricing = delivery.pricing || {};
+
+    const baseAmount = parseFloat(
+      routeImpact.base_amount ||
+        pricing.base_amount ||
+        pricing.total_trip_earnings ||
+        routeImpact.total_trip_earnings ||
+        0,
+    );
+    const extraEarnings = parseFloat(
+      routeImpact.extra_earnings || pricing.extra_earnings || 0,
+    );
+    const bonusAmount = parseFloat(
+      routeImpact.bonus_amount || pricing.bonus_amount || 0,
+    );
+    const tipAmount = parseFloat(pricing.tip_amount || 0);
+
+    const primaryEarning = isFirst ? baseAmount : extraEarnings;
+    const totalEarnings = isFirst
+      ? baseAmount + tipAmount
+      : extraEarnings + bonusAmount + tipAmount;
+
+    return {
+      isFirst,
+      baseAmount,
+      extraEarnings,
+      bonusAmount,
+      tipAmount,
+      primaryEarning,
+      totalEarnings,
+    };
+  };
+
+  const getDistanceAndTimeSummary = (delivery) => {
+    const isFirstDelivery = isFirstDeliveryRequest(delivery);
+    const routeImpact = delivery.route_impact || {};
+
+    const totalDistance = Number(
+      delivery.total_delivery_distance_km ||
+        routeImpact.total_distance_km ||
+        routeImpact.r1_distance_km ||
+        delivery.distance_km ||
+        0,
+    );
+    const extraDistance = Number(routeImpact.extra_distance_km || 0);
+    const totalMinutes = Number(
+      routeImpact.estimated_time_minutes ||
+        routeImpact.estimated_time ||
+        delivery.estimated_time_minutes ||
+        delivery.estimated_time ||
+        0,
+    );
+    const extraMinutes = Number(routeImpact.extra_time_minutes || 0);
+
+    const primaryDistance = isFirstDelivery
+      ? totalDistance > 0
+        ? totalDistance
+        : extraDistance
+      : extraDistance;
+
+    const primaryMinutes = isFirstDelivery
+      ? totalMinutes > 0
+        ? totalMinutes
+        : primaryDistance > 0
+          ? Math.round(primaryDistance * 2)
+          : 0
+      : extraMinutes;
+
+    return {
+      isFirstDelivery,
+      totalDistance: Number.isFinite(totalDistance) ? totalDistance : 0,
+      extraDistance: Number.isFinite(extraDistance) ? extraDistance : 0,
+      totalMinutes: Number.isFinite(totalMinutes) ? totalMinutes : 0,
+      extraMinutes: Number.isFinite(extraMinutes) ? extraMinutes : 0,
+      primaryDistance: Number.isFinite(primaryDistance) ? primaryDistance : 0,
+      primaryMinutes: Number.isFinite(primaryMinutes) ? primaryMinutes : 0,
+    };
+  };
+
+  const getPickupRestaurantWithCity = (delivery) => {
+    const name =
+      delivery?.restaurant?.name ||
+      delivery?.orders?.restaurant_name ||
+      delivery?.restaurant_name ||
+      "Restaurant";
+    const city =
+      delivery?.restaurant?.city ||
+      delivery?.orders?.restaurant_city ||
+      delivery?.delivery?.city ||
+      delivery?.customer?.city ||
+      delivery?.orders?.delivery_city ||
+      null;
+    return city ? `${name}, ${city}` : name;
+  };
+
+  const getPickupAddress = (delivery) => {
     return (
-      routeImpact.estimated_time_minutes || delivery.estimated_time_minutes || 0
+      delivery?.restaurant?.address ||
+      delivery?.orders?.restaurant_address ||
+      delivery?.restaurant_address ||
+      "Pickup address unavailable"
     );
   };
 
+  const getDropoffAddress = (delivery) => {
+    return (
+      delivery?.delivery?.address ||
+      delivery?.customer?.address ||
+      delivery?.orders?.delivery_address ||
+      delivery?.delivery_address ||
+      "Drop-off address unavailable"
+    );
+  };
+
+  const nearbyDeliveries = useMemo(() => {
+    const seen = new Set();
+    const unique = [];
+
+    for (const delivery of availableDeliveries || []) {
+      const id = delivery?.delivery_id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      unique.push(delivery);
+    }
+
+    return unique;
+  }, [availableDeliveries]);
+
+  const visibleNearbyDeliveries = useMemo(
+    () => nearbyDeliveries.slice(0, nearbyVisibleCount),
+    [nearbyDeliveries, nearbyVisibleCount],
+  );
+
+  const remainingNearbyCount = Math.max(
+    0,
+    nearbyDeliveries.length - visibleNearbyDeliveries.length,
+  );
+
+  useEffect(() => {
+    setNearbyVisibleCount((prev) => {
+      const minimumVisible = Math.min(
+        NEARBY_PAGE_SIZE,
+        nearbyDeliveries.length,
+      );
+      if (prev < minimumVisible) return minimumVisible;
+      return Math.min(prev, nearbyDeliveries.length);
+    });
+  }, [nearbyDeliveries.length]);
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+    Promise.all([
+      fetchDriverProfile(),
+      fetchStatusInfo(),
+      fetchDashboardData(),
+    ]);
+  }, [fetchDashboardData, fetchDriverProfile, fetchStatusInfo]);
+
+  useEffect(() => {
+    if (!statusMessage) {
+      statusToastAnim.setValue(0);
+      return;
+    }
+
+    Animated.timing(statusToastAnim, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [statusMessage, statusToastAnim]);
+
+  useEffect(() => {
+    if (!isFocused) return;
+
+    dashboardContentFadeAnim.setValue(0);
+    Animated.timing(dashboardContentFadeAnim, {
+      toValue: 1,
+      duration: 240,
+      useNativeDriver: true,
+    }).start();
+  }, [isFocused, dashboardContentFadeAnim]);
 
   // ============================================================================
   // RENDER
   // ============================================================================
 
-  if (loading) {
+  if (loading && !hasDashboardSnapshot && !hasVisitedDriverDashboardScreen) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#06C168" />
-          <Text style={styles.loadingText}>Loading...</Text>
-        </View>
+        <DriverDashboardLoadingSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <AnimatedAlert
-        visible={alert.visible}
-        type={alert.type}
-        message={alert.message}
-        onDismiss={() => setAlert({ ...alert, visible: false })}
-      />
-
-      {/* Manual Override Modal */}
-      <Modal
-        visible={showOverrideModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowOverrideModal(false)}
+      <Animated.View
+        style={[
+          styles.pageAnimationWrap,
+          {
+            opacity: dashboardContentFadeAnim,
+            transform: [
+              {
+                translateY: dashboardContentFadeAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [6, 0],
+                }),
+              },
+            ],
+          },
+        ]}
       >
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setShowOverrideModal(false)}
+        <AnimatedAlert
+          visible={alert.visible}
+          type={alert.type}
+          message={alert.message}
+          onDismiss={() => setAlert({ ...alert, visible: false })}
+        />
+
+        {/* Manual Override Modal */}
+        <Modal
+          visible={showOverrideModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowOverrideModal(false)}
         >
           <Pressable
-            style={styles.modalContent}
-            onPress={(e) => e.stopPropagation()}
+            style={styles.modalOverlay}
+            onPress={() => setShowOverrideModal(false)}
           >
-            <View style={styles.modalIconContainer}>
-              <Ionicons name="time-outline" size={32} color="#d97706" />
-            </View>
-            <Text style={styles.modalTitle}>Outside Working Hours</Text>
-            <Text style={styles.modalDescription}>
-              Your working time is set to{" "}
-              <Text style={styles.modalBold}>
-                {WORKING_TIME_LABELS[driverProfile?.working_time] || "Unknown"}
+            <Pressable
+              style={styles.modalContent}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={styles.modalIconContainer}>
+                <Ionicons name="time-outline" size={32} color="#d97706" />
+              </View>
+              <Text style={styles.modalTitle}>Outside Working Hours</Text>
+              <Text style={styles.modalDescription}>
+                Your working time is set to{" "}
+                <Text style={styles.modalBold}>
+                  {WORKING_TIME_LABELS[driverProfile?.working_time] ||
+                    "Unknown"}
+                </Text>
+                . You are currently outside your scheduled working hours.
               </Text>
-              . You are currently outside your scheduled working hours.
-            </Text>
-            <Text style={styles.modalSubtext}>
-              Do you want to go online anyway?
-            </Text>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setShowOverrideModal(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalConfirmButton}
-                onPress={handleManualOverrideConfirm}
-              >
-                <Text style={styles.modalConfirmText}>Go Online</Text>
-              </TouchableOpacity>
-            </View>
+              <Text style={styles.modalSubtext}>
+                Do you want to go online anyway?
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => setShowOverrideModal(false)}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalConfirmButton}
+                  onPress={handleManualOverrideConfirm}
+                >
+                  <Text style={styles.modalConfirmText}>Go Online</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </Modal>
 
-      {/* Status Message Toast */}
-      {statusMessage ? (
-        <View style={styles.statusToast}>
-          <Ionicons name="information-circle" size={20} color="#f59e0b" />
-          <Text style={styles.statusToastText}>{statusMessage}</Text>
-        </View>
-      ) : null}
-
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={["#06C168"]}
-          />
-        }
-      >
-        {/* Top App Bar */}
-        <View style={styles.topBar}>
-          <TouchableOpacity
-            style={styles.profileButton}
-            onPress={() => navigation.navigate("DriverAccountProfile")}
+        {/* Status Message Toast */}
+        {statusMessage ? (
+          <Animated.View
+            style={[
+              styles.statusToast,
+              {
+                opacity: statusToastAnim,
+                transform: [
+                  {
+                    translateY: statusToastAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-8, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
           >
-            <View style={styles.avatarContainer}>
-              {driverProfile?.profile_picture ? (
-                <Image
-                  source={{ uri: driverProfile.profile_picture }}
-                  style={styles.avatar}
-                />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Ionicons name="person" size={20} color="#64748b" />
-                </View>
-              )}
-            </View>
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>
-                {driverProfile?.user_name || "Driver"}
-              </Text>
-              <Text style={styles.profileSubtext}>
-                {WORKING_TIME_LABELS[driverProfile?.working_time] || ""}
-              </Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.notificationButton}
-            onPress={() => navigation.navigate("DriverNotifications")}
-          >
-            <Ionicons name="notifications-outline" size={24} color="#64748b" />
-            <View style={styles.notificationBadge} />
-          </TouchableOpacity>
-        </View>
+            <Ionicons name="information-circle" size={20} color="#f59e0b" />
+            <Text style={styles.statusToastText}>{statusMessage}</Text>
+          </Animated.View>
+        ) : null}
 
-        {/* Online/Offline Toggle */}
-        <View style={styles.section}>
-          <View style={styles.statusCard}>
-            <View style={styles.statusContent}>
-              <View style={styles.statusTextContainer}>
-                <Text style={styles.statusTitle}>
-                  Status: {isOnline ? "Online" : "Offline"}
-                </Text>
-                <Text style={styles.statusSubtitle}>
-                  {statusInfo?.workingTimeDescription ||
-                    (isOnline
-                      ? "Receiving requests nearby"
-                      : "Not receiving requests")}
-                </Text>
-              </View>
+        <DriverScreenSection
+          screenKey="DriverDashboard"
+          sectionIndex={0}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            style={styles.scrollView}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={["#06C168"]}
+              />
+            }
+          >
+            {/* Top App Bar */}
+            <View style={styles.topBar}>
               <TouchableOpacity
-                style={[
-                  styles.toggleContainer,
-                  isOnline && styles.toggleContainerActive,
-                  togglingStatus && styles.toggleContainerDisabled,
-                ]}
-                onPress={() => handleToggleOnline(false)}
-                disabled={togglingStatus}
+                style={styles.profileButton}
+                onPress={() => navigation.navigate("DriverAccountProfile")}
               >
-                {togglingStatus ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <View
-                    style={[
-                      styles.toggleThumb,
-                      isOnline && styles.toggleThumbActive,
-                    ]}
-                  />
-                )}
-              </TouchableOpacity>
-            </View>
-
-            {/* Status Messages from status-info */}
-            {statusInfo && !statusInfo.shouldBeActive && (
-              <View style={styles.statusMessageBanner}>
-                <Ionicons name="time-outline" size={16} color="#d97706" />
-                <Text style={styles.statusMessageText}>
-                  ⏰ You are currently outside your working hours. You'll be
-                  able to accept deliveries during your scheduled time.
-                </Text>
-              </View>
-            )}
-
-            {statusInfo && statusInfo.shouldBeActive && !isOnline && (
-              <View
-                style={[styles.statusMessageBanner, styles.statusMessageInfo]}
-              >
-                <Ionicons name="bulb-outline" size={16} color="#3b82f6" />
-                <Text
-                  style={[
-                    styles.statusMessageText,
-                    styles.statusMessageTextInfo,
-                  ]}
-                >
-                  💡 You're within your working hours. Activate your status to
-                  start receiving delivery requests.
-                </Text>
-              </View>
-            )}
-
-            {statusInfo && statusInfo.isActive && (
-              <View
-                style={[
-                  styles.statusMessageBanner,
-                  styles.statusMessageSuccess,
-                ]}
-              >
-                <Ionicons name="checkmark-circle" size={16} color="#06C168" />
-                <Text
-                  style={[
-                    styles.statusMessageText,
-                    styles.statusMessageTextSuccess,
-                  ]}
-                >
-                  ✅ You are active and can receive delivery requests!
-                </Text>
-              </View>
-            )}
-
-            {/* Working Hours Status */}
-            {driverProfile?.working_time &&
-              driverProfile.working_time !== "full_time" && (
-                <View
-                  style={[
-                    styles.workingHoursStatus,
-                    withinWorkingHours
-                      ? styles.workingHoursStatusActive
-                      : manualOverrideActive
-                        ? styles.workingHoursStatusWarning
-                        : styles.workingHoursStatusInactive,
-                  ]}
-                >
-                  <Ionicons
-                    name={
-                      withinWorkingHours ? "checkmark-circle" : "time-outline"
-                    }
-                    size={16}
-                    color={
-                      withinWorkingHours
-                        ? "#06C168"
-                        : manualOverrideActive
-                          ? "#d97706"
-                          : "#64748b"
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.workingHoursText,
-                      withinWorkingHours
-                        ? styles.workingHoursTextActive
-                        : manualOverrideActive
-                          ? styles.workingHoursTextWarning
-                          : styles.workingHoursTextInactive,
-                    ]}
-                  >
-                    {withinWorkingHours
-                      ? "Within working hours"
-                      : manualOverrideActive
-                        ? "Manual override active (outside working hours)"
-                        : "Outside working hours"}
+                <View style={styles.avatarContainer}>
+                  {driverProfile?.profile_picture ? (
+                    <Image
+                      source={{ uri: driverProfile.profile_picture }}
+                      style={styles.avatar}
+                    />
+                  ) : (
+                    <View style={styles.avatarPlaceholder}>
+                      <Ionicons name="person" size={20} color="#64748b" />
+                    </View>
+                  )}
+                </View>
+                <View style={styles.profileInfo}>
+                  <Text style={styles.profileName}>
+                    {driverProfile?.full_name || "Driver"}
+                  </Text>
+                  <Text style={styles.profileSubtext}>
+                    {WORKING_TIME_LABELS[driverProfile?.working_time] || ""}
                   </Text>
                 </View>
-              )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.notificationButton}
+                onPress={() => navigation.navigate("DriverNotifications")}
+              >
+                <Ionicons
+                  name="notifications-outline"
+                  size={24}
+                  color="#64748b"
+                />
+                <View style={styles.notificationBadge} />
+              </TouchableOpacity>
+            </View>
 
-            {/* Next Status Change Info */}
-            {statusInfo?.nextStatusChange && (
-              <View style={styles.nextStatusChangeInfo}>
-                <Text style={styles.nextStatusChangeText}>
-                  Next automatic status change:{" "}
-                  {new Date(statusInfo.nextStatusChange).toLocaleTimeString()}
+            {/* Online/Offline Toggle */}
+            <View style={styles.section}>
+              <View style={styles.statusCard}>
+                <View style={styles.statusContent}>
+                  <View style={styles.statusTextContainer}>
+                    <Text style={styles.statusTitle}>
+                      Status: {isOnline ? "Online" : "Offline"}
+                    </Text>
+                    <Text style={styles.statusSubtitle}>
+                      {statusInfo?.workingTimeDescription ||
+                        (isOnline
+                          ? "Receiving requests nearby"
+                          : "Not receiving requests")}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleContainer,
+                      isOnline && styles.toggleContainerActive,
+                      togglingStatus && styles.toggleContainerDisabled,
+                    ]}
+                    onPress={() => handleToggleOnline(false)}
+                    disabled={togglingStatus}
+                  >
+                    {togglingStatus ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <View
+                        style={[
+                          styles.toggleThumb,
+                          isOnline && styles.toggleThumbActive,
+                        ]}
+                      />
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {/* Status Messages from status-info */}
+                {statusInfo && !statusInfo.shouldBeActive && (
+                  <View style={styles.statusMessageBanner}>
+                    <Ionicons name="time-outline" size={16} color="#d97706" />
+                    <Text style={styles.statusMessageText}>
+                      ⏰ You are currently outside your working hours. You'll be
+                      able to accept deliveries during your scheduled time.
+                    </Text>
+                  </View>
+                )}
+
+                {statusInfo && statusInfo.shouldBeActive && !isOnline && (
+                  <View
+                    style={[
+                      styles.statusMessageBanner,
+                      styles.statusMessageInfo,
+                    ]}
+                  >
+                    <Ionicons name="bulb-outline" size={16} color="#3b82f6" />
+                    <Text
+                      style={[
+                        styles.statusMessageText,
+                        styles.statusMessageTextInfo,
+                      ]}
+                    >
+                      💡 You're within your working hours. Activate your status
+                      to start receiving delivery requests.
+                    </Text>
+                  </View>
+                )}
+
+                {statusInfo && statusInfo.isActive && (
+                  <View
+                    style={[
+                      styles.statusMessageBanner,
+                      styles.statusMessageSuccess,
+                    ]}
+                  >
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color="#06C168"
+                    />
+                    <Text
+                      style={[
+                        styles.statusMessageText,
+                        styles.statusMessageTextSuccess,
+                      ]}
+                    >
+                      ✅ You are active and can receive delivery requests!
+                    </Text>
+                  </View>
+                )}
+
+                {/* Working Hours Status */}
+                {driverProfile?.working_time &&
+                  driverProfile.working_time !== "full_time" && (
+                    <View
+                      style={[
+                        styles.workingHoursStatus,
+                        withinWorkingHours
+                          ? styles.workingHoursStatusActive
+                          : manualOverrideActive
+                            ? styles.workingHoursStatusWarning
+                            : styles.workingHoursStatusInactive,
+                      ]}
+                    >
+                      <Ionicons
+                        name={
+                          withinWorkingHours
+                            ? "checkmark-circle"
+                            : "time-outline"
+                        }
+                        size={16}
+                        color={
+                          withinWorkingHours
+                            ? "#06C168"
+                            : manualOverrideActive
+                              ? "#d97706"
+                              : "#64748b"
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.workingHoursText,
+                          withinWorkingHours
+                            ? styles.workingHoursTextActive
+                            : manualOverrideActive
+                              ? styles.workingHoursTextWarning
+                              : styles.workingHoursTextInactive,
+                        ]}
+                      >
+                        {withinWorkingHours
+                          ? "Within working hours"
+                          : manualOverrideActive
+                            ? "Manual override active (outside working hours)"
+                            : "Outside working hours"}
+                      </Text>
+                    </View>
+                  )}
+
+                {/* Next Status Change Info */}
+                {statusInfo?.nextStatusChange && (
+                  <View style={styles.nextStatusChangeInfo}>
+                    <Text style={styles.nextStatusChangeText}>
+                      Next automatic status change:{" "}
+                      {new Date(
+                        statusInfo.nextStatusChange,
+                      ).toLocaleTimeString()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+
+            {/* Stats Cards */}
+            <View style={styles.statsRow}>
+              <View style={styles.statCard}>
+                <Text style={styles.statLabel}>Today's Earnings</Text>
+                <Text style={styles.statValue}>
+                  Rs. {stats.todayEarnings.toFixed(0)}
                 </Text>
               </View>
+              <View style={styles.statCard}>
+                <Text style={styles.statLabel}>Today's Deliveries</Text>
+                <Text style={styles.statValueBlack}>
+                  {stats.todayDeliveries}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.balanceToReceiveCardWrap}>
+              <View style={styles.balanceToReceiveCard}>
+                <Text style={styles.balanceToReceiveLabel}>
+                  Balance to Receive
+                </Text>
+                <Text style={styles.balanceToReceiveValue}>
+                  Rs. {balanceToReceive.toFixed(2)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Active Deliveries Section */}
+            {activeDeliveries.length > 0 && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>
+                    Active Deliveries ({activeDeliveries.length})
+                  </Text>
+                  <TouchableOpacity onPress={openActiveMap}>
+                    <Text style={styles.sectionLink}>View All</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.section}>
+                  {activeDeliveries.slice(0, 3).map((delivery) => (
+                    <TouchableOpacity
+                      key={String(delivery.delivery_id || delivery.id)}
+                      style={styles.activeDeliveryCard}
+                      onPress={openActiveMap}
+                    >
+                      <View style={styles.activeDeliveryIcon}>
+                        <Ionicons
+                          name={
+                            delivery.status === "accepted"
+                              ? "restaurant"
+                              : delivery.status === "picked_up"
+                                ? "bicycle"
+                                : delivery.status === "on_the_way"
+                                  ? "car"
+                                  : "location"
+                          }
+                          size={24}
+                          color="#d97706"
+                        />
+                      </View>
+                      <View style={styles.activeDeliveryInfo}>
+                        <Text style={styles.activeDeliveryRestaurant}>
+                          {["picked_up", "on_the_way", "at_customer"].includes(
+                            delivery.status,
+                          )
+                            ? delivery.order?.delivery?.address ||
+                              delivery.orders?.delivery_address ||
+                              "Customer Address"
+                            : delivery.order?.restaurant?.name ||
+                              delivery.orders?.restaurant_name ||
+                              "Restaurant"}
+                        </Text>
+                        <Text style={styles.activeDeliveryOrder}>
+                          Order #
+                          {delivery.order?.order_number ||
+                            delivery.orders?.order_number ||
+                            "N/A"}
+                        </Text>
+                        <Text style={styles.activeDeliveryStatus}>
+                          {delivery.status?.replace(/_/g, " ")}
+                        </Text>
+                      </View>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={20}
+                        color="#cbd5e1"
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {!isOnline && activeDeliveries.length > 0 && (
+                  <View style={styles.warningBanner}>
+                    <Ionicons
+                      name="information-circle"
+                      size={18}
+                      color="#d97706"
+                    />
+                    <Text style={styles.warningText}>
+                      You're offline but have active deliveries. Complete these
+                      deliveries to receive your earnings.
+                    </Text>
+                  </View>
+                )}
+              </>
             )}
-          </View>
-        </View>
 
-        {/* Stats Cards */}
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Today's Earnings</Text>
-            <Text style={styles.statValue}>
-              Rs. {stats.todayEarnings.toFixed(0)}
-            </Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Today's Deliveries</Text>
-            <Text style={styles.statValueBlack}>{stats.todayDeliveries}</Text>
-          </View>
-        </View>
-
-        {/* Active Deliveries Section */}
-        {activeDeliveries.length > 0 && (
-          <>
+            {/* Nearby Requests Header */}
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>
-                Active Deliveries ({activeDeliveries.length})
+                Nearby Requests ({nearbyDeliveries.length})
               </Text>
               <TouchableOpacity
-                onPress={() => navigation.navigate("ActiveDeliveries")}
+                onPress={() => navigation.navigate("AvailableDeliveries")}
               >
                 <Text style={styles.sectionLink}>View All</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Nearby Requests List */}
             <View style={styles.section}>
-              {activeDeliveries.slice(0, 3).map((delivery) => (
-                <TouchableOpacity
-                  key={delivery.id}
-                  style={styles.activeDeliveryCard}
-                  onPress={() => navigation.navigate("ActiveDeliveries")}
-                >
-                  <View style={styles.activeDeliveryIcon}>
+              {!isOnline ? (
+                activeDeliveries.length > 0 ? (
+                  <View style={styles.emptyState}>
                     <Ionicons
-                      name={
-                        delivery.status === "accepted"
-                          ? "restaurant"
-                          : delivery.status === "picked_up"
-                            ? "bicycle"
-                            : delivery.status === "on_the_way"
-                              ? "car"
-                              : "location"
-                      }
-                      size={24}
-                      color="#d97706"
+                      name="hourglass-outline"
+                      size={56}
+                      color="#f59e0b"
                     />
-                  </View>
-                  <View style={styles.activeDeliveryInfo}>
-                    <Text style={styles.activeDeliveryRestaurant}>
-                      {delivery.orders?.restaurant_name || "Restaurant"}
+                    <Text style={styles.emptyStateTitle}>
+                      Complete your active deliveries
                     </Text>
-                    <Text style={styles.activeDeliveryOrder}>
-                      Order #{delivery.orders?.order_number || "N/A"}
-                    </Text>
-                    <Text style={styles.activeDeliveryStatus}>
-                      {delivery.status?.replace(/_/g, " ")}
+                    <Text style={styles.emptyStateSubtext}>
+                      You can go online after completing current deliveries
                     </Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-                </TouchableOpacity>
-              ))}
-            </View>
-            {!isOnline && activeDeliveries.length > 0 && (
-              <View style={styles.warningBanner}>
-                <Ionicons name="information-circle" size={18} color="#d97706" />
-                <Text style={styles.warningText}>
-                  You're offline but have active deliveries. Complete these
-                  deliveries to receive your earnings.
-                </Text>
-              </View>
-            )}
-          </>
-        )}
-
-        {/* Nearby Requests Header */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            Nearby Requests ({availableDeliveries.length})
-          </Text>
-          <TouchableOpacity
-            onPress={() => navigation.navigate("AvailableDeliveries")}
-          >
-            <Text style={styles.sectionLink}>View All</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Nearby Requests List */}
-        <View style={styles.section}>
-          {!isOnline ? (
-            activeDeliveries.length > 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="hourglass-outline" size={56} color="#f59e0b" />
-                <Text style={styles.emptyStateTitle}>
-                  Complete your active deliveries
-                </Text>
-                <Text style={styles.emptyStateSubtext}>
-                  You can go online after completing current deliveries
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.emptyState}>
-                <MaterialCommunityIcons
-                  name="wifi-off"
-                  size={64}
-                  color="#cbd5e1"
-                />
-                <Text style={styles.emptyStateTitle}>
-                  You're currently offline
-                </Text>
-                <Text style={styles.emptyStateSubtext}>
-                  Go online to receive delivery requests
-                </Text>
-              </View>
-            )
-          ) : availableDeliveries.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="cube-outline" size={64} color="#cbd5e1" />
-              <Text style={styles.emptyStateTitle}>No requests nearby</Text>
-              <Text style={styles.emptyStateSubtext}>
-                New orders will appear here
-              </Text>
-            </View>
-          ) : (
-            availableDeliveries.slice(0, 5).map((delivery, index) => (
-              <View key={delivery.delivery_id} style={styles.deliveryCard}>
-                <View style={styles.deliveryHeader}>
-                  <View style={styles.deliveryHeaderLeft}>
-                    <View style={styles.deliveryBadges}>
-                      {index === 0 && (
-                        <View style={styles.newBadge}>
-                          <Text style={styles.newBadgeText}>NEW ORDER</Text>
-                        </View>
-                      )}
-                      {delivery.orders?.length > 1 && (
-                        <View style={styles.bulkBadge}>
-                          <Text style={styles.bulkBadgeText}>BULK ORDER</Text>
-                        </View>
-                      )}
+                ) : (
+                  <View style={styles.emptyState}>
+                    <MaterialCommunityIcons
+                      name="wifi-off"
+                      size={64}
+                      color="#cbd5e1"
+                    />
+                    <Text style={styles.emptyStateTitle}>
+                      You're currently offline
+                    </Text>
+                    <Text style={styles.emptyStateSubtext}>
+                      Go online to receive delivery requests
+                    </Text>
+                  </View>
+                )
+              ) : !hasNearbyInitialSyncCompleted ? (
+                <View style={styles.nearbySkeletonWrap}>
+                  <View style={styles.nearbySyncBanner}>
+                    <ActivityIndicator size="small" color="#06C168" />
+                    <Text style={styles.nearbySyncBannerText}>
+                      Updating nearby requests with latest available
+                      deliveries...
+                    </Text>
+                  </View>
+                  {[1, 2, 3].map((item) => (
+                    <View key={item} style={styles.nearbySkeletonCard}>
+                      <View style={styles.nearbySkeletonLineLg} />
+                      <View style={styles.nearbySkeletonLineSm} />
+                      <View style={styles.nearbySkeletonRow}>
+                        <View style={styles.nearbySkeletonChip} />
+                        <View style={styles.nearbySkeletonChip} />
+                      </View>
+                      <View style={styles.nearbySkeletonButton} />
                     </View>
-                    <Text style={styles.distanceText}>
-                      {calculateDistance(delivery)} km away
+                  ))}
+                </View>
+              ) : nearbySyncError && nearbyDeliveries.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="warning-outline" size={52} color="#f59e0b" />
+                  <Text style={styles.emptyStateTitle}>
+                    Unable to update requests
+                  </Text>
+                  <Text style={styles.emptyStateSubtext}>
+                    {nearbySyncError}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.retryNearbyButton}
+                    onPress={() => fetchDashboardData()}
+                  >
+                    <Text style={styles.retryNearbyButtonText}>
+                      Retry update
                     </Text>
-                    <Text style={styles.earningsAmount}>
-                      Rs. {getDeliveryEarnings(delivery)}
-                    </Text>
-                    {parseFloat(delivery.pricing?.tip_amount || 0) > 0 && (
-                      <View style={styles.tipBadge}>
-                        <Text style={styles.tipEmoji}>💰</Text>
-                        <Text style={styles.tipText}>
-                          +Rs.
-                          {parseFloat(delivery.pricing.tip_amount).toFixed(
-                            0,
-                          )}{" "}
-                          tip included
+                  </TouchableOpacity>
+                </View>
+              ) : nearbyDeliveries.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="cube-outline" size={64} color="#cbd5e1" />
+                  <Text style={styles.emptyStateTitle}>No requests nearby</Text>
+                  <Text style={styles.emptyStateSubtext}>
+                    New orders will appear here
+                  </Text>
+                </View>
+              ) : (
+                visibleNearbyDeliveries.map((delivery, index) => {
+                  const breakdown = getEarningsBreakdown(delivery);
+                  const tripSummary = getDistanceAndTimeSummary(delivery);
+                  const chips = breakdown.isFirst
+                    ? [
+                        `Delivery Rs. ${breakdown.baseAmount.toFixed(0)}`,
+                        breakdown.tipAmount > 0
+                          ? `Tip Rs. ${breakdown.tipAmount.toFixed(0)}`
+                          : null,
+                      ].filter(Boolean)
+                    : [
+                        `Delivery Rs. ${breakdown.extraEarnings.toFixed(0)}`,
+                        breakdown.bonusAmount > 0
+                          ? `Bonus Rs. ${breakdown.bonusAmount.toFixed(0)}`
+                          : null,
+                        breakdown.tipAmount > 0
+                          ? `Tip Rs. ${breakdown.tipAmount.toFixed(0)}`
+                          : null,
+                      ].filter(Boolean);
+
+                  return (
+                    <View
+                      key={delivery.delivery_id}
+                      style={styles.deliveryCard}
+                    >
+                      <View style={styles.deliveryHeader}>
+                        <View style={styles.deliveryHeaderLeft}>
+                          <View style={styles.deliveryBadges}>
+                            {index === 0 && (
+                              <View style={styles.newBadge}>
+                                <Text style={styles.newBadgeText}>
+                                  NEW ORDER
+                                </Text>
+                              </View>
+                            )}
+                            {delivery.orders?.length > 1 && (
+                              <View style={styles.bulkBadge}>
+                                <Text style={styles.bulkBadgeText}>
+                                  BULK ORDER
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+
+                          <Text style={styles.earningsAmount}>
+                            Rs. {getDeliveryEarnings(delivery)}
+                          </Text>
+                          {chips.length > 0 && (
+                            <Text style={styles.breakdownText}>
+                              {chips.join(" • ")}
+                            </Text>
+                          )}
+
+                          <View style={styles.metricsRow}>
+                            <View style={styles.metricItem}>
+                              <Ionicons
+                                name="navigate-outline"
+                                size={14}
+                                color="#64748b"
+                              />
+                              <Text style={styles.metricText}>
+                                {tripSummary.primaryDistance > 0
+                                  ? `${breakdown.isFirst ? "" : "+"}${tripSummary.primaryDistance.toFixed(1)} km`
+                                  : "0"}
+                              </Text>
+                            </View>
+                            <View style={styles.metricItem}>
+                              <Ionicons
+                                name="time-outline"
+                                size={14}
+                                color="#64748b"
+                              />
+                              <Text style={styles.metricText}>
+                                {tripSummary.primaryMinutes > 0
+                                  ? `${breakdown.isFirst ? "" : "+"}${Math.round(tripSummary.primaryMinutes)} min`
+                                  : "0"}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.restaurantInfo}>
+                            <Ionicons
+                              name="storefront"
+                              size={18}
+                              color="#64748b"
+                            />
+                            <Text style={styles.restaurantName}>
+                              {getPickupRestaurantWithCity(delivery)}
+                            </Text>
+                          </View>
+                          <Text style={styles.estimatedTime} numberOfLines={1}>
+                            Drop-off: {getDropoffAddress(delivery)}
+                          </Text>
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        style={[
+                          styles.acceptButton,
+                          (acceptingOrder === delivery.delivery_id ||
+                            isNearbySyncing) &&
+                            styles.acceptButtonDisabled,
+                        ]}
+                        onPress={() =>
+                          handleAcceptDelivery(delivery.delivery_id)
+                        }
+                        disabled={
+                          acceptingOrder === delivery.delivery_id ||
+                          isNearbySyncing
+                        }
+                      >
+                        {acceptingOrder === delivery.delivery_id ? (
+                          <>
+                            <ActivityIndicator size="small" color="#fff" />
+                            <Text style={styles.acceptButtonText}>
+                              Accepting...
+                            </Text>
+                          </>
+                        ) : (
+                          <>
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={22}
+                              color="#fff"
+                            />
+                            <Text style={styles.acceptButtonText}>
+                              Accept Request
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })
+              )}
+              {remainingNearbyCount > 0 && (
+                <TouchableOpacity
+                  style={styles.showMoreNearbyButton}
+                  onPress={() =>
+                    setNearbyVisibleCount((prev) =>
+                      Math.min(
+                        prev + NEARBY_PAGE_SIZE,
+                        nearbyDeliveries.length,
+                      ),
+                    )
+                  }
+                >
+                  <Text style={styles.showMoreNearbyText}>
+                    Show More (+
+                    {Math.min(NEARBY_PAGE_SIZE, remainingNearbyCount)})
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Monthly Performance Section */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Monthly Performance</Text>
+            </View>
+            <View style={styles.statsRow}>
+              <View style={[styles.statCard, styles.monthlyEarningsCard]}>
+                <Text style={styles.monthlyStatLabel}>Month Earnings</Text>
+                <Text style={styles.monthlyStatValue}>
+                  Rs. {monthlyStats.earnings.toFixed(0)}
+                </Text>
+              </View>
+              <View style={[styles.statCard, styles.monthlyDeliveriesCard]}>
+                <Text style={styles.monthlyStatLabel}>Month Deliveries</Text>
+                <Text style={styles.monthlyStatValue}>
+                  {monthlyStats.deliveries}
+                </Text>
+              </View>
+            </View>
+
+            {/* Recent Deliveries Section */}
+            {recentDeliveries.length > 0 && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Recent Deliveries</Text>
+                </View>
+                <View style={styles.section}>
+                  {recentDeliveries.map((delivery) => (
+                    <View key={delivery.id} style={styles.recentDeliveryCard}>
+                      <View style={styles.recentDeliveryIcon}>
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={24}
+                          color="#06C168"
+                        />
+                      </View>
+                      <View style={styles.recentDeliveryInfo}>
+                        <Text style={styles.recentDeliveryRestaurant}>
+                          {delivery.restaurant_name || "Restaurant"}
+                        </Text>
+                        <Text style={styles.recentDeliveryOrder}>
+                          Order #{delivery.order_number || "N/A"}
+                        </Text>
+                        <Text style={styles.recentDeliveryEarnings}>
+                          Rs.{" "}
+                          {parseFloat(delivery.driver_earnings || 0).toFixed(2)}
                         </Text>
                       </View>
-                    )}
-                    <View style={styles.restaurantInfo}>
-                      <Ionicons name="storefront" size={18} color="#64748b" />
-                      <Text style={styles.restaurantName}>
-                        {delivery.restaurant?.name ||
-                          delivery.restaurant_name ||
-                          "Restaurant"}
-                      </Text>
+                      <View style={styles.recentDeliveryTime}>
+                        <Text style={styles.recentDeliveryDate}>
+                          {delivery.delivered_at
+                            ? new Date(
+                                delivery.delivered_at,
+                              ).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                              })
+                            : ""}
+                        </Text>
+                        <Text style={styles.recentDeliveryTimeText}>
+                          {delivery.delivered_at
+                            ? new Date(
+                                delivery.delivered_at,
+                              ).toLocaleTimeString("en-US", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : ""}
+                        </Text>
+                      </View>
                     </View>
-                    {getEstimatedTime(delivery) > 0 && (
-                      <Text style={styles.estimatedTime}>
-                        ~{getEstimatedTime(delivery)} mins
-                      </Text>
-                    )}
-                  </View>
-                  <MiniDeliveryMap delivery={delivery} />
+                  ))}
                 </View>
-                <TouchableOpacity
-                  style={[
-                    styles.acceptButton,
-                    acceptingOrder === delivery.delivery_id &&
-                      styles.acceptButtonDisabled,
-                  ]}
-                  onPress={() => handleAcceptDelivery(delivery.delivery_id)}
-                  disabled={acceptingOrder === delivery.delivery_id}
-                >
-                  {acceptingOrder === delivery.delivery_id ? (
-                    <>
-                      <ActivityIndicator size="small" color="#fff" />
-                      <Text style={styles.acceptButtonText}>Accepting...</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={22}
-                        color="#fff"
-                      />
-                      <Text style={styles.acceptButtonText}>
-                        Accept Request
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </View>
-            ))
-          )}
-        </View>
+              </>
+            )}
 
-        {/* Monthly Performance Section */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Monthly Performance</Text>
-        </View>
-        <View style={styles.statsRow}>
-          <View style={[styles.statCard, styles.monthlyEarningsCard]}>
-            <Text style={styles.monthlyStatLabel}>Month Earnings</Text>
-            <Text style={styles.monthlyStatValue}>
-              Rs. {monthlyStats.earnings.toFixed(0)}
-            </Text>
-          </View>
-          <View style={[styles.statCard, styles.monthlyDeliveriesCard]}>
-            <Text style={styles.monthlyStatLabel}>Month Deliveries</Text>
-            <Text style={styles.monthlyStatValue}>
-              {monthlyStats.deliveries}
-            </Text>
-          </View>
-        </View>
+            {/* Logout */}
+            <TouchableOpacity
+              style={styles.logoutBtn}
+              onPress={() =>
+                Alert.alert("Logout", "Are you sure you want to logout?", [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Logout",
+                    style: "destructive",
+                    onPress: async () => await logout(),
+                  },
+                ])
+              }
+            >
+              <Ionicons name="log-out-outline" size={20} color="#dc2626" />
+              <Text style={styles.logoutBtnText}>Logout</Text>
+            </TouchableOpacity>
 
-        {/* Recent Deliveries Section */}
-        {recentDeliveries.length > 0 && (
-          <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent Deliveries</Text>
-            </View>
-            <View style={styles.section}>
-              {recentDeliveries.map((delivery) => (
-                <View key={delivery.id} style={styles.recentDeliveryCard}>
-                  <View style={styles.recentDeliveryIcon}>
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={24}
-                      color="#06C168"
-                    />
-                  </View>
-                  <View style={styles.recentDeliveryInfo}>
-                    <Text style={styles.recentDeliveryRestaurant}>
-                      {delivery.restaurant_name || "Restaurant"}
-                    </Text>
-                    <Text style={styles.recentDeliveryOrder}>
-                      Order #{delivery.order_number || "N/A"}
-                    </Text>
-                    <Text style={styles.recentDeliveryEarnings}>
-                      Rs. {parseFloat(delivery.driver_earnings || 0).toFixed(0)}
-                    </Text>
-                  </View>
-                  <View style={styles.recentDeliveryTime}>
-                    <Text style={styles.recentDeliveryDate}>
-                      {delivery.delivered_at
-                        ? new Date(delivery.delivered_at).toLocaleDateString(
-                            "en-US",
-                            {
-                              month: "short",
-                              day: "numeric",
-                            },
-                          )
-                        : ""}
-                    </Text>
-                    <Text style={styles.recentDeliveryTimeText}>
-                      {delivery.delivered_at
-                        ? new Date(delivery.delivered_at).toLocaleTimeString(
-                            "en-US",
-                            {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            },
-                          )
-                        : ""}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </>
-        )}
-
-        {/* Logout */}
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          onPress={() =>
-            Alert.alert("Logout", "Are you sure you want to logout?", [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Logout",
-                style: "destructive",
-                onPress: async () => await logout(),
-              },
-            ])
-          }
-        >
-          <Ionicons name="log-out-outline" size={20} color="#dc2626" />
-          <Text style={styles.logoutBtnText}>Logout</Text>
-        </TouchableOpacity>
-
-        <View style={{ height: 100 }} />
-      </ScrollView>
+            <View style={{ height: 100 }} />
+          </ScrollView>
+        </DriverScreenSection>
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -1246,6 +2079,9 @@ const styles = StyleSheet.create({
     color: "#64748b",
   },
   scrollView: {
+    flex: 1,
+  },
+  pageAnimationWrap: {
     flex: 1,
   },
   topBar: {
@@ -1493,6 +2329,36 @@ const styles = StyleSheet.create({
     color: "#0f172a",
     letterSpacing: -0.5,
   },
+  balanceToReceiveCardWrap: {
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  balanceToReceiveCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  balanceToReceiveLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#94a3b8",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  balanceToReceiveValue: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#ea580c",
+    letterSpacing: -0.5,
+  },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1618,13 +2484,6 @@ const styles = StyleSheet.create({
     color: "#64748b",
     letterSpacing: 0.5,
   },
-  distanceText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#94a3b8",
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
   earningsAmount: {
     fontSize: 24,
     fontWeight: "700",
@@ -1664,26 +2523,33 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#475569",
   },
+  breakdownText: {
+    fontSize: 12,
+    color: "#0f172a",
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  metricsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  metricItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  metricText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#334155",
+  },
   estimatedTime: {
     fontSize: 12,
     color: "#94a3b8",
     marginTop: 2,
-  },
-  miniMapContainer: {
-    width: 96,
-    height: 96,
-    borderRadius: 12,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-  },
-  miniMapPlaceholder: {
-    width: 96,
-    height: 96,
-    borderRadius: 12,
-    backgroundColor: "#f8fafc",
-    justifyContent: "center",
-    alignItems: "center",
   },
   acceptButton: {
     flexDirection: "row",
@@ -1721,6 +2587,90 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#94a3b8",
     marginTop: 4,
+    textAlign: "center",
+    paddingHorizontal: 16,
+  },
+  retryNearbyButton: {
+    marginTop: 16,
+    backgroundColor: "#06C168",
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  retryNearbyButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  showMoreNearbyButton: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: "#06C168",
+    borderRadius: 10,
+    alignItems: "center",
+    paddingVertical: 10,
+    backgroundColor: "#ecfdf3",
+  },
+  showMoreNearbyText: {
+    color: "#047857",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  nearbySkeletonWrap: {
+    gap: 12,
+  },
+  nearbySyncBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#ecfdf3",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#b8f0d0",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  nearbySyncBannerText: {
+    flex: 1,
+    color: "#046b4d",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  nearbySkeletonCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+    padding: 16,
+    gap: 10,
+  },
+  nearbySkeletonLineLg: {
+    width: "52%",
+    height: 18,
+    borderRadius: 8,
+    backgroundColor: "#e2e8f0",
+  },
+  nearbySkeletonLineSm: {
+    width: "40%",
+    height: 14,
+    borderRadius: 8,
+    backgroundColor: "#e2e8f0",
+  },
+  nearbySkeletonRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  nearbySkeletonChip: {
+    width: 90,
+    height: 12,
+    borderRadius: 8,
+    backgroundColor: "#cbd5e1",
+  },
+  nearbySkeletonButton: {
+    marginTop: 6,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: "#d1fae5",
   },
   monthlyEarningsCard: {
     backgroundColor: "#dcfce7",

@@ -4,7 +4,7 @@
  */
 
 /**
- * Calculate distance between two coordinates using Haversine formula
+ * Calculate distance between two coordinates using planar approximation
  * @param {number} lat1
  * @param {number} lon1
  * @param {number} lat2
@@ -12,25 +12,13 @@
  * @returns {number} Distance in kilometers
  */
 export const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371; // Earth's radius in km
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+  const latMeters = 111320;
+  const avgLatRad = ((lat1 + lat2) / 2) * (Math.PI / 180);
+  const lngMeters = 111320 * Math.cos(avgLatRad);
+  const dLat = (lat2 - lat1) * latMeters;
+  const dLng = (lon2 - lon1) * lngMeters;
+  return Math.sqrt(dLat * dLat + dLng * dLng) / 1000;
 };
-
-/**
- * Convert degrees to radians
- */
-const toRad = (deg) => (deg * Math.PI) / 180;
 
 /**
  * Format coordinates for display
@@ -54,7 +42,7 @@ export const isWithinRadius = (center, point, radiusKm) => {
     center.latitude,
     center.longitude,
     point.latitude,
-    point.longitude
+    point.longitude,
   );
   return distance <= radiusKm;
 };
@@ -72,7 +60,7 @@ export const getCenterPoint = (coordinates) => {
       latitude: acc.latitude + coord.latitude,
       longitude: acc.longitude + coord.longitude,
     }),
-    { latitude: 0, longitude: 0 }
+    { latitude: 0, longitude: 0 },
   );
 
   return {

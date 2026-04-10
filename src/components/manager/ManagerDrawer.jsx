@@ -115,7 +115,7 @@ const ManagerDrawer = ({
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <View style={styles.nmIcon}>
-                <Text style={styles.nmText}>NM</Text>
+                <Text style={styles.nmText}>MEEZO</Text>
               </View>
               <Text style={styles.headerTitle} numberOfLines={1}>
                 {sectionTitle}
@@ -198,18 +198,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   nmIcon: {
-    width: 30,
+    minWidth: 60,
     height: 30,
     borderRadius: 8,
     backgroundColor: "#06C168",
+    paddingHorizontal: 8,
     justifyContent: "center",
     alignItems: "center",
   },
   nmText: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "800",
-    letterSpacing: 0.3,
+    letterSpacing: 0.6,
   },
   headerTitle: {
     fontSize: 15,

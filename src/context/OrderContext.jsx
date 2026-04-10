@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+} from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE_URL } from "../constants/api";
 import supabase from "../services/supabaseClient";
@@ -7,19 +14,46 @@ const OrderContext = createContext(null);
 
 // ─── Status Constants (shared across app) ─────────────────────────────────
 export const ACTIVE_STATUSES = [
-  "placed", "pending", "accepted", "preparing", "ready", "picked_up", "on_the_way",
-  "driver_accepted", "driver_assigned", "received",
-  "PLACED", "PENDING", "DRIVER_ACCEPTED", "DRIVER_ASSIGNED", "RECEIVED", "ACCEPTED", "PREPARING", "READY", "PICKED_UP", "ON_THE_WAY",
+  "placed",
+  "pending",
+  "accepted",
+  "preparing",
+  "ready",
+  "picked_up",
+  "on_the_way",
+  "driver_accepted",
+  "driver_assigned",
+  "received",
+  "PLACED",
+  "PENDING",
+  "DRIVER_ACCEPTED",
+  "DRIVER_ASSIGNED",
+  "RECEIVED",
+  "ACCEPTED",
+  "PREPARING",
+  "READY",
+  "PICKED_UP",
+  "ON_THE_WAY",
 ];
 export const PAST_STATUSES = [
-  "delivered", "cancelled", "rejected", "failed",
-  "DELIVERED", "CANCELLED", "REJECTED", "FAILED",
+  "delivered",
+  "cancelled",
+  "rejected",
+  "failed",
+  "DELIVERED",
+  "CANCELLED",
+  "REJECTED",
+  "FAILED",
 ];
 
 // Helper to get the displayable status from an order object
 // Priority: effective_status > delivery_status > status (normalised to lowercase)
 export const getOrderStatus = (order) => {
-  const raw = order?.effective_status || order?.delivery_status || order?.status || "placed";
+  const raw =
+    order?.effective_status ||
+    order?.delivery_status ||
+    order?.status ||
+    "placed";
   return typeof raw === "string" ? raw.toLowerCase() : "placed";
 };
 
@@ -51,42 +85,14 @@ export function OrderProvider({ children }) {
         const list = data.orders || data || [];
         const orderList = Array.isArray(list) ? list : [];
 
-        // For active orders, also fetch /delivery-status to get effective_status
-        const activeIds = orderList
-          .filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o)))
-          .map((o) => o.id)
-          .slice(0, 10); // cap at 10 to avoid too many requests
-
-        if (activeIds.length > 0) {
-          const results = await Promise.allSettled(
-            activeIds.map(async (id) => {
-              try {
-                const r = await fetch(`${API_BASE_URL}/orders/${id}/delivery-status`, {
-                  headers: { Authorization: `Bearer ${token}` },
-                });
-                if (!r.ok) return null;
-                const d = await r.json().catch(() => null);
-                if (!d) return null;
-                return { id, effective_status: d.effective_status || d.delivery_status || d.status || null };
-              } catch { return null; }
-            }),
-          );
-          // Merge effective_status back into the order objects
-          const statusMap = {};
-          results.forEach((r) => {
-            if (r.status === "fulfilled" && r.value?.effective_status) {
-              statusMap[r.value.id] = r.value.effective_status;
-            }
-          });
-          orderList.forEach((o) => {
-            if (statusMap[o.id]) o.effective_status = statusMap[o.id];
-          });
-        }
+        // Do not fan out N extra delivery-status calls; /orders/my-orders already carries delivery/effective status.
 
         setOrders(orderList);
 
         // Update badge count (active orders)
-        const activeCount = orderList.filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))).length;
+        const activeCount = orderList.filter((o) =>
+          ACTIVE_STATUSES.includes(getOrderStatus(o)),
+        ).length;
         setOrdersBadgeCount(activeCount);
 
         return true;
@@ -141,11 +147,13 @@ export function OrderProvider({ children }) {
           { event: "UPDATE", schema: "public", table: "orders" },
           (payload) => {
             setOrders((prev) =>
-              prev.map((o) => (o.id === payload.new.id ? { ...o, ...payload.new } : o))
+              prev.map((o) =>
+                o.id === payload.new.id ? { ...o, ...payload.new } : o,
+              ),
             );
             // Re-fetch to get effective_status from delivery-status endpoint
             fetchOrders("silent");
-          }
+          },
         )
         .on(
           "postgres_changes",
@@ -156,7 +164,7 @@ export function OrderProvider({ children }) {
               addNewOrder(payload.new);
             }
             fetchOrders("silent");
-          }
+          },
         )
         .subscribe();
 
@@ -169,12 +177,14 @@ export function OrderProvider({ children }) {
     };
   }, [fetchOrders, addNewOrder]);
 
-  // ── Background polling: keep active orders in sync (every 10s) ──────────
+  // ── Background polling: keep active orders in sync (every 30s) ──────────
   useEffect(() => {
-    const hasActive = orders.some((o) => ACTIVE_STATUSES.includes(getOrderStatus(o)));
+    const hasActive = orders.some((o) =>
+      ACTIVE_STATUSES.includes(getOrderStatus(o)),
+    );
     if (!hasActive) return;
 
-    const interval = setInterval(() => fetchOrders("silent"), 10000);
+    const interval = setInterval(() => fetchOrders("silent"), 30000);
     return () => clearInterval(interval);
   }, [orders, fetchOrders]);
 
@@ -191,7 +201,9 @@ export function OrderProvider({ children }) {
     setOrders,
   };
 
-  return <OrderContext.Provider value={value}>{children}</OrderContext.Provider>;
+  return (
+    <OrderContext.Provider value={value}>{children}</OrderContext.Provider>
+  );
 }
 
 export function useOrders() {

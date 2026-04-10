@@ -23,6 +23,9 @@ import {
 import { API_BASE_URL } from "../constants/api";
 import { useSocket } from "./SocketContext";
 
+const AVAILABLE_DELIVERIES_CACHE_KEY = "available_deliveries_cache";
+const DRIVER_STATUS_ENDPOINT = "/driver/working-hours-status";
+
 const DriverDeliveryNotificationContext = createContext(null);
 
 export const useDriverDeliveryNotifications = () => {
@@ -65,6 +68,113 @@ async function createAlertSound() {
 // ============================================================================
 
 export function DriverDeliveryNotificationProvider({ children }) {
+  const deriveDriverOnlineState = useCallback((statusPayload) => {
+    const normalizedStatus = String(
+      statusPayload?.currentStatus ||
+        statusPayload?.driver_status ||
+        statusPayload?.status ||
+        "",
+    )
+      .trim()
+      .toLowerCase();
+
+    if (normalizedStatus === "active") return true;
+    if (normalizedStatus === "inactive") return false;
+
+    // Fallback for legacy payloads that only return time-window booleans.
+    if (typeof statusPayload?.shouldBeActive === "boolean") {
+      return statusPayload.shouldBeActive;
+    }
+
+    return null;
+  }, []);
+
+  const enrichWithCachedAvailableDelivery = useCallback(
+    async (deliveryData) => {
+      try {
+        const cachedRaw = await AsyncStorage.getItem(
+          AVAILABLE_DELIVERIES_CACHE_KEY,
+        );
+        if (!cachedRaw) return deliveryData;
+
+        const parsed = JSON.parse(cachedRaw);
+        const deliveries = parsed?.data?.deliveries || [];
+        const currentRoute = parsed?.data?.currentRoute || {};
+
+        const match = deliveries.find(
+          (d) => String(d?.delivery_id) === String(deliveryData?.delivery_id),
+        );
+
+        if (!match) return deliveryData;
+
+        const routeImpact = match.route_impact || {};
+        const pricing = match.pricing || {};
+        const activeDeliveries = Number(currentRoute.active_deliveries || 0);
+        const hasRouteExtraSignals =
+          Number(routeImpact.extra_distance_km || 0) > 0 ||
+          Number(routeImpact.extra_time_minutes || 0) > 0 ||
+          Number(routeImpact.extra_earnings || 0) > 0 ||
+          Number(routeImpact.bonus_amount || 0) > 0;
+
+        const stackedByContext =
+          routeImpact.is_first_delivery === false ||
+          hasRouteExtraSignals ||
+          activeDeliveries > 0;
+
+        const inferredSequence =
+          Number(routeImpact.delivery_sequence || 0) ||
+          (stackedByContext
+            ? activeDeliveries + 1 || 2
+            : Number(deliveryData?.delivery_sequence || 0) || 1);
+
+        return {
+          ...deliveryData,
+          delivery_sequence: inferredSequence,
+          driver_earnings:
+            Number(deliveryData?.driver_earnings || 0) ||
+            Number(pricing.total_trip_earnings || 0) ||
+            Number(routeImpact.total_trip_earnings || 0),
+          total_trip_earnings:
+            Number(deliveryData?.total_trip_earnings || 0) ||
+            Number(pricing.total_trip_earnings || 0) ||
+            Number(routeImpact.total_trip_earnings || 0),
+          base_amount:
+            Number(deliveryData?.base_amount || 0) ||
+            Number(routeImpact.base_amount || 0) ||
+            Number(pricing.total_trip_earnings || 0),
+          extra_earnings:
+            Number(deliveryData?.extra_earnings || 0) ||
+            Number(routeImpact.extra_earnings || 0),
+          bonus_amount:
+            Number(deliveryData?.bonus_amount || 0) ||
+            Number(routeImpact.bonus_amount || 0),
+          tip_amount:
+            Number(deliveryData?.tip_amount || 0) ||
+            Number(pricing.tip_amount || 0),
+          total_distance_km:
+            Number(deliveryData?.total_distance_km || 0) ||
+            Number(match.total_delivery_distance_km || 0) ||
+            Number(routeImpact.r1_distance_km || 0),
+          distance_km:
+            Number(deliveryData?.distance_km || 0) ||
+            Number(match.total_delivery_distance_km || 0),
+          estimated_time:
+            Number(deliveryData?.estimated_time || 0) ||
+            Number(match.estimated_time_minutes || 0),
+          extra_distance_km:
+            Number(deliveryData?.extra_distance_km || 0) ||
+            Number(routeImpact.extra_distance_km || 0),
+          extra_time_minutes:
+            Number(deliveryData?.extra_time_minutes || 0) ||
+            Number(routeImpact.extra_time_minutes || 0),
+        };
+      } catch {
+        return deliveryData;
+      }
+    },
+    [],
+  );
+
   const [notifications, setNotifications] = useState([]);
   const [isDriverOnline, setIsDriverOnlineState] = useState(false);
 
@@ -88,6 +198,30 @@ export function DriverDeliveryNotificationProvider({ children }) {
           // Restore the persisted online status (server syncs on mount)
           const online = savedOnline !== null ? JSON.parse(savedOnline) : true;
           setIsDriverOnlineState(online);
+
+          // Pull source-of-truth status from backend to avoid stale local gate.
+          try {
+            const statusRes = await fetch(`${API_BASE_URL}${DRIVER_STATUS_ENDPOINT}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              const serverOnline = deriveDriverOnlineState(statusData);
+              if (typeof serverOnline === "boolean") {
+                setIsDriverOnlineState(serverOnline);
+                await AsyncStorage.setItem(
+                  "driver_is_online",
+                  JSON.stringify(serverOnline),
+                );
+              }
+            }
+          } catch (statusErr) {
+            console.warn(
+              "[DriverNotification] Failed to sync online status from server:",
+              statusErr?.message || statusErr,
+            );
+          }
         }
       } catch (e) {
         console.error(
@@ -96,7 +230,7 @@ export function DriverDeliveryNotificationProvider({ children }) {
         );
       }
     })();
-  }, []);
+  }, [deriveDriverOnlineState]);
 
   // ──────────────────────────────────────────────
   // Load alert sound on mount
@@ -143,15 +277,17 @@ export function DriverDeliveryNotificationProvider({ children }) {
   // ──────────────────────────────────────────────
   // addNotification – stacking, dedup, tip update
   // ──────────────────────────────────────────────
-  const addNotification = useCallback((deliveryData) => {
+  const addNotification = useCallback(async (deliveryData) => {
+    const enriched = await enrichWithCachedAvailableDelivery(deliveryData);
+
     setNotifications((prev) => {
-      if (prev.some((n) => n.delivery_id === deliveryData.delivery_id)) {
-        if (deliveryData.type === "tip_update") {
+      if (prev.some((n) => n.delivery_id === enriched.delivery_id)) {
+        if (enriched.type === "tip_update") {
           return prev.map((n) =>
-            n.delivery_id === deliveryData.delivery_id
+            n.delivery_id === enriched.delivery_id
               ? {
                   ...n,
-                  tip_amount: deliveryData.tip_amount,
+                  ...enriched,
                   type: "tip_update",
                   updatedAt: Date.now(),
                 }
@@ -160,9 +296,10 @@ export function DriverDeliveryNotificationProvider({ children }) {
         }
         return prev;
       }
-      return [{ ...deliveryData, notifiedAt: Date.now() }, ...prev];
+      return [{ ...enriched, notifiedAt: Date.now() }, ...prev];
     });
-    showPushNotification(deliveryData);
+    showPushNotification(enriched);
+    return enriched;
   }, []);
 
   // ──────────────────────────────────────────────
@@ -253,19 +390,48 @@ export function DriverDeliveryNotificationProvider({ children }) {
     }
 
     const isNew = deliveryData.type !== "tip_update";
+    const isStacked =
+      Number(deliveryData.delivery_sequence || 1) > 1 ||
+      parseFloat(deliveryData.extra_distance_km || 0) > 0 ||
+      parseFloat(deliveryData.extra_time_minutes || 0) > 0 ||
+      parseFloat(deliveryData.extra_earnings || 0) > 0;
     const title = isNew
       ? "🚨 New Delivery Available!"
       : "💰 Tip Added to Delivery!";
-    const earnings = isNew
-      ? `LKR ${parseFloat(deliveryData.driver_earnings || deliveryData.total_trip_earnings || 0).toFixed(2)}`
-      : `Tip: LKR ${parseFloat(deliveryData.tip_amount || 0).toFixed(2)}`;
-    const distKm = parseFloat(deliveryData.distance_km || 0);
-    const estTime = parseFloat(deliveryData.estimated_time || 0);
+    const baseAmount = parseFloat(
+      deliveryData.base_amount ||
+        deliveryData.driver_earnings ||
+        deliveryData.total_trip_earnings ||
+        0,
+    );
+    const deliveryComponent = isStacked
+      ? parseFloat(deliveryData.extra_earnings || 0)
+      : baseAmount;
+    const bonusComponent = parseFloat(deliveryData.bonus_amount || 0);
+    const tipComponent = parseFloat(deliveryData.tip_amount || 0);
+    const totalEarnings = deliveryComponent + bonusComponent + tipComponent;
+
+    const earnings = `LKR ${totalEarnings.toFixed(2)}`;
+
+    const distKm = isStacked
+      ? parseFloat(deliveryData.extra_distance_km || 0)
+      : parseFloat(
+          deliveryData.total_distance_km || deliveryData.distance_km || 0,
+        );
+    const estTime = isStacked
+      ? parseFloat(deliveryData.extra_time_minutes || 0)
+      : parseFloat(deliveryData.estimated_time || 0);
     const body = [
-      earnings,
+      `${earnings} · ${[
+        `Delivery ${deliveryComponent.toFixed(0)}`,
+        bonusComponent > 0 ? `Bonus ${bonusComponent.toFixed(0)}` : null,
+        tipComponent > 0 ? `Tip ${tipComponent.toFixed(0)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" + ")}`,
       deliveryData.restaurant_name || "Restaurant",
-      distKm > 0 ? `${distKm.toFixed(1)} km` : "",
-      estTime > 0 ? `~${Math.round(estTime)} min` : "",
+      distKm > 0 ? `${isStacked ? "+" : ""}${distKm.toFixed(1)} km` : "",
+      estTime > 0 ? `${isStacked ? "+" : ""}${Math.round(estTime)} min` : "",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -321,7 +487,11 @@ export function DriverDeliveryNotificationProvider({ children }) {
         total_trip_earnings: data.total_trip_earnings || 0,
         extra_earnings: data.extra_earnings || 0,
         bonus_amount: data.bonus_amount || 0,
+        base_amount: data.base_amount || 0,
         tip_amount: data.tip_amount || 0,
+        total_distance_km: data.total_distance_km || 0,
+        extra_distance_km: data.extra_distance_km || 0,
+        extra_time_minutes: data.extra_time_minutes || 0,
         delivery_sequence: data.delivery_sequence || 1,
         earnings_data: data.earnings_data || null,
       });
@@ -344,7 +514,11 @@ export function DriverDeliveryNotificationProvider({ children }) {
         total_trip_earnings: data.total_trip_earnings || 0,
         extra_earnings: data.extra_earnings || 0,
         bonus_amount: data.bonus_amount || 0,
+        base_amount: data.base_amount || 0,
         tip_amount: data.tip_amount || 0,
+        total_distance_km: data.total_distance_km || 0,
+        extra_distance_km: data.extra_distance_km || 0,
+        extra_time_minutes: data.extra_time_minutes || 0,
         delivery_sequence: data.delivery_sequence || 1,
         earnings_data: data.earnings_data || null,
       });

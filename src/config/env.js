@@ -1,17 +1,19 @@
 // Environment Configuration
+const RENDER_API_URL = "https://meezo-backend-d3gw.onrender.com";
+const DEV_API_URL = process.env.EXPO_PUBLIC_API_URL || RENDER_API_URL;
+
 const ENV = {
   development: {
-    // For Android emulator, use 10.0.2.2 to refer to host machine
-    // For physical device or iOS simulator, replace with your machine's IP (e.g., 192.168.x.x)
-    API_URL: "https://meezo-backend-d3gw.onrender.com",
+    // Use explicit env override when provided; otherwise default to Render backend.
+    API_URL: DEV_API_URL,
     ENABLE_LOGGING: true,
   },
   staging: {
-    API_URL: "https://staging-api.nearme.com/api",
+    API_URL: RENDER_API_URL,
     ENABLE_LOGGING: true,
   },
   production: {
-    API_URL: "https://api.nearme.com/api",
+    API_URL: RENDER_API_URL,
     ENABLE_LOGGING: false,
   },
 };

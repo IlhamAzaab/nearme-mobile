@@ -26,7 +26,7 @@ export const SocketProvider = ({ children, userId, userRole, authToken }) => {
   const reconnectAttemptsRef = useRef(0);
 
   const connect = useCallback(() => {
-    if (socketRef.current?.connected) {
+    if (socketRef.current?.connected || socketRef.current?.active) {
       console.log("[SocketContext] Already connected");
       return;
     }
@@ -45,18 +45,25 @@ export const SocketProvider = ({ children, userId, userRole, authToken }) => {
     });
 
     try {
+      const socketUrl = String(config.API_URL || "")
+        .trim()
+        .replace(/\/$/, "");
+
       // Create socket connection with auth
-      const newSocket = io(config.API_URL, {
+      const newSocket = io(socketUrl, {
         auth: {
           token: authToken,
         },
         query: { userId, userRole },
-        transports: ["websocket"],
+        // Prefer websocket on production URLs; keep polling as fallback.
+        transports: ["websocket", "polling"],
+        tryAllTransports: true,
+        upgrade: true,
         reconnection: true,
         reconnectionDelay: config.SOCKET_RECONNECT_INTERVAL,
         reconnectionDelayMax: config.SOCKET_RECONNECT_INTERVAL * 2,
         reconnectionAttempts: config.SOCKET_MAX_RETRIES,
-        timeout: 10000,
+        timeout: 20000,
       });
 
       socketRef.current = newSocket;
@@ -83,7 +90,13 @@ export const SocketProvider = ({ children, userId, userRole, authToken }) => {
       });
 
       newSocket.on("disconnect", (reason) => {
-        console.log("[SocketContext] ❌ Disconnected:", reason);
+        if (reason === "transport error") {
+          console.warn(
+            "[SocketContext] Transport disconnected, reconnecting...",
+          );
+        } else {
+          console.log("[SocketContext] ❌ Disconnected:", reason);
+        }
         setIsConnected(false);
 
         // Auto-reconnect on unexpected disconnect
@@ -100,13 +113,28 @@ export const SocketProvider = ({ children, userId, userRole, authToken }) => {
       });
 
       newSocket.on("connect_error", (error) => {
-        console.error("[SocketContext] Connection error:", error.message);
+        const message = String(error?.message || "connection error");
+        if (message.toLowerCase().includes("timeout")) {
+          console.warn("[SocketContext] Connection timeout, retrying...");
+        } else {
+          console.warn("[SocketContext] Connection error:", message);
+        }
         setIsConnected(false);
       });
 
       // Acknowledgement handlers
       newSocket.on("driver:registered", (data) => {
         console.log("[SocketContext] Driver registration confirmed:", data);
+      });
+
+      newSocket.on("driver:registration_error", (data) => {
+        console.warn("[SocketContext] Driver registration rejected:", data);
+        try {
+          newSocket.disconnect();
+        } catch {
+          // Ignore disconnect failures.
+        }
+        setIsConnected(false);
       });
 
       newSocket.on("customer:registered", (data) => {

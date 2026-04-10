@@ -1,30 +1,38 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useEffect } from "react";
+import { StyleSheet } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
+import { DriverMapSheetLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 
 /**
  * DriverMapPageScreen - Full map view for driver navigation
  */
 const DriverMapPageScreen = ({ navigation, route }) => {
-  // TODO: Integrate react-native-maps with live route navigation
+  useEffect(() => {
+    const params = route?.params || {};
+    const timer = setTimeout(() => {
+      navigation.replace("DriverMap", params);
+    }, 80);
+
+    return () => clearTimeout(timer);
+  }, [navigation, route?.params]);
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.mapPlaceholder}>
-        <Text style={styles.mapIcon}>🗺️</Text>
-        <Text style={styles.mapText}>Driver Navigation Map</Text>
-        <Text style={styles.mapSubtext}>Live route navigation will appear here</Text>
-      </View>
+      <DriverScreenSection
+        screenKey="DriverMapPage"
+        sectionIndex={0}
+        style={styles.content}
+      >
+        <DriverMapSheetLoadingSkeleton />
+      </DriverScreenSection>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  mapPlaceholder: { flex: 1, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' },
-  mapIcon: { fontSize: 60, marginBottom: 12 },
-  mapText: { fontSize: 18, fontWeight: '700', color: '#374151' },
-  mapSubtext: { fontSize: 14, color: '#6B7280', marginTop: 4 },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
+  content: { flex: 1 },
 });
 
 export default DriverMapPageScreen;

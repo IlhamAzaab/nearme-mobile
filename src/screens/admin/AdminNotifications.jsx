@@ -1,20 +1,45 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
   Animated,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
 import { getAccessToken } from "../../lib/authStorage";
 import { supabase } from "../../services/supabaseClient";
 
 const ADMIN_UNREAD_KEY = "@admin_notifications_unread_count";
+
+const parseNotificationMetadata = (notification) => {
+  try {
+    const data =
+      typeof notification?.data === "string"
+        ? JSON.parse(notification.data)
+        : notification?.data;
+    if (data && typeof data === "object") return data;
+
+    const metadata =
+      typeof notification?.metadata === "string"
+        ? JSON.parse(notification.metadata)
+        : notification?.metadata;
+    if (metadata && typeof metadata === "object") return metadata;
+
+    return {};
+  } catch {
+    return {};
+  }
+};
 
 const fetchAdminNotifications = async () => {
   const token = await getAccessToken();
@@ -54,12 +79,12 @@ const markAdminNotificationsRead = async () => {
 };
 
 export default function AdminNotifications() {
+  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [adminId, setAdminId] = useState(null);
-
-  // Animation
-  const fadeAnim = useState(new Animated.Value(0))[0];
+  const [filter, setFilter] = useState("all");
+  const pageEnterStyle = usePageEnterAnimation();
 
   const notificationsQuery = useQuery({
     queryKey: ["admin", "notifications"],
@@ -85,23 +110,24 @@ export default function AdminNotifications() {
   });
 
   const notifications = notificationsQuery.data || [];
+  const filteredNotifications =
+    filter === "all"
+      ? notifications
+      : notifications.filter((n) => {
+          const metadata = parseNotificationMetadata(n);
+          const notifType = metadata.type || n.type || null;
+          return notifType === filter;
+        });
   const loading = notificationsQuery.isLoading && !notificationsQuery.data;
 
   useEffect(() => {
     const init = async () => {
       const userId = await AsyncStorage.getItem("userId");
       setAdminId(userId);
-
-      // Start animation
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }).start();
     };
 
     init();
-  }, [fadeAnim]);
+  }, []);
 
   useEffect(() => {
     if (notifications.length === 0) return;
@@ -124,15 +150,26 @@ export default function AdminNotifications() {
         {
           event: "INSERT",
           schema: "public",
-          table: "notifications",
-          filter: `recipient_id=eq.${adminId}`,
+          table: "notification_log",
+          filter: `user_id=eq.${adminId}`,
         },
         (payload) => {
-          console.log("New notification:", payload);
-          queryClient.setQueryData(["admin", "notifications"], (prev = []) => [
-            payload.new,
-            ...prev,
-          ]);
+          queryClient.setQueryData(["admin", "notifications"], (prev = []) => {
+            const newNotif = payload.new;
+            const mapped = {
+              id: newNotif.id,
+              title: newNotif.title,
+              body: newNotif.body,
+              message: newNotif.body,
+              data: newNotif.data || {},
+              metadata: newNotif.data || {},
+              type: newNotif?.data?.type || "general",
+              is_read: newNotif.status === "read",
+              created_at: newNotif.sent_at || newNotif.created_at,
+            };
+
+            return [mapped, ...prev];
+          });
         },
       )
       .subscribe();
@@ -156,17 +193,22 @@ export default function AdminNotifications() {
   const getNotificationIcon = (type) => {
     switch (type) {
       case "new_delivery":
-        return "📦";
+        return { name: "cube-outline", color: "#0f766e" };
       case "driver_assigned":
-        return "🛵";
+        return { name: "bicycle-outline", color: "#7c3aed" };
       case "delivery_status_update":
-        return "📍";
+        return { name: "navigate-outline", color: "#0284c7" };
       case "order_accepted":
-        return "✅";
+        return { name: "checkmark-circle-outline", color: "#059669" };
       case "order_rejected":
-        return "❌";
+        return { name: "close-circle-outline", color: "#dc2626" };
+      case "restaurant_approval":
+      case "admin_approval":
+        return { name: "shield-checkmark-outline", color: "#059669" };
+      case "restaurant_rejection":
+        return { name: "alert-circle-outline", color: "#dc2626" };
       default:
-        return "📢";
+        return { name: "notifications-outline", color: "#4b5563" };
     }
   };
 
@@ -211,7 +253,7 @@ export default function AdminNotifications() {
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
-        <Text style={styles.emptyIcon}>🔔</Text>
+        <Ionicons name="notifications-off-outline" size={36} color="#6b7280" />
       </View>
       <Text style={styles.emptyTitle}>No notifications yet</Text>
       <Text style={styles.emptySubtitle}>Check back soon for updates</Text>
@@ -220,14 +262,14 @@ export default function AdminNotifications() {
 
   // Notification item
   const renderNotification = (n, index) => {
-    let metadata = {};
-    try {
-      metadata = n.metadata ? JSON.parse(n.metadata) : {};
-    } catch (e) {
-      metadata = {};
-    }
+    const metadata = parseNotificationMetadata(n);
 
     const isUnread = !n.is_read;
+    const orderId = metadata.order_id || metadata.orderId || null;
+    const isClickable = !!orderId;
+    const notifType = metadata.type || n.type;
+    const icon = getNotificationIcon(notifType);
+    const bodyText = n.body || n.message || "";
 
     return (
       <Animated.View
@@ -237,87 +279,94 @@ export default function AdminNotifications() {
           isUnread
             ? styles.notificationCardUnread
             : styles.notificationCardRead,
-          {
-            opacity: fadeAnim,
-            transform: [
-              {
-                translateY: fadeAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [20, 0],
-                }),
-              },
-            ],
-          },
+          pageEnterStyle,
         ]}
       >
-        <View
-          style={[
-            styles.notificationBorder,
-            isUnread ? styles.borderUnread : styles.borderRead,
+        <Pressable
+          disabled={!isClickable}
+          onPress={() => {
+            if (!isClickable) return;
+            navigation.navigate("Orders", {
+              orderId,
+              highlightOrderId: orderId,
+            });
+          }}
+          style={({ pressed }) => [
+            styles.notificationPressableBody,
+            isClickable && pressed ? styles.notificationPressed : null,
           ]}
-        />
-        <View style={styles.notificationContent}>
-          {/* Icon */}
+        >
           <View
             style={[
-              styles.iconContainer,
-              isUnread ? styles.iconContainerUnread : styles.iconContainerRead,
+              styles.notificationBorder,
+              isUnread ? styles.borderUnread : styles.borderRead,
             ]}
-          >
-            <Text style={styles.iconText}>{getNotificationIcon(n.type)}</Text>
-          </View>
-
-          {/* Content */}
-          <View style={styles.textContainer}>
-            <View style={styles.titleRow}>
-              <Text
-                style={[
-                  styles.notificationTitle,
-                  isUnread ? styles.titleUnread : styles.titleRead,
-                ]}
-              >
-                {n.title}
-              </Text>
-              {isUnread && <View style={styles.unreadDot} />}
-            </View>
-
-            <Text
+          />
+          <View style={styles.notificationContent}>
+            {/* Icon */}
+            <View
               style={[
-                styles.notificationMessage,
-                isUnread ? styles.messageUnread : styles.messageRead,
+                styles.iconContainer,
+                isUnread
+                  ? styles.iconContainerUnread
+                  : styles.iconContainerRead,
               ]}
             >
-              {n.message}
-            </Text>
+              <Ionicons name={icon.name} size={22} color={icon.color} />
+            </View>
 
-            {/* Metadata Tags */}
-            {metadata.order_id && (
-              <View style={styles.tagsContainer}>
-                <View style={styles.tagOrder}>
-                  <Text style={styles.tagOrderText}>
-                    Order #{metadata.order_id.substring(0, 8)}
-                  </Text>
-                </View>
-                {metadata.status && (
-                  <View style={styles.tagStatus}>
-                    <Text style={styles.tagStatusText}>
-                      Status: {metadata.status}
+            {/* Content */}
+            <View style={styles.textContainer}>
+              <View style={styles.titleRow}>
+                <Text
+                  style={[
+                    styles.notificationTitle,
+                    isUnread ? styles.titleUnread : styles.titleRead,
+                  ]}
+                >
+                  {n.title}
+                </Text>
+                {isUnread && <View style={styles.unreadDot} />}
+              </View>
+
+              <Text
+                style={[
+                  styles.notificationMessage,
+                  isUnread ? styles.messageUnread : styles.messageRead,
+                ]}
+              >
+                {bodyText}
+              </Text>
+
+              {/* Metadata Tags */}
+              {orderId && (
+                <View style={styles.tagsContainer}>
+                  <View style={styles.tagOrder}>
+                    <Text style={styles.tagOrderText}>
+                      Order #{String(orderId).substring(0, 8)}
                     </Text>
                   </View>
-                )}
-              </View>
-            )}
+                  {metadata.status && (
+                    <View style={styles.tagStatus}>
+                      <Text style={styles.tagStatusText}>
+                        Status: {metadata.status}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
 
-            {/* Time */}
-            <Text style={styles.timeText}>{getTimeAgo(n.created_at)}</Text>
+              {/* Time */}
+              <Text style={styles.timeText}>{getTimeAgo(n.created_at)}</Text>
+            </View>
           </View>
-        </View>
+        </Pressable>
       </Animated.View>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -341,14 +390,45 @@ export default function AdminNotifications() {
           </Text>
         </View>
 
+        <View style={styles.filterTabs}>
+          {[
+            { key: "all", label: "All" },
+            { key: "new_delivery", label: "Orders" },
+            { key: "delivery_status_update", label: "Delivery" },
+          ].map((tab) => {
+            const active = filter === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                onPress={() => setFilter(tab.key)}
+                style={[
+                  styles.filterTab,
+                  active ? styles.filterTabActive : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.filterTabText,
+                    active ? styles.filterTabTextActive : null,
+                  ]}
+                >
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         {/* Content */}
         {loading ? (
           renderSkeleton()
-        ) : notifications.length === 0 ? (
+        ) : filteredNotifications.length === 0 ? (
           renderEmpty()
         ) : (
           <View style={styles.notificationsList}>
-            {notifications.map((n, index) => renderNotification(n, index))}
+            {filteredNotifications.map((n, index) =>
+              renderNotification(n, index),
+            )}
           </View>
         )}
       </ScrollView>
@@ -382,6 +462,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#6b7280",
     marginTop: 4,
+  },
+  filterTabs: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 14,
+  },
+  filterTab: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "#f3f4f6",
+  },
+  filterTabActive: {
+    backgroundColor: "#06C1681A",
+    borderWidth: 1,
+    borderColor: "#06C16840",
+  },
+  filterTabText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#6b7280",
+  },
+  filterTabTextActive: {
+    color: "#06C168",
   },
 
   // Skeleton
@@ -452,13 +556,13 @@ const styles = StyleSheet.create({
   notificationCard: {
     borderRadius: 16,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 3,
-    flexDirection: "row",
     marginBottom: 12,
+  },
+  notificationPressableBody: {
+    flexDirection: "row",
+  },
+  notificationPressed: {
+    opacity: 0.86,
   },
   notificationCardUnread: {
     backgroundColor: "#EDFBF2",

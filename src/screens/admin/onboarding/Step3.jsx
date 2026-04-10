@@ -184,7 +184,17 @@ export default function Step3() {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
+  const [focusedField, setFocusedField] = useState("");
   const [filteredBanks, setFilteredBanks] = useState(SRI_LANKAN_BANKS);
+  const isBankFieldActive = showDropdown || Boolean(form.bankName);
+  const isAccountHolderFieldActive =
+    focusedField === "accountHolderName" || Boolean(form.accountHolderName);
+  const isBranchFieldActive = focusedField === "branch" || Boolean(form.branch);
+  const isAccountNumberFieldActive =
+    focusedField === "accountNumber" || Boolean(form.accountNumber);
+  const isAccountNumberConfirmFieldActive =
+    focusedField === "accountNumberConfirm" ||
+    Boolean(form.accountNumberConfirm);
 
   // Filter banks based on search term
   useEffect(() => {
@@ -300,7 +310,9 @@ export default function Step3() {
           <View style={styles.formCard}>
             {/* Account Holder Name */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Account Holder Name</Text>
+              {isAccountHolderFieldActive && (
+                <Text style={styles.inputLabel}>Account Holder Name</Text>
+              )}
               <View style={styles.inputWrapper}>
                 <TextInput
                   style={styles.input}
@@ -308,15 +320,27 @@ export default function Step3() {
                   onChangeText={(value) =>
                     updateField("accountHolderName", value)
                   }
-                  placeholder="Enter account holder name"
+                  placeholder={
+                    isAccountHolderFieldActive
+                      ? "Enter account holder name"
+                      : "Account Holder Name"
+                  }
                   placeholderTextColor="#9ca3af"
+                  onFocus={() => setFocusedField("accountHolderName")}
+                  onBlur={() =>
+                    setFocusedField((prev) =>
+                      prev === "accountHolderName" ? "" : prev,
+                    )
+                  }
                 />
               </View>
             </View>
 
             {/* Bank Name with Dropdown */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Bank Name</Text>
+              {isBankFieldActive && (
+                <Text style={styles.inputLabel}>Bank Name</Text>
+              )}
               <TouchableOpacity
                 style={styles.inputWrapper}
                 onPress={() => setShowDropdown(true)}
@@ -329,7 +353,7 @@ export default function Step3() {
                       !form.bankName && styles.selectPlaceholder,
                     ]}
                   >
-                    {form.bankName || "Select your bank"}
+                    {form.bankName || "Bank Name"}
                   </Text>
                   <Text style={styles.dropdownIcon}>▼</Text>
                 </View>
@@ -338,37 +362,59 @@ export default function Step3() {
 
             {/* Branch Name */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Branch Name</Text>
+              {isBranchFieldActive && (
+                <Text style={styles.inputLabel}>Branch Name</Text>
+              )}
               <View style={styles.inputWrapper}>
                 <TextInput
                   style={styles.input}
                   value={form.branch}
                   onChangeText={(value) => updateField("branch", value)}
-                  placeholder="Enter branch name"
+                  placeholder={
+                    isBranchFieldActive ? "Enter branch name" : "Branch Name"
+                  }
                   placeholderTextColor="#9ca3af"
+                  onFocus={() => setFocusedField("branch")}
+                  onBlur={() =>
+                    setFocusedField((prev) => (prev === "branch" ? "" : prev))
+                  }
                 />
               </View>
             </View>
 
             {/* Account Number */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Account Number</Text>
+              {isAccountNumberFieldActive && (
+                <Text style={styles.inputLabel}>Account Number</Text>
+              )}
               <View style={styles.inputWrapper}>
                 <TextInput
                   style={styles.input}
                   value={form.accountNumber}
                   onChangeText={(value) => updateField("accountNumber", value)}
-                  placeholder="Enter account number"
+                  placeholder={
+                    isAccountNumberFieldActive
+                      ? "Enter account number"
+                      : "Account Number"
+                  }
                   placeholderTextColor="#9ca3af"
                   keyboardType="number-pad"
                   secureTextEntry
+                  onFocus={() => setFocusedField("accountNumber")}
+                  onBlur={() =>
+                    setFocusedField((prev) =>
+                      prev === "accountNumber" ? "" : prev,
+                    )
+                  }
                 />
               </View>
             </View>
 
             {/* Confirm Account Number */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Confirm Account Number</Text>
+              {isAccountNumberConfirmFieldActive && (
+                <Text style={styles.inputLabel}>Confirm Account Number</Text>
+              )}
               <View style={styles.inputWrapper}>
                 <TextInput
                   style={styles.input}
@@ -376,10 +422,20 @@ export default function Step3() {
                   onChangeText={(value) =>
                     updateField("accountNumberConfirm", value)
                   }
-                  placeholder="Re-enter account number"
+                  placeholder={
+                    isAccountNumberConfirmFieldActive
+                      ? "Re-enter account number"
+                      : "Confirm Account Number"
+                  }
                   placeholderTextColor="#9ca3af"
                   keyboardType="number-pad"
                   secureTextEntry
+                  onFocus={() => setFocusedField("accountNumberConfirm")}
+                  onBlur={() =>
+                    setFocusedField((prev) =>
+                      prev === "accountNumberConfirm" ? "" : prev,
+                    )
+                  }
                 />
               </View>
             </View>
@@ -539,11 +595,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
   },
   headerIconText: {
     fontSize: 32,
@@ -563,11 +614,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderRadius: 20,
     padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 4,
   },
   inputGroup: {
     marginBottom: 20,
@@ -636,7 +682,7 @@ const styles = StyleSheet.create({
   backButton: {
     flex: 1,
     backgroundColor: "#e5e7eb",
-    borderRadius: 12,
+    borderRadius: 999,
     paddingVertical: 16,
     alignItems: "center",
   },
@@ -648,17 +694,11 @@ const styles = StyleSheet.create({
   submitButton: {
     flex: 2,
     backgroundColor: "#06C168",
-    borderRadius: 12,
+    borderRadius: 999,
     paddingVertical: 16,
-    shadowColor: "#06C168",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
   submitButtonDisabled: {
-    backgroundColor: "#6EDE9A",
-    shadowOpacity: 0.1,
+    backgroundColor: "#34D399",
   },
   buttonContent: {
     flexDirection: "row",

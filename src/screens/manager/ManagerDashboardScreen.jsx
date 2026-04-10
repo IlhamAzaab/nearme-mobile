@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useNavigation } from "@react-navigation/native";
-import { useCallback, useEffect, useState } from "react";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -56,50 +57,64 @@ const MiniBarChart = ({ data, dataKey, color, maxHeight = 100 }) => {
 
 export default function ManagerDashboardScreen() {
   const navigation = useNavigation();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const isFocused = useIsFocused();
+  const queryClient = useQueryClient();
   const [userName, setUserName] = useState("");
-  const [stats, setStats] = useState({
-    todayEarnings: 0,
-    todaySales: 0,
-    todayOrders: 0,
-    totalPendingFromDrivers: 0,
-    driverPayment: 0,
-    driverCount: 0,
-    restaurantPayment: 0,
-    restaurantCount: 0,
-    earningsGraph: [],
-  });
+  const EMPTY_STATS = useMemo(
+    () => ({
+      todayEarnings: 0,
+      todaySales: 0,
+      todayOrders: 0,
+      totalPendingFromDrivers: 0,
+      driverPayment: 0,
+      driverCount: 0,
+      restaurantPayment: 0,
+      restaurantCount: 0,
+      earningsGraph: [],
+    }),
+    [],
+  );
 
-  const fetchData = useCallback(async (showLoading = true) => {
-    if (showLoading) setLoading(true);
-    else setRefreshing(true);
-    try {
+  const dashboardQuery = useQuery({
+    queryKey: ["manager", "dashboard-stats"],
+    queryFn: async () => {
       const token = await AsyncStorage.getItem("token");
       const res = await fetch(`${API_URL}/manager/dashboard-stats`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (data.success) {
-        setStats({
-          todayEarnings: data.todayEarnings || 0,
-          todaySales: data.todaySales || 0,
-          todayOrders: data.todayOrders || 0,
-          totalPendingFromDrivers: data.totalPendingFromDrivers || 0,
-          driverPayment: data.driverPayment || 0,
-          driverCount: data.driverCount || 0,
-          restaurantPayment: data.restaurantPayment || 0,
-          restaurantCount: data.restaurantCount || 0,
-          earningsGraph: data.earningsGraph || [],
-        });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(
+          data?.message ||
+            `Dashboard request failed (${res.status}). Please try again.`,
+        );
       }
-    } catch (error) {
-      console.error("Failed to fetch dashboard stats:", error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+
+      return {
+        todayEarnings: data.todayEarnings || 0,
+        todaySales: data.todaySales || 0,
+        todayOrders: data.todayOrders || 0,
+        totalPendingFromDrivers: data.totalPendingFromDrivers || 0,
+        driverPayment: data.driverPayment || 0,
+        driverCount: data.driverCount || 0,
+        restaurantPayment: data.restaurantPayment || 0,
+        restaurantCount: data.restaurantCount || 0,
+        earningsGraph: data.earningsGraph || [],
+      };
+    },
+    staleTime: 30 * 1000,
+    refetchInterval: isFocused ? 90 * 1000 : false,
+    initialData: () =>
+      queryClient.getQueryData(["manager", "dashboard-stats"]) || undefined,
+    placeholderData: (previousData) => previousData,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const stats = dashboardQuery.data || EMPTY_STATS;
+  const loading = dashboardQuery.isLoading && !dashboardQuery.data;
+  const refreshing = dashboardQuery.isFetching && !loading;
 
   useEffect(() => {
     (async () => {
@@ -108,9 +123,8 @@ export default function ManagerDashboardScreen() {
         const name = email.split("@")[0];
         setUserName(name.charAt(0).toUpperCase() + name.slice(1));
       }
-      fetchData(true);
     })();
-  }, [fetchData]);
+  }, []);
 
   const formatCurrency = (value) =>
     `Rs.${Number(value || 0).toLocaleString("en-US", {
@@ -131,13 +145,13 @@ export default function ManagerDashboardScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <ManagerHeader title="Dashboard" onRefresh={() => fetchData(false)} />
+      <ManagerHeader title="Dashboard" onRefresh={dashboardQuery.refetch} />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => fetchData(false)}
+            onRefresh={dashboardQuery.refetch}
             colors={["#06C168"]}
           />
         }
@@ -148,7 +162,7 @@ export default function ManagerDashboardScreen() {
           <View style={styles.heroDecor2} />
           <View style={styles.heroContent}>
             <View style={styles.heroHeader}>
-              <Text style={styles.heroLabel}>TODAY'S EARNINGS</Text>
+              <Text style={styles.heroLabel}>{"TODAY'S EARNINGS"}</Text>
               <View style={styles.heroIcon}>
                 <Ionicons name="cash-outline" size={20} color="#56D68A" />
               </View>
@@ -168,7 +182,7 @@ export default function ManagerDashboardScreen() {
             <View style={[styles.statIcon, { backgroundColor: "#F3E8FF" }]}>
               <Ionicons name="wallet-outline" size={18} color="#7C3AED" />
             </View>
-            <Text style={styles.statLabel}>TODAY'S SALES</Text>
+            <Text style={styles.statLabel}>{"TODAY'S SALES"}</Text>
             <Text style={styles.statValue}>
               {formatCurrency(stats.todaySales)}
             </Text>
@@ -177,7 +191,7 @@ export default function ManagerDashboardScreen() {
             <View style={[styles.statIcon, { backgroundColor: "#DBEAFE" }]}>
               <Ionicons name="clipboard-outline" size={18} color="#2563EB" />
             </View>
-            <Text style={styles.statLabel}>TODAY'S ORDERS</Text>
+            <Text style={styles.statLabel}>{"TODAY'S ORDERS"}</Text>
             <Text style={styles.statValueLarge}>{stats.todayOrders}</Text>
           </View>
         </View>
@@ -431,6 +445,23 @@ export default function ManagerDashboardScreen() {
           <View style={styles.actionTextWrap}>
             <Text style={styles.actionTitle}>Sales Reports</Text>
             <Text style={styles.actionSub}>Detailed sales analytics</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.actionCard, { marginBottom: 20 }]}
+          activeOpacity={0.7}
+          onPress={() => navigation.navigate("SendNotification")}
+        >
+          <View style={[styles.actionIcon, { backgroundColor: "#111816" }]}>
+            <Ionicons name="megaphone-outline" size={20} color="#fff" />
+          </View>
+          <View style={styles.actionTextWrap}>
+            <Text style={styles.actionTitle}>Send Notification</Text>
+            <Text style={styles.actionSub}>
+              Broadcast to users, admins or drivers
+            </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
         </TouchableOpacity>

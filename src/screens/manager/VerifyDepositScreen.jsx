@@ -19,6 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const SRI_LANKA_TIME_ZONE = "Asia/Colombo";
 
 const VerifyDepositScreen = ({ navigation, route }) => {
   const { depositId } = route.params || {};
@@ -162,14 +163,21 @@ const VerifyDepositScreen = ({ navigation, route }) => {
   const formatDateTime = (dateStr) => {
     if (!dateStr) return "-";
     const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "-";
     return date.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      hour12: true,
+      timeZone: SRI_LANKA_TIME_ZONE,
     });
   };
+
+  const transferId = String(deposit?.id || "-")
+    .substring(0, 12)
+    .toUpperCase();
 
   const getDriverInitials = (name) => {
     if (!name) return "DR";
@@ -321,6 +329,11 @@ const VerifyDepositScreen = ({ navigation, route }) => {
                   {deposit.collection_date || "-"}
                 </Text>
               </View>
+            </View>
+
+            <View style={styles.transferRow}>
+              <Text style={styles.infoLabel}>TRANSFER ID</Text>
+              <Text style={styles.transferIdValue}>{transferId}</Text>
             </View>
           </View>
         </View>
@@ -564,6 +577,17 @@ const styles = StyleSheet.create({
   },
   infoValueLarge: { fontSize: 18, fontWeight: "700", color: "#0F172A" },
   infoValueSmall: { fontSize: 13, fontWeight: "500", color: "#334155" },
+  transferRow: {
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+    marginTop: 16,
+    paddingTop: 12,
+  },
+  transferIdValue: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#334155",
+  },
 
   // Form
   fieldLabel: {

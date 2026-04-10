@@ -1,8 +1,10 @@
+import { Feather } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
 import {
+  Animated,
   ActivityIndicator,
   Alert,
   Image,
@@ -12,7 +14,6 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -20,6 +21,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
 import { getAccessToken } from "../../lib/authStorage";
 
 const fetchFoods = async () => {
@@ -121,7 +123,17 @@ export default function Products() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingFood, setEditingFood] = useState(null);
   const [search, setSearch] = useState("");
+  const [availabilityFilter, setAvailabilityFilter] = useState("all");
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const pageEnterStyle = usePageEnterAnimation();
+
+  const availabilityLabel =
+    availabilityFilter === "all"
+      ? "All Products"
+      : availabilityFilter === "available"
+        ? "Available"
+        : "Unavailable";
 
   const productsQuery = useQuery({
     queryKey: ["admin", "products"],
@@ -198,32 +210,16 @@ export default function Products() {
     }
   };
 
-  const filteredFoods = foods.filter((food) =>
-    food.name.toLowerCase().includes(search.toLowerCase()),
-  );
-
-  const renderStars = (rating = 0) => {
-    const stars = [];
-    for (let i = 0; i < 5; i++) {
-      stars.push(
-        <Text
-          key={i}
-          style={[
-            styles.star,
-            { color: i < Math.round(rating) ? "#facc15" : "#d1d5db" },
-          ]}
-        >
-          ★
-        </Text>,
-      );
-    }
-    return (
-      <View style={styles.starsContainer}>
-        <View style={styles.starsRow}>{stars}</View>
-        <Text style={styles.ratingText}>{rating.toFixed(1)}</Text>
-      </View>
-    );
-  };
+  const filteredFoods = foods.filter((food) => {
+    const matchesSearch = food.name
+      .toLowerCase()
+      .includes(search.toLowerCase());
+    const matchesAvailability =
+      availabilityFilter === "all" ||
+      (availabilityFilter === "available" && food.is_available) ||
+      (availabilityFilter === "unavailable" && !food.is_available);
+    return matchesSearch && matchesAvailability;
+  });
 
   const renderLoadingSkeleton = () => (
     <View style={styles.skeletonContainer}>
@@ -253,7 +249,7 @@ export default function Products() {
       <Text style={styles.emptySubtitle}>
         {foods.length === 0
           ? 'Tap "Add Product" to create your first menu item.'
-          : "No products match your search."}
+          : "No products match your search/filter."}
       </Text>
     </View>
   );
@@ -292,46 +288,66 @@ export default function Products() {
               </Text>
             </View>
 
-            {/* Availability Toggle */}
-            <View style={styles.availabilityToggle}>
-              <Switch
-                value={food.is_available}
-                onValueChange={() => toggleAvailability(food)}
-                trackColor={{ false: "#d1d5db", true: "#06C168" }}
-                thumbColor="#ffffff"
-                ios_backgroundColor="#d1d5db"
-              />
+            <TouchableOpacity
+              style={styles.availabilityToggle}
+              onPress={(e) => {
+                e.stopPropagation?.();
+                toggleAvailability(food);
+              }}
+            >
               <Text
                 style={[
-                  styles.availabilityText,
-                  { color: food.is_available ? "#15803d" : "#dc2626" },
+                  styles.availabilityLabel,
+                  {
+                    color: food.is_available ? "#059669" : "#9CA3AF",
+                  },
                 ]}
               >
-                {food.is_available ? "On" : "Off"}
+                {food.is_available ? "Available" : "Unavailable"}
               </Text>
-            </View>
+              <View
+                style={[
+                  styles.customSwitch,
+                  {
+                    backgroundColor: food.is_available ? "#06C168" : "#d1d5db",
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.customSwitchThumb,
+                    food.is_available && styles.customSwitchThumbOn,
+                  ]}
+                />
+              </View>
+            </TouchableOpacity>
           </View>
 
-          {/* Price & Rating */}
-          <View style={styles.priceRatingRow}>
-            <Text style={styles.productPrice}>Rs. {food.regular_price}</Text>
-            {food.offer_price ? (
-              <View style={styles.offerBadge}>
-                <Text style={styles.offerText}>
-                  Offer: Rs. {food.offer_price}
+          <View style={styles.priceRows}>
+            <View style={styles.sizePriceRow}>
+              <Text style={styles.sizeLabel}>
+                {food.regular_size || "Regular"}
+              </Text>
+              <Text style={styles.activePrice}>
+                Rs. {food.offer_price || food.regular_price}
+              </Text>
+              {food.offer_price ? (
+                <Text style={styles.strikePrice}>Rs. {food.regular_price}</Text>
+              ) : null}
+            </View>
+            {food.extra_price ? (
+              <View style={styles.sizePriceRow}>
+                <Text style={styles.sizeLabel}>
+                  {food.extra_size || "Extra"}
                 </Text>
+                <Text style={styles.activePrice}>
+                  Rs. {food.extra_offer_price || food.extra_price}
+                </Text>
+                {food.extra_offer_price ? (
+                  <Text style={styles.strikePrice}>Rs. {food.extra_price}</Text>
+                ) : null}
               </View>
             ) : null}
-            {renderStars(food.stars)}
-          </View>
-
-          {/* Available Times */}
-          <View style={styles.timeBadgesContainer}>
-            {food.available_time?.map((time) => (
-              <View key={time} style={styles.timeBadge}>
-                <Text style={styles.timeBadgeText}>{time}</Text>
-              </View>
-            ))}
           </View>
         </View>
       </View>
@@ -340,15 +356,21 @@ export default function Products() {
       <View style={styles.actionButtons}>
         <TouchableOpacity
           style={styles.editButton}
-          onPress={() => openEdit(food)}
+          onPress={(e) => {
+            e.stopPropagation?.();
+            openEdit(food);
+          }}
         >
-          <Text style={styles.editButtonText}>Edit</Text>
+          <Feather name="edit-2" size={15} color="#9CA3AF" />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.deleteButton}
-          onPress={() => handleDelete(food.id)}
+          onPress={(e) => {
+            e.stopPropagation?.();
+            handleDelete(food.id);
+          }}
         >
-          <Text style={styles.deleteButtonText}>Delete</Text>
+          <Feather name="trash-2" size={15} color="#9CA3AF" />
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
@@ -356,90 +378,135 @@ export default function Products() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerTopRow}>
-          <Text style={styles.headerTitle}>Products</Text>
-          <View style={styles.headerActions}>
-            <View style={styles.filterPill}>
-              <Text style={styles.filterPillText}>All Products</Text>
-              <Text style={styles.filterPillArrow}>⌄</Text>
+      <Animated.View style={[styles.pageAnimationWrap, pageEnterStyle]}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerTopRow}>
+            <View style={styles.headerTitleBlock}>
+              <Text style={styles.headerTitle}>Products</Text>
+              <View style={styles.headerUnderline} />
             </View>
-            <TouchableOpacity
-              style={styles.iconBtn}
-              onPress={() => navigation.navigate("AdminNotifications")}
-            >
-              <Text style={styles.iconBtnText}>🔔</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.iconBtn, styles.profileIconBtn]}
-              onPress={() => navigation.navigate("Account")}
-            >
-              <Text style={[styles.iconBtnText, styles.profileIconText]}>
-                ◉
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <View style={styles.filterDropdownWrap}>
+                <TouchableOpacity
+                  style={styles.filterPill}
+                  onPress={() => setShowFilterMenu((prev) => !prev)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.filterPillText}>{availabilityLabel}</Text>
+                  <Feather name="chevron-down" size={14} color="#64748b" />
+                </TouchableOpacity>
+                {showFilterMenu ? (
+                  <View style={styles.filterMenu}>
+                    {["all", "available", "unavailable"].map((value) => {
+                      const label =
+                        value === "all"
+                          ? "All Products"
+                          : value === "available"
+                            ? "Available"
+                            : "Unavailable";
+                      const selected = availabilityFilter === value;
+                      return (
+                        <TouchableOpacity
+                          key={value}
+                          style={styles.filterMenuItem}
+                          onPress={() => {
+                            setAvailabilityFilter(value);
+                            setShowFilterMenu(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.filterMenuText,
+                              selected && styles.filterMenuTextActive,
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={() => navigation.navigate("AdminNotifications")}
+              >
+                <Feather name="bell" size={18} color="#4b5563" />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-        <View style={styles.headerUnderline} />
-      </View>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={["#06C168"]}
-          />
-        }
-      >
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <View style={styles.searchInputWrapper}>
-            <Text style={styles.searchIcon}>🔍</Text>
-            <TextInput
-              style={styles.searchInput}
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search food items, categories..."
-              placeholderTextColor="#9ca3af"
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          onScrollBeginDrag={() => setShowFilterMenu(false)}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={["#06C168"]}
             />
-            {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch("")}>
-                <Text style={styles.clearSearch}>✕</Text>
-              </TouchableOpacity>
+          }
+        >
+          {/* Search Bar */}
+          <View style={styles.searchContainer}>
+            <View style={styles.searchInputWrapper}>
+              <Feather
+                name="search"
+                size={16}
+                color="#9ca3af"
+                style={styles.searchIcon}
+              />
+              <TextInput
+                style={styles.searchInput}
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search food items, categories..."
+                placeholderTextColor="#9ca3af"
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch("")}>
+                  <Feather
+                    name="x"
+                    size={16}
+                    color="#9ca3af"
+                    style={styles.clearSearch}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.addProductCta}
+            onPress={() => {
+              setEditingFood(null);
+              setShowAddModal(true);
+            }}
+            activeOpacity={0.85}
+          >
+            <Feather name="plus" size={18} color="#fff" />
+            <Text style={styles.addProductCtaText}>Add Product</Text>
+          </TouchableOpacity>
+
+          {/* Products List */}
+          <View style={styles.productsContainer}>
+            {loading ? (
+              renderLoadingSkeleton()
+            ) : filteredFoods.length === 0 ? (
+              renderEmptyState()
+            ) : (
+              <View style={styles.productsList}>
+                {filteredFoods.map(renderProductCard)}
+              </View>
             )}
           </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.addProductCta}
-          onPress={() => {
-            setEditingFood(null);
-            setShowAddModal(true);
-          }}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.addProductCtaIcon}>＋</Text>
-          <Text style={styles.addProductCtaText}>Add Product</Text>
-        </TouchableOpacity>
-
-        {/* Products List */}
-        <View style={styles.productsContainer}>
-          {loading ? (
-            renderLoadingSkeleton()
-          ) : filteredFoods.length === 0 ? (
-            renderEmptyState()
-          ) : (
-            <View style={styles.productsList}>
-              {filteredFoods.map(renderProductCard)}
-            </View>
-          )}
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </Animated.View>
 
       {/* Add/Edit Product Modal */}
       <AddProductModal
@@ -473,6 +540,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
     extra_size: "",
     extra_portion: "",
     extra_price: "",
+    extra_offer_price: "",
     is_available: true,
   });
 
@@ -518,6 +586,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
         extra_size: food?.extra_size || "",
         extra_portion: food?.extra_portion || "",
         extra_price: food?.extra_price?.toString() || "",
+        extra_offer_price: food?.extra_offer_price?.toString() || "",
         is_available: food?.is_available ?? true,
       });
       setError(null);
@@ -614,6 +683,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
         extra_price: formData.extra_price
           ? parseFloat(formData.extra_price)
           : null,
+        extra_offer_price: formData.extra_offer_price
+          ? parseFloat(formData.extra_offer_price)
+          : null,
       };
 
       await saveFoodMutation.mutateAsync({ foodId: food?.id, payload });
@@ -635,17 +707,34 @@ function AddProductModal({ visible, food, onClose, onSave }) {
       <SafeAreaView style={modalStyles.container}>
         {/* Modal Header */}
         <View style={modalStyles.header}>
+          <View style={modalStyles.headerLeft}>
+            <TouchableOpacity
+              style={modalStyles.closeButton}
+              onPress={onClose}
+              disabled={loading || uploading}
+            >
+              <Feather name="arrow-left" size={18} color="#374151" />
+            </TouchableOpacity>
+            <Text style={modalStyles.headerTitle}>
+              {food ? "Edit Product" : "Add New Product"}
+            </Text>
+          </View>
           <TouchableOpacity
-            style={modalStyles.closeButton}
-            onPress={onClose}
+            style={[
+              modalStyles.headerSaveButton,
+              (loading || uploading) && modalStyles.saveButtonDisabled,
+            ]}
+            onPress={handleSubmit}
             disabled={loading || uploading}
           >
-            <Text style={modalStyles.closeButtonText}>✕</Text>
+            {loading ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <Text style={modalStyles.headerSaveButtonText}>
+                {food ? "Save" : "Save Product"}
+              </Text>
+            )}
           </TouchableOpacity>
-          <Text style={modalStyles.headerTitle}>
-            {food ? "Edit Product" : "Add New Product"}
-          </Text>
-          <View style={{ width: 40 }} />
         </View>
 
         <KeyboardAvoidingView
@@ -662,14 +751,30 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <Text style={modalStyles.sectionLabel}>Product Image</Text>
               <View style={modalStyles.imageSection}>
                 {formData.image_url ? (
-                  <Image
-                    source={{ uri: formData.image_url }}
-                    style={modalStyles.previewImage}
-                  />
-                ) : (
-                  <View style={modalStyles.imagePlaceholder}>
-                    <Text style={modalStyles.imagePlaceholderIcon}>📷</Text>
+                  <View style={modalStyles.previewWrap}>
+                    <Image
+                      source={{ uri: formData.image_url }}
+                      style={modalStyles.previewImage}
+                    />
+                    <TouchableOpacity
+                      style={modalStyles.removeImageButton}
+                      onPress={() => handleInputChange("image_url", "")}
+                    >
+                      <Feather name="x" size={12} color="#06C168" />
+                    </TouchableOpacity>
                   </View>
+                ) : (
+                  <>
+                    <View style={modalStyles.uploadIconCircle}>
+                      <Feather name="upload-cloud" size={22} color="#ffffff" />
+                    </View>
+                    <Text style={modalStyles.uploadTitle}>
+                      Upload Food Image
+                    </Text>
+                    <Text style={modalStyles.uploadSubtitle}>
+                      JPG, PNG . Max size of 2MB
+                    </Text>
+                  </>
                 )}
                 <TouchableOpacity
                   style={[
@@ -683,14 +788,14 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                     <ActivityIndicator size="small" color="#ffffff" />
                   ) : (
                     <Text style={modalStyles.uploadButtonText}>
-                      {formData.image_url ? "Change Image" : "Upload Image"}
+                      Browse Files
                     </Text>
                   )}
                 </TouchableOpacity>
               </View>
-              <Text style={modalStyles.helperText}>
-                Optional. Recommended size: 400x400px
-              </Text>
+              {uploading ? (
+                <Text style={modalStyles.helperText}>Uploading...</Text>
+              ) : null}
             </View>
 
             {/* Product Name */}
@@ -744,7 +849,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                       ]}
                     >
                       {formData.available_time.includes(time) && (
-                        <Text style={modalStyles.checkboxCheck}>✓</Text>
+                        <Feather name="check" size={13} color="#ffffff" />
                       )}
                     </View>
                     <Text
@@ -776,15 +881,29 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                   Toggle off to hide from menu
                 </Text>
               </View>
-              <Switch
-                value={!!formData.is_available}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, is_available: value })
+              <TouchableOpacity
+                style={[
+                  modalStyles.customToggle,
+                  {
+                    backgroundColor: formData.is_available
+                      ? "#06C168"
+                      : "#d1d5db",
+                  },
+                ]}
+                onPress={() =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    is_available: !prev.is_available,
+                  }))
                 }
-                trackColor={{ false: "#d1d5db", true: "#6366f1" }}
-                thumbColor="#ffffff"
-                ios_backgroundColor="#d1d5db"
-              />
+              >
+                <View
+                  style={[
+                    modalStyles.customToggleThumb,
+                    formData.is_available && modalStyles.customToggleThumbOn,
+                  ]}
+                />
+              </TouchableOpacity>
             </View>
 
             {/* Regular Size Section */}
@@ -900,6 +1019,20 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               />
             </View>
 
+            <View style={modalStyles.section}>
+              <Text style={modalStyles.inputLabel}>Offer Price (Rs.)</Text>
+              <TextInput
+                style={modalStyles.input}
+                value={formData.extra_offer_price}
+                onChangeText={(value) =>
+                  handleInputChange("extra_offer_price", value)
+                }
+                placeholder="Leave empty if no offer"
+                placeholderTextColor="#9ca3af"
+                keyboardType="numeric"
+              />
+            </View>
+
             {/* Spacer for bottom buttons */}
             <View style={{ height: 100 }} />
           </ScrollView>
@@ -912,7 +1045,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
             onPress={onClose}
             disabled={loading || uploading}
           >
-            <Text style={modalStyles.cancelButtonText}>Cancel</Text>
+            <Text style={modalStyles.cancelButtonText}>Discard</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -925,9 +1058,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
             {loading ? (
               <ActivityIndicator size="small" color="#ffffff" />
             ) : (
-              <Text style={modalStyles.saveButtonText}>
-                {food ? "Update Product" : "Add Product"}
-              </Text>
+              <Text style={modalStyles.saveButtonText}>Save Product</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -942,6 +1073,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F8FAFC",
   },
+  pageAnimationWrap: {
+    flex: 1,
+  },
   header: {
     paddingHorizontal: 12,
     paddingTop: 8,
@@ -949,16 +1083,25 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderBottomWidth: 1,
     borderBottomColor: "#eef2f7",
+    zIndex: 5,
   },
   headerTopRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
+  headerTitleBlock: {
+    paddingTop: 2,
+    paddingHorizontal: 8,
+    alignItems: "flex-end",
+  },
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  filterDropdownWrap: {
+    position: "relative",
   },
   filterPill: {
     height: 38,
@@ -976,9 +1119,30 @@ const styles = StyleSheet.create({
     color: "#334155",
     fontWeight: "500",
   },
-  filterPillArrow: {
+  filterMenu: {
+    position: "absolute",
+    top: 42,
+    left: 0,
+    right: 0,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 10,
+    paddingVertical: 4,
+    zIndex: 10,
+  },
+  filterMenuItem: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  filterMenuText: {
     fontSize: 13,
-    color: "#64748b",
+    color: "#334155",
+    fontWeight: "500",
+  },
+  filterMenuTextActive: {
+    color: "#047857",
+    fontWeight: "700",
   },
   iconBtn: {
     width: 36,
@@ -990,20 +1154,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#fff",
   },
-  profileIconBtn: {
-    backgroundColor: "#06C168",
-    borderColor: "#06C168",
-  },
-  iconBtnText: {
-    fontSize: 15,
-  },
-  profileIconText: {
-    color: "#fff",
-  },
   headerTitle: {
-    fontSize: 39,
-    lineHeight: 40,
-    fontWeight: "700",
+    fontSize: 36,
+    lineHeight: 38,
+    fontWeight: "500",
     color: "#111827",
   },
   headerUnderline: {
@@ -1012,7 +1166,6 @@ const styles = StyleSheet.create({
     borderRadius: 99,
     backgroundColor: "#06C168",
     marginTop: 2,
-    marginLeft: 2,
   },
   addProductCta: {
     height: 48,
@@ -1024,11 +1177,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
-  addProductCtaIcon: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-  },
   addProductCtaText: {
     color: "#fff",
     fontSize: 18,
@@ -1038,28 +1186,23 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 12,
+    padding: 8,
     paddingBottom: 32,
   },
   searchContainer: {
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    padding: 8,
+    borderRadius: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
   },
   searchInputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F3F4F6",
-    borderRadius: 10,
+    backgroundColor: "#F5F7FA",
+    borderRadius: 16,
     paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderWidth: 1.5,
+    borderColor: "#06C168",
   },
   searchIcon: {
-    fontSize: 16,
     marginRight: 8,
   },
   searchInput: {
@@ -1069,16 +1212,10 @@ const styles = StyleSheet.create({
     color: "#1f2937",
   },
   clearSearch: {
-    fontSize: 16,
-    color: "#9ca3af",
     padding: 4,
   },
   productsContainer: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    overflow: "hidden",
+    backgroundColor: "transparent",
   },
   skeletonContainer: {
     padding: 16,
@@ -1144,28 +1281,23 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   productsList: {
-    padding: 12,
+    paddingTop: 2,
   },
   productCard: {
     backgroundColor: "#ffffff",
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: "#dcfce7",
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    padding: 10,
+    marginBottom: 10,
   },
   productCardContent: {
     flexDirection: "row",
   },
   productImageContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 12,
+    width: 52,
+    height: 52,
+    borderRadius: 10,
     overflow: "hidden",
     backgroundColor: "#f3f4f6",
   },
@@ -1184,7 +1316,7 @@ const styles = StyleSheet.create({
   },
   productInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 9,
   },
   productHeader: {
     flexDirection: "row",
@@ -1195,105 +1327,85 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   productName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
     color: "#111827",
   },
   productDescription: {
     fontSize: 12,
     color: "#6b7280",
-    marginTop: 2,
+    marginTop: 3,
   },
   availabilityToggle: {
-    alignItems: "center",
-  },
-  availabilityText: {
-    fontSize: 10,
-    fontWeight: "500",
-    marginTop: 2,
-  },
-  priceRatingRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    marginTop: 8,
-    gap: 8,
-  },
-  productPrice: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  offerBadge: {
-    backgroundColor: "#dcfce7",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  offerText: {
-    fontSize: 11,
-    fontWeight: "500",
-    color: "#15803d",
-  },
-  starsContainer: {
     flexDirection: "row",
     alignItems: "center",
-  },
-  starsRow: {
-    flexDirection: "row",
-  },
-  star: {
-    fontSize: 14,
-  },
-  ratingText: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginLeft: 4,
-  },
-  timeBadgesContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginTop: 8,
     gap: 4,
   },
-  timeBadge: {
-    backgroundColor: "#dbeafe",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  timeBadgeText: {
+  availabilityLabel: {
     fontSize: 10,
-    fontWeight: "500",
-    color: "#1d4ed8",
-    textTransform: "capitalize",
+    fontWeight: "700",
+  },
+  customSwitch: {
+    width: 34,
+    height: 17,
+    borderRadius: 12,
+    paddingHorizontal: 2,
+    justifyContent: "center",
+  },
+  customSwitchThumb: {
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    backgroundColor: "#fff",
+  },
+  customSwitchThumbOn: {
+    transform: [{ translateX: 16 }],
+  },
+  priceRows: {
+    marginTop: 7,
+    gap: 6,
+  },
+  sizePriceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  sizeLabel: {
+    width: 52,
+    fontSize: 10,
+    textTransform: "uppercase",
+    color: "#9CA3AF",
+    fontWeight: "700",
+  },
+  activePrice: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#06C168",
+  },
+  strikePrice: {
+    fontSize: 12,
+    color: "#9CA3AF",
+    textDecorationLine: "line-through",
   },
   actionButtons: {
     flexDirection: "row",
     justifyContent: "flex-end",
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#f3f4f6",
-    gap: 16,
+    marginTop: 4,
+    gap: 10,
   },
   editButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  editButtonText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#6366f1",
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
   },
   deleteButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  deleteButtonText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#dc2626",
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
 
@@ -1301,7 +1413,7 @@ const styles = StyleSheet.create({
 const modalStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#F9FAFB",
   },
   header: {
     flexDirection: "row",
@@ -1309,142 +1421,181 @@ const modalStyles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
+    backgroundColor: "#ffffff",
     borderBottomWidth: 1,
     borderBottomColor: "#e5e7eb",
   },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    gap: 10,
+    marginRight: 8,
+  },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#f3f4f6",
+    width: 34,
+    height: 34,
+    borderRadius: 8,
     justifyContent: "center",
     alignItems: "center",
   },
-  closeButtonText: {
-    fontSize: 18,
-    color: "#6b7280",
-  },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "700",
     color: "#111827",
+  },
+  headerSaveButton: {
+    height: 34,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: "#06C168",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerSaveButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#ffffff",
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     padding: 16,
+    paddingBottom: 24,
   },
   section: {
-    marginBottom: 20,
+    marginBottom: 12,
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    padding: 14,
   },
   sectionLabel: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#374151",
-    marginBottom: 8,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 10,
   },
   imageSection: {
-    flexDirection: "row",
+    borderWidth: 2,
+    borderColor: "#BBF7D0",
+    borderStyle: "dashed",
+    borderRadius: 16,
+    backgroundColor: "#F0FDF4",
+    paddingVertical: 16,
+    paddingHorizontal: 12,
     alignItems: "center",
-    gap: 16,
+  },
+  previewWrap: {
+    position: "relative",
   },
   previewImage: {
     width: 96,
     height: 96,
     borderRadius: 12,
   },
-  imagePlaceholder: {
-    width: 96,
-    height: 96,
-    borderRadius: 12,
-    backgroundColor: "#f3f4f6",
+  removeImageButton: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#D1FAE5",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#e5e7eb",
-    borderStyle: "dashed",
   },
-  imagePlaceholderIcon: {
-    fontSize: 32,
+  uploadIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#06C168",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  uploadTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
+  },
+  uploadSubtitle: {
+    fontSize: 12,
+    color: "#9CA3AF",
+    marginTop: 2,
   },
   uploadButton: {
-    flex: 1,
-    backgroundColor: "#6366f1",
-    paddingVertical: 12,
+    marginTop: 10,
+    backgroundColor: "#06C168",
+    paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 12,
+    borderRadius: 10,
     alignItems: "center",
   },
   uploadButtonDisabled: {
-    backgroundColor: "#a5b4fc",
+    opacity: 0.6,
   },
   uploadButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "700",
     color: "#ffffff",
   },
   helperText: {
     fontSize: 12,
-    color: "#6b7280",
+    color: "#06C168",
+    fontWeight: "600",
     marginTop: 8,
   },
   input: {
     borderWidth: 1,
     borderColor: "#d1d5db",
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
     color: "#111827",
     backgroundColor: "#ffffff",
   },
   textArea: {
     minHeight: 80,
-    paddingTop: 12,
+    paddingTop: 10,
   },
   timeOptionsRow: {
-    flexDirection: "row",
-    gap: 16,
+    marginTop: 2,
   },
   timeOption: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
   },
   timeOptionSelected: {
-    borderColor: "#6366f1",
-    backgroundColor: "#eef2ff",
+    backgroundColor: "transparent",
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 6,
     borderWidth: 2,
     borderColor: "#d1d5db",
-    marginRight: 8,
+    marginRight: 10,
     justifyContent: "center",
     alignItems: "center",
   },
   checkboxSelected: {
-    borderColor: "#6366f1",
-    backgroundColor: "#6366f1",
-  },
-  checkboxCheck: {
-    fontSize: 12,
-    color: "#ffffff",
-    fontWeight: "bold",
+    borderColor: "#06C168",
+    backgroundColor: "#06C168",
   },
   timeOptionText: {
     fontSize: 14,
     color: "#374151",
+    fontWeight: "500",
   },
   timeOptionTextSelected: {
-    color: "#4f46e5",
+    color: "#374151",
     fontWeight: "500",
   },
   errorText: {
@@ -1458,44 +1609,61 @@ const modalStyles = StyleSheet.create({
     justifyContent: "space-between",
     paddingVertical: 16,
     paddingHorizontal: 4,
-    borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
-    marginBottom: 20,
+    marginBottom: 8,
   },
   toggleLabel: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
     color: "#111827",
   },
   toggleHelper: {
     fontSize: 12,
-    color: "#6b7280",
+    color: "#9CA3AF",
     marginTop: 2,
+  },
+  customToggle: {
+    width: 48,
+    height: 26,
+    borderRadius: 16,
+    paddingHorizontal: 3,
+    justifyContent: "center",
+  },
+  customToggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#ffffff",
+  },
+  customToggleThumbOn: {
+    transform: [{ translateX: 22 }],
   },
   sectionDivider: {
     borderTopWidth: 1,
     borderTopColor: "#e5e7eb",
-    paddingTop: 20,
-    marginBottom: 16,
+    paddingTop: 14,
+    marginBottom: 10,
   },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111827",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    color: "#6B7280",
   },
   gridRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 16,
+    flexDirection: "column",
+    gap: 0,
+    marginBottom: 0,
   },
   gridItem: {
     flex: 1,
   },
   inputLabel: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#374151",
-    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#111827",
+    marginBottom: 6,
+    marginTop: 8,
   },
   footer: {
     flexDirection: "row",
@@ -1519,13 +1687,13 @@ const modalStyles = StyleSheet.create({
   },
   saveButton: {
     flex: 1,
-    backgroundColor: "#6366f1",
+    backgroundColor: "#06C168",
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: "center",
   },
   saveButtonDisabled: {
-    backgroundColor: "#a5b4fc",
+    opacity: 0.6,
   },
   saveButtonText: {
     fontSize: 16,

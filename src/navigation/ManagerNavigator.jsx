@@ -10,6 +10,8 @@ import ManagerDashboardScreen from "../screens/manager/ManagerDashboardScreen";
 import ManagerDepositsScreen from "../screens/manager/ManagerDepositsScreen";
 import ManagerEarningsScreen from "../screens/manager/ManagerEarningsScreen";
 import ManagerReportsScreen from "../screens/manager/ManagerReportsScreen";
+import SendNotificationFormScreen from "../screens/manager/SendNotificationFormScreen";
+import SendNotificationScreen from "../screens/manager/SendNotificationScreen";
 
 // Sub Screens
 import OperationsConfigScreen from "../screens/manager/OperationsConfigScreen";
@@ -56,6 +58,14 @@ function HomeStack() {
       <HomeStackNav.Screen
         name="ManagerDashboard"
         component={ManagerDashboardScreen}
+      />
+      <HomeStackNav.Screen
+        name="SendNotification"
+        component={SendNotificationScreen}
+      />
+      <HomeStackNav.Screen
+        name="SendNotificationForm"
+        component={SendNotificationFormScreen}
       />
       <HomeStackNav.Screen
         name="ManagerAccount"
@@ -186,6 +196,14 @@ function ReportsStack() {
       <ReportsStackNav.Screen
         name="PendingDeliveries"
         component={PendingDeliveriesScreen}
+      />
+      <ReportsStackNav.Screen
+        name="SendNotification"
+        component={SendNotificationScreen}
+      />
+      <ReportsStackNav.Screen
+        name="SendNotificationForm"
+        component={SendNotificationFormScreen}
       />
       <ReportsStackNav.Screen
         name="ManagerAccount"

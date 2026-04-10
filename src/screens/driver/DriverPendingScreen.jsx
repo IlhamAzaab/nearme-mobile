@@ -1,7 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,114 +11,157 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useIsFocused } from "@react-navigation/native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { CommonActions } from "@react-navigation/native";
+import { SvgXml } from "react-native-svg";
 import { useAuth } from "../../app/providers/AuthProvider";
+import { NEARME_LOGO_ARTBOARD5_XML } from "../../assets/NearMeLogoArtboard5Xml";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 export default function DriverPendingScreen({ navigation }) {
+  const isFocused = useIsFocused();
+  const queryClient = useQueryClient();
   const { logout } = useAuth();
   const [driverStatus, setDriverStatus] = useState("pending");
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastChecked, setLastChecked] = useState(null);
+  const activeRedirectTimerRef = useRef(null);
 
-  const checkStatus = useCallback(async () => {
-    try {
-      const token = await AsyncStorage.getItem("token");
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const [token, role] = await Promise.all([
+        getAccessToken(),
+        AsyncStorage.getItem("role"),
+      ]);
+
+      if (!mounted) return;
+      if (!token || role !== "driver") {
+        navigation.replace("Login");
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [navigation]);
+
+  const statusQuery = useQuery({
+    queryKey: ["driver", "onboarding", "status"],
+    enabled: isFocused,
+    staleTime: 15 * 1000,
+    refetchInterval: 30 * 1000,
+    initialData: () =>
+      queryClient.getQueryData(["driver", "onboarding", "status"]),
+    placeholderData: (previousData) => previousData,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error("No authentication token");
+      }
+
       const res = await fetch(`${API_URL}/onboarding/status`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
 
-      if (res.ok && data.driver) {
-        setDriverStatus(data.driver.driver_status);
-        if (
-          data.driver.driver_status === "active" &&
-          data.driver.onboarding_completed
-        ) {
-          navigation.replace("DriverTabs");
-          return;
-        }
-        if (!data.driver.onboarding_completed) {
-          const step = data.driver.onboarding_step || 1;
-          navigation.replace(`DriverOnboardingStep${step}`);
-          return;
-        }
+      if (!res.ok || !data?.driver) {
+        throw new Error(data?.message || "Failed to load onboarding status");
       }
-    } catch (e) {
-      console.error("Status check error:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [navigation]);
+
+      return data.driver;
+    },
+  });
 
   useEffect(() => {
-    checkStatus();
-    // Poll every 60 seconds (was 30s) - pending screen doesn't need fast polling
-    const interval = setInterval(checkStatus, 60000);
-    return () => clearInterval(interval);
-  }, [checkStatus]);
+    if (initialLoading && (statusQuery.data || statusQuery.error)) {
+      setInitialLoading(false);
+    }
+  }, [statusQuery.data, statusQuery.error, initialLoading]);
+
+  useEffect(() => {
+    const driver = statusQuery.data;
+    if (!driver) return;
+
+    setDriverStatus(driver.driver_status || "pending");
+    setLastChecked(new Date());
+
+    if (!driver.onboarding_completed) {
+      const step = driver.onboarding_step || 1;
+      navigation.replace(`DriverOnboardingStep${step}`);
+      return;
+    }
+
+    const normalizedStatus = String(driver.driver_status || "").toLowerCase();
+    if (normalizedStatus === "active") {
+      if (activeRedirectTimerRef.current) {
+        clearTimeout(activeRedirectTimerRef.current);
+      }
+      activeRedirectTimerRef.current = setTimeout(() => {
+        navigation.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [{ name: "DriverTabs" }],
+          }),
+        );
+      }, 1500);
+    }
+
+    return () => {
+      if (activeRedirectTimerRef.current) {
+        clearTimeout(activeRedirectTimerRef.current);
+      }
+    };
+  }, [statusQuery.data, navigation]);
+
+  const checkStatus = async () => {
+    setRefreshing(true);
+    try {
+      await statusQuery.refetch();
+    } catch (e) {
+      Alert.alert("Error", "Failed to check status. Please try again.");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
   };
 
-  const getStatusInfo = () => {
+  const getStatusMessage = () => {
     switch (driverStatus) {
       case "pending":
-        return {
-          icon: "",
-          title: "Application Under Review",
-          message: "Your application is being reviewed by our team",
-          color: "#92400e",
-          bgColor: "#fffbeb",
-          borderColor: "#fde68a",
-          details: [
-            "Our verification team is reviewing your documents",
-            "This process typically takes 24-48 hours",
-            "You will receive a notification once your account is activated",
-            "Make sure to check your spam folder for emails",
-          ],
-        };
-      case "rejected":
-        return {
-          icon: "",
-          title: "Application Rejected",
-          message: "Unfortunately, your application was not approved",
-          color: "#991b1b",
-          bgColor: "#fef2f2",
-          borderColor: "#fecaca",
-          details: [
-            "Please check your email for rejection reasons",
-            "You can reapply after addressing the issues",
-            "Contact support for more information",
-          ],
-        };
+        return "Your application is under review. We'll notify you once approved.";
       case "suspended":
-        return {
-          icon: "",
-          title: "Account Suspended",
-          message: "Your driver account has been temporarily suspended",
-          color: "#991b1b",
-          bgColor: "#fef2f2",
-          borderColor: "#fecaca",
-          details: [
-            "Please contact support for more information",
-            "Email: support@nearme.lk",
-            "Phone: +94 11 234 5678",
-          ],
-        };
+        return "Your account has been suspended. Please contact support.";
+      case "rejected":
+        return "Your application was rejected. Please contact support for more information.";
       default:
-        return {
-          icon: "",
-          title: "Verification Pending",
-          message: "Please wait while we process your application",
-          color: "#92400e",
-          bgColor: "#fffbeb",
-          borderColor: "#fde68a",
-          details: [],
-        };
+        return "Your application is under review. We'll notify you once approved.";
     }
   };
 
-  if (loading) {
+  const getStatusEmoji = () => {
+    switch (driverStatus) {
+      case "pending":
+        return "⏳";
+      case "suspended":
+        return "🚫";
+      case "rejected":
+        return "❌";
+      default:
+        return "⏳";
+    }
+  };
+
+  if (initialLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <ActivityIndicator size="large" color="#06C168" style={{ flex: 1 }} />
@@ -124,243 +169,207 @@ export default function DriverPendingScreen({ navigation }) {
     );
   }
 
-  const statusInfo = getStatusInfo();
-
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.card}>
-          <Text style={styles.statusIcon}>{statusInfo.icon}</Text>
-          <Text style={styles.title}>{statusInfo.title}</Text>
-          <Text style={styles.message}>{statusInfo.message}</Text>
-
-          {statusInfo.details.length > 0 && (
-            <View
-              style={[
-                styles.detailsCard,
-                {
-                  backgroundColor: statusInfo.bgColor,
-                  borderColor: statusInfo.borderColor,
-                },
-              ]}
-            >
-              {statusInfo.details.map((detail, index) => (
-                <View key={index} style={styles.detailRow}>
-                  <Text
-                    style={[styles.detailBullet, { color: statusInfo.color }]}
-                  ></Text>
-                  <Text
-                    style={[styles.detailText, { color: statusInfo.color }]}
-                  >
-                    {detail}
-                  </Text>
-                </View>
-              ))}
+      <DriverScreenSection
+        screenKey="DriverPending"
+        sectionIndex={0}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing || statusQuery.isFetching}
+              onRefresh={checkStatus}
+              colors={["#06C168"]}
+              tintColor="#06C168"
+            />
+          }
+        >
+          <View style={styles.content}>
+            <View style={styles.logoWrap}>
+              <SvgXml
+                xml={NEARME_LOGO_ARTBOARD5_XML}
+                width={150}
+                height={150}
+              />
             </View>
-          )}
-
-          {driverStatus === "pending" && (
-            <View style={styles.timelineSection}>
-              <Text style={styles.timelineTitle}>Verification Process</Text>
-              {[
-                {
-                  num: "",
-                  title: "Application Submitted",
-                  sub: "Your onboarding is complete",
-                  done: true,
-                },
-                {
-                  num: "2",
-                  title: "Document Verification",
-                  sub: "Checking all submitted documents",
-                  active: true,
-                },
-                {
-                  num: "3",
-                  title: "Background Check",
-                  sub: "Pending document approval",
-                  done: false,
-                },
-                {
-                  num: "4",
-                  title: "Final Approval",
-                  sub: "Account activation",
-                  done: false,
-                },
-              ].map((step, idx) => (
-                <View key={idx} style={styles.timelineRow}>
-                  <View
-                    style={[
-                      styles.timelineNum,
-                      step.done
-                        ? styles.timelineNumDone
-                        : step.active
-                          ? styles.timelineNumActive
-                          : styles.timelineNumPending,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.timelineNumText,
-                        (step.done || step.active) && { color: "#fff" },
-                        !step.done && !step.active && { color: "#9ca3af" },
-                      ]}
-                    >
-                      {step.num}
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[
-                        styles.timelineItemTitle,
-                        !step.done && !step.active && { color: "#9ca3af" },
-                      ]}
-                    >
-                      {step.title}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.timelineItemSub,
-                        !step.done && !step.active && { color: "#d1d5db" },
-                      ]}
-                    >
-                      {step.sub}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-
-          <View style={styles.supportCard}>
-            <Text style={styles.supportTitle}>Need Help?</Text>
-            <Text style={styles.supportSubtitle}>
-              Contact our support team for assistance:
+            <Text style={styles.title}>
+              {driverStatus === "pending"
+                ? "Approval Pending"
+                : driverStatus === "suspended"
+                  ? "Account Suspended"
+                  : driverStatus === "rejected"
+                    ? "Application Rejected"
+                    : "Approval Pending"}
             </Text>
-            <Text style={styles.supportInfo}> Email: support@nearme.lk</Text>
-            <Text style={styles.supportInfo}> Phone: +94 11 234 5678</Text>
-            <Text style={styles.supportInfo}> Hours: Mon-Fri, 9 AM - 6 PM</Text>
-          </View>
+            <Text
+              style={styles.subtitle}
+            >{`${getStatusEmoji()} ${getStatusMessage()}`}</Text>
 
-          <View style={styles.actions}>
-            {driverStatus === "pending" && (
-              <TouchableOpacity style={styles.primaryBtn} onPress={checkStatus}>
-                <Text style={styles.primaryBtnText}>Refresh Status</Text>
-              </TouchableOpacity>
-            )}
-            {driverStatus === "rejected" && (
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => navigation.navigate("DriverOnboardingStep1")}
-              >
-                <Text style={styles.primaryBtnText}>Update Application</Text>
-              </TouchableOpacity>
-            )}
+            <View style={styles.infoCard}>
+              <Text style={styles.infoTitle}>What happens next?</Text>
+              <Text style={styles.infoStep}>
+                1. Our team reviews your details
+              </Text>
+              <Text style={styles.infoStep}>2. We verify your documents</Text>
+              <Text style={styles.infoStep}>
+                3. You'll receive a notification when approved
+              </Text>
+              <Text style={styles.infoStep}>
+                4. Start delivering with Meezo
+              </Text>
+            </View>
+
+            <View style={styles.supportCard}>
+              <Text style={styles.supportTitle}>Need Help?</Text>
+              <Text style={styles.supportSubtitle}>
+                Email: support.meezo.lk
+              </Text>
+              <Text style={styles.supportSubtitle}>Phone: 0759587979</Text>
+            </View>
+
             <TouchableOpacity
-              style={styles.secondaryBtn}
-              onPress={handleLogout}
+              style={[
+                styles.refreshBtn,
+                (refreshing || statusQuery.isFetching) &&
+                  styles.refreshBtnDisabled,
+              ]}
+              onPress={checkStatus}
+              disabled={refreshing || statusQuery.isFetching}
             >
-              <Text style={styles.secondaryBtnText}>Logout</Text>
+              {refreshing || statusQuery.isFetching ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.refreshBtnText}>Check Status</Text>
+              )}
+            </TouchableOpacity>
+
+            {lastChecked && (
+              <Text style={styles.lastChecked}>
+                Last checked: {lastChecked.toLocaleTimeString()}
+              </Text>
+            )}
+
+            <Text style={styles.pullHint}>Pull down to refresh</Text>
+
+            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+              <Text style={styles.logoutBtnText}>Log Out</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </DriverScreenSection>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f9fafb" },
-  scroll: { padding: 20, paddingVertical: 40 },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 28,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+  container: {
+    flex: 1,
+    backgroundColor: "#EDFBF2",
   },
-  statusIcon: { fontSize: 64, textAlign: "center", marginBottom: 16 },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  content: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 32,
+    paddingVertical: 40,
+  },
+  logoWrap: {
+    marginBottom: 16,
+    alignItems: "center",
+  },
   title: {
-    fontSize: 26,
-    fontWeight: "800",
-    color: "#111827",
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#1f2937",
     textAlign: "center",
-    marginBottom: 8,
   },
-  message: {
+  subtitle: {
     fontSize: 16,
     color: "#6b7280",
+    marginTop: 12,
     textAlign: "center",
     lineHeight: 24,
-    marginBottom: 24,
+    marginBottom: 32,
   },
-  detailsCard: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-  },
-  detailRow: { flexDirection: "row", marginBottom: 8, gap: 8 },
-  detailBullet: { fontSize: 14, fontWeight: "700", marginTop: 1 },
-  detailText: { fontSize: 14, lineHeight: 20, flex: 1 },
-  timelineSection: { marginBottom: 24 },
-  timelineTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#374151",
-    marginBottom: 16,
-  },
-  timelineRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 16,
-    gap: 12,
-  },
-  timelineNum: {
-    width: 32,
-    height: 32,
+  infoCard: {
+    backgroundColor: "#fff",
     borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
+    padding: 20,
+    width: "100%",
+    marginBottom: 16,
   },
-  timelineNumDone: { backgroundColor: "#06C168" },
-  timelineNumActive: { backgroundColor: "#eab308" },
-  timelineNumPending: { backgroundColor: "#e5e7eb" },
-  timelineNumText: { fontSize: 13, fontWeight: "700" },
-  timelineItemTitle: { fontSize: 14, fontWeight: "600", color: "#111827" },
-  timelineItemSub: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  infoTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#166534",
+    marginBottom: 12,
+  },
+  infoStep: {
+    fontSize: 14,
+    color: "#4b5563",
+    marginBottom: 8,
+    paddingLeft: 4,
+  },
   supportCard: {
-    backgroundColor: "#f9fafb",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 12,
+    backgroundColor: "#fff",
+    borderRadius: 16,
     padding: 16,
+    width: "100%",
     marginBottom: 24,
   },
   supportTitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "700",
-    color: "#374151",
-    marginBottom: 4,
+    color: "#166534",
+    marginBottom: 8,
   },
-  supportSubtitle: { fontSize: 13, color: "#6b7280", marginBottom: 8 },
-  supportInfo: { fontSize: 13, color: "#374151", marginBottom: 4 },
-  actions: { gap: 12 },
-  primaryBtn: {
-    backgroundColor: "#4f46e5",
-    borderRadius: 12,
+  supportSubtitle: {
+    fontSize: 14,
+    color: "#4b5563",
+    marginBottom: 6,
+  },
+  refreshBtn: {
+    backgroundColor: "#06C168",
     paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 999,
+    minWidth: 160,
     alignItems: "center",
   },
-  primaryBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  secondaryBtn: {
-    backgroundColor: "#e5e7eb",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
+  refreshBtnDisabled: {
+    opacity: 0.7,
   },
-  secondaryBtnText: { color: "#374151", fontSize: 15, fontWeight: "700" },
+  refreshBtnText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  lastChecked: {
+    fontSize: 12,
+    color: "#9ca3af",
+    marginTop: 12,
+  },
+  pullHint: {
+    fontSize: 12,
+    color: "#9ca3af",
+    marginTop: 8,
+  },
+  logoutBtn: {
+    marginTop: 32,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 999,
+    backgroundColor: "#fee2e2",
+  },
+  logoutBtnText: {
+    color: "#ef4444",
+    fontSize: 14,
+    fontWeight: "600",
+  },
 });

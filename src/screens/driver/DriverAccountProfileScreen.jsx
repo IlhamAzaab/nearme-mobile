@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ActivityIndicator,
   Alert,
@@ -12,8 +13,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
+import DriverScreenSection from "../../components/driver/DriverScreenSection";
+import { DriverProfileLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const WORKING_TIME_LABELS = {
   full_time: "Full Time",
@@ -23,32 +27,42 @@ const WORKING_TIME_LABELS = {
 
 export default function DriverAccountProfileScreen({ navigation }) {
   const { logout } = useAuth();
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
-  const fetchProfile = useCallback(async () => {
-    setLoading(true);
-    try {
-      const token = await AsyncStorage.getItem("token");
+  const profileQuery = useQuery({
+    queryKey: ["driver", "account-profile"],
+    queryFn: async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("No authentication token");
+
       const res = await fetch(`${API_URL}/driver/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (res.ok) {
-        setProfile(data);
-      } else {
-        Alert.alert("Error", data?.message || "Failed to load profile");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to load profile");
       }
-    } catch (error) {
-      Alert.alert("Error", "Network error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+
+      return data?.driver || data;
+    },
+    initialData: () => queryClient.getQueryData(["driver", "account-profile"]),
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const profile = profileQuery.data || null;
+  const loading = profileQuery.isLoading && !profile;
 
   useEffect(() => {
-    fetchProfile();
-  }, [fetchProfile]);
+    if (!profileQuery.isError) return;
+    Alert.alert(
+      "Error",
+      profileQuery.error?.message || "Failed to load profile",
+    );
+  }, [profileQuery.isError, profileQuery.error]);
 
   const handleLogout = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
@@ -66,82 +80,90 @@ export default function DriverAccountProfileScreen({ navigation }) {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <DriverScreenHeader
-          title="My Profile"
-          onBackPress={() => navigation.goBack()}
-        />
-        <View style={styles.loaderWrap}>
-          <ActivityIndicator size="large" color="#06C168" />
-        </View>
+        <DriverProfileLoadingSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <DriverScreenHeader
-        title="My Profile"
-        onBackPress={() => navigation.goBack()}
-      />
+      <View style={{ flex: 1 }}>
+        <DriverScreenSection screenKey="DriverAccountProfile" sectionIndex={0}>
+          <DriverScreenHeader
+            title="My Profile"
+            onBackPress={() => navigation.goBack()}
+          />
+        </DriverScreenSection>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.heroCard}>
-          <View style={styles.heroAvatar}>
-            <Ionicons name="person" size={26} color="#fff" />
-          </View>
-          <View style={styles.heroContent}>
-            <Text style={styles.heroName}>
-              {profile?.full_name || "Driver"}
-            </Text>
-            <Text style={styles.heroUsername}>
-              @ {profile?.username || "-"}
-            </Text>
-          </View>
-        </View>
+        <DriverScreenSection
+          screenKey="DriverAccountProfile"
+          sectionIndex={1}
+          style={{ flex: 1 }}
+        >
+          <ScrollView contentContainerStyle={styles.scroll}>
+            <View style={styles.heroCard}>
+              <View style={styles.heroAvatar}>
+                <Ionicons name="person" size={26} color="#fff" />
+              </View>
+              <View style={styles.heroContent}>
+                <Text style={styles.heroName}>
+                  {profile?.full_name || "Driver"}
+                </Text>
+                <Text style={styles.heroUsername}>
+                  @ {profile?.username || "-"}
+                </Text>
+              </View>
+            </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Personal Information</Text>
-          <InfoRow
-            label="Full Name"
-            value={profile?.full_name}
-            icon="person-outline"
-          />
-          <InfoRow label="Email" value={profile?.email} icon="mail-outline" />
-          <InfoRow
-            label="Phone Number"
-            value={profile?.phone_number}
-            icon="call-outline"
-          />
-        </View>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Personal Information</Text>
+              <InfoRow
+                label="Full Name"
+                value={profile?.full_name}
+                icon="person-outline"
+              />
+              <InfoRow
+                label="Email"
+                value={profile?.email}
+                icon="mail-outline"
+              />
+              <InfoRow
+                label="Phone Number"
+                value={profile?.phone_number}
+                icon="call-outline"
+              />
+            </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Work Information</Text>
-          <InfoRow
-            label="Working Time"
-            value={
-              WORKING_TIME_LABELS[profile?.working_time] ||
-              profile?.working_time
-            }
-            icon="time-outline"
-          />
-          <InfoRow
-            label="Status"
-            value={(profile?.driver_status || "unknown").toUpperCase()}
-            icon="radio-button-on-outline"
-            status={profile?.driver_status}
-          />
-          <InfoRow
-            label="Vehicle Number"
-            value={profile?.vehicle_number}
-            icon="bicycle-outline"
-          />
-        </View>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Work Information</Text>
+              <InfoRow
+                label="Working Time"
+                value={
+                  WORKING_TIME_LABELS[profile?.working_time] ||
+                  profile?.working_time
+                }
+                icon="time-outline"
+              />
+              <InfoRow
+                label="Status"
+                value={(profile?.driver_status || "unknown").toUpperCase()}
+                icon="radio-button-on-outline"
+                status={profile?.driver_status}
+              />
+              <InfoRow
+                label="Vehicle Number"
+                value={profile?.vehicle_number}
+                icon="bicycle-outline"
+              />
+            </View>
 
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color="#fff" />
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
-      </ScrollView>
+            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+              <Ionicons name="log-out-outline" size={20} color="#fff" />
+              <Text style={styles.logoutText}>Logout</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </DriverScreenSection>
+      </View>
     </SafeAreaView>
   );
 }

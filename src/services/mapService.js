@@ -18,7 +18,7 @@
 export async function getOSRMRoute(startLat, startLng, endLat, endLng) {
   try {
     // OSRM uses [lng, lat] format
-    const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
+    const url = `https://router.project-osrm.org/route/v1/foot/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
     
     const response = await fetch(url);
     const data = await response.json();
@@ -63,7 +63,7 @@ export async function getMultiStopRoute(waypoints) {
       .map(wp => `${wp.longitude},${wp.latitude}`)
       .join(";");
     
-    const url = `https://router.project-osrm.org/route/v1/driving/${waypointsStr}?overview=full&geometries=geojson&steps=true`;
+    const url = `https://router.project-osrm.org/route/v1/foot/${waypointsStr}?overview=full&geometries=geojson&steps=true`;
     
     const response = await fetch(url);
     const data = await response.json();

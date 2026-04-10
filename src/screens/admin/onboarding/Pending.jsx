@@ -1,8 +1,16 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, RefreshControl, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, CommonActions } from '@react-navigation/native';
-import { useAuth } from '../../../app/providers/AuthProvider';
+import React, { useEffect, useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useNavigation, CommonActions } from "@react-navigation/native";
+import { useAuth } from "../../../app/providers/AuthProvider";
 
 export default function Pending() {
   const navigation = useNavigation();
@@ -16,13 +24,13 @@ export default function Pending() {
     setLastChecked(new Date());
     setChecking(false);
 
-    if (data?.admin_status === 'active') {
+    if (data?.admin_status === "active") {
       // Navigate to dashboard when approved
       navigation.dispatch(
         CommonActions.reset({
           index: 0,
-          routes: [{ name: 'AdminMain' }],
-        })
+          routes: [{ name: "AdminMain" }],
+        }),
       );
     }
   }, [fetchAdminStatus, navigation]);
@@ -42,27 +50,27 @@ export default function Pending() {
 
   const getStatusMessage = () => {
     switch (adminStatus) {
-      case 'pending':
-        return 'Your restaurant is under review. We\'ll notify you once approved.';
-      case 'suspended':
-        return 'Your account has been suspended. Please contact support.';
-      case 'rejected':
-        return 'Your application was rejected. Please contact support for more information.';
+      case "pending":
+        return "Your restaurant is under review. We'll notify you once approved.";
+      case "suspended":
+        return "Your account has been suspended. Please contact support.";
+      case "rejected":
+        return "Your application was rejected. Please contact support for more information.";
       default:
-        return 'Your restaurant is under review. We\'ll notify you once approved.';
+        return "Your restaurant is under review. We'll notify you once approved.";
     }
   };
 
   const getStatusEmoji = () => {
     switch (adminStatus) {
-      case 'pending':
-        return '⏳';
-      case 'suspended':
-        return '🚫';
-      case 'rejected':
-        return '❌';
+      case "pending":
+        return "⏳";
+      case "suspended":
+        return "🚫";
+      case "rejected":
+        return "❌";
       default:
-        return '⏳';
+        return "⏳";
     }
   };
 
@@ -74,7 +82,7 @@ export default function Pending() {
           <RefreshControl
             refreshing={checking}
             onRefresh={checkStatus}
-            colors={['#06C168']}
+            colors={["#06C168"]}
             tintColor="#06C168"
           />
         }
@@ -82,22 +90,32 @@ export default function Pending() {
         <View style={styles.content}>
           <Text style={styles.emoji}>{getStatusEmoji()}</Text>
           <Text style={styles.title}>
-            {adminStatus === 'pending' ? 'Approval Pending' : 
-             adminStatus === 'suspended' ? 'Account Suspended' :
-             adminStatus === 'rejected' ? 'Application Rejected' : 'Approval Pending'}
+            {adminStatus === "pending"
+              ? "Approval Pending"
+              : adminStatus === "suspended"
+                ? "Account Suspended"
+                : adminStatus === "rejected"
+                  ? "Application Rejected"
+                  : "Approval Pending"}
           </Text>
           <Text style={styles.subtitle}>{getStatusMessage()}</Text>
 
           <View style={styles.infoCard}>
             <Text style={styles.infoTitle}>What happens next?</Text>
-            <Text style={styles.infoStep}>1. Our team reviews your restaurant details</Text>
+            <Text style={styles.infoStep}>
+              1. Our team reviews your restaurant details
+            </Text>
             <Text style={styles.infoStep}>2. We verify your documents</Text>
-            <Text style={styles.infoStep}>3. You'll receive a notification when approved</Text>
-            <Text style={styles.infoStep}>4. Start managing your restaurant! 🎉</Text>
+            <Text style={styles.infoStep}>
+              3. You'll receive a notification when approved
+            </Text>
+            <Text style={styles.infoStep}>
+              4. Start managing your restaurant! 🎉
+            </Text>
           </View>
 
-          <TouchableOpacity 
-            style={[styles.refreshBtn, checking && styles.refreshBtnDisabled]} 
+          <TouchableOpacity
+            style={[styles.refreshBtn, checking && styles.refreshBtnDisabled]}
             onPress={checkStatus}
             disabled={checking}
           >
@@ -128,15 +146,15 @@ export default function Pending() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#EDFBF2',
+    backgroundColor: "#EDFBF2",
   },
   scrollContent: {
     flexGrow: 1,
   },
   content: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingHorizontal: 32,
     paddingVertical: 40,
   },
@@ -146,76 +164,74 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1f2937',
-    textAlign: 'center',
+    fontWeight: "bold",
+    color: "#1f2937",
+    textAlign: "center",
   },
   subtitle: {
     fontSize: 16,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 12,
-    textAlign: 'center',
+    textAlign: "center",
     lineHeight: 24,
     marginBottom: 32,
   },
   infoCard: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 16,
     padding: 20,
-    width: '100%',
+    width: "100%",
     marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
   },
   infoTitle: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#166534',
+    fontWeight: "700",
+    color: "#166534",
     marginBottom: 12,
   },
   infoStep: {
     fontSize: 14,
-    color: '#4b5563',
+    color: "#4b5563",
     marginBottom: 8,
     paddingLeft: 4,
   },
   refreshBtn: {
-    backgroundColor: '#06C168',
+    backgroundColor: "#06C168",
     paddingVertical: 14,
     paddingHorizontal: 32,
-    borderRadius: 12,
+    borderRadius: 999,
     minWidth: 160,
-    alignItems: 'center',
+    alignItems: "center",
   },
   refreshBtnDisabled: {
     opacity: 0.7,
   },
   refreshBtnText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   lastChecked: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: "#9ca3af",
     marginTop: 12,
   },
   pullHint: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: "#9ca3af",
     marginTop: 8,
   },
   logoutBtn: {
     marginTop: 32,
     paddingVertical: 12,
     paddingHorizontal: 24,
+    borderRadius: 999,
+    backgroundColor: "#fee2e2",
   },
   logoutBtnText: {
-    color: '#ef4444',
+    color: "#ef4444",
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 });
+

@@ -42,7 +42,7 @@ const ManagerHeader = ({
           </TouchableOpacity>
         )}
         <View style={styles.nmIcon}>
-          <Text style={styles.nmText}>NM</Text>
+          <Text style={styles.nmText}>MEEZO</Text>
         </View>
       </View>
 
@@ -91,18 +91,19 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   nmIcon: {
-    width: 32,
+    minWidth: 56,
     height: 32,
     borderRadius: 8,
     backgroundColor: "#06C168",
+    paddingHorizontal: 8,
     justifyContent: "center",
     alignItems: "center",
   },
   nmText: {
     color: "#fff",
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: "800",
-    letterSpacing: 0.5,
+    letterSpacing: 0.7,
   },
   title: {
     flex: 1,

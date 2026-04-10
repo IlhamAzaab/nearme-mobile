@@ -54,9 +54,12 @@ Notifications.setNotificationHandler({
     const type = data?.type;
     if (type && NOTIFICATION_ROLE_MAP[type]) {
       const currentRole = await AsyncStorage.getItem("role");
-      if (currentRole && currentRole !== NOTIFICATION_ROLE_MAP[type]) {
+      const normalizedRole = currentRole
+        ? String(currentRole).trim().toLowerCase()
+        : null;
+      if (normalizedRole && normalizedRole !== NOTIFICATION_ROLE_MAP[type]) {
         console.log(
-          `[Push] Suppressing banner for "${type}" — not for role "${currentRole}"`,
+          `[Push] Suppressing banner for "${type}" — not for role "${normalizedRole}"`,
         );
         return {
           shouldShowAlert: false,
@@ -189,6 +192,92 @@ class PushNotificationService {
     this._userRole = null; // stored on initialize
 
     this._onUrgentNotification = null; // callback for in-app modal
+    this._initializePromise = null;
+    this._lastNetworkWarnAt = 0;
+    this._lastHandledNotificationResponseId = null;
+  }
+
+  TOKEN_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
+  NETWORK_WARN_COOLDOWN_MS = 60 * 1000;
+  LAST_TOKEN_FAILURE_AT_KEY = "@push_last_token_network_failure_at";
+
+  _isNetworkError(error) {
+    const message = String(error?.message || error || "").toLowerCase();
+    return (
+      message.includes("network request failed") ||
+      message.includes("fetch failed") ||
+      message.includes("network")
+    );
+  }
+
+  _logNetworkWarnOnce(message, error = null) {
+    const now = Date.now();
+    if (now - this._lastNetworkWarnAt < this.NETWORK_WARN_COOLDOWN_MS) {
+      return;
+    }
+    this._lastNetworkWarnAt = now;
+    if (error) {
+      console.warn(message, error?.message || error);
+    } else {
+      console.warn(message);
+    }
+  }
+
+  async _hasExpoNetworkConnectivity() {
+    // Probe Expo host before requesting a push token.
+    // This avoids noisy expo-notifications warnings when device is offline.
+    const controller =
+      typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeoutId = setTimeout(() => {
+      try {
+        controller?.abort();
+      } catch {}
+    }, 4000);
+
+    try {
+      const response = await fetch("https://exp.host", {
+        method: "HEAD",
+        cache: "no-store",
+        signal: controller?.signal,
+      });
+      return response.ok;
+    } catch (error) {
+      if (this._isNetworkError(error)) {
+        this._logNetworkWarnOnce(
+          "[Push] Network unavailable. Skipping Expo token fetch for now.",
+        );
+      }
+      return false;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async _shouldSkipTokenFetchForCooldown() {
+    try {
+      const raw = await AsyncStorage.getItem(this.LAST_TOKEN_FAILURE_AT_KEY);
+      const lastFailureAt = Number(raw || 0);
+      if (!lastFailureAt) return false;
+      const elapsed = Date.now() - lastFailureAt;
+      return elapsed < this.TOKEN_RETRY_COOLDOWN_MS;
+    } catch {
+      return false;
+    }
+  }
+
+  async _markTokenNetworkFailure() {
+    try {
+      await AsyncStorage.setItem(
+        this.LAST_TOKEN_FAILURE_AT_KEY,
+        String(Date.now()),
+      );
+    } catch {}
+  }
+
+  async _clearTokenNetworkFailure() {
+    try {
+      await AsyncStorage.removeItem(this.LAST_TOKEN_FAILURE_AT_KEY);
+    } catch {}
   }
 
   /**
@@ -326,6 +415,19 @@ class PushNotificationService {
    */
   async getExpoPushToken() {
     try {
+      if (await this._shouldSkipTokenFetchForCooldown()) {
+        this._logNetworkWarnOnce(
+          "[Push] Skipping Expo token fetch due to recent network failure cooldown.",
+        );
+        return null;
+      }
+
+      const hasNetwork = await this._hasExpoNetworkConnectivity();
+      if (!hasNetwork) {
+        await this._markTokenNetworkFailure();
+        return null;
+      }
+
       if (!Device.isDevice) {
         console.log("[Push] Need physical device");
         return null;
@@ -357,9 +459,19 @@ class PushNotificationService {
       const token = tokenData.data;
       console.log("[Push] Got token:", token);
 
+      await this._clearTokenNetworkFailure();
       await AsyncStorage.setItem("expoPushToken", token);
       return token;
     } catch (error) {
+      if (this._isNetworkError(error)) {
+        await this._markTokenNetworkFailure();
+        this._logNetworkWarnOnce(
+          "[Push] Token fetch skipped after network error. Will retry later.",
+          error,
+        );
+        return null;
+      }
+
       console.error("[Push] Token error:", error);
       return null;
     }
@@ -571,6 +683,28 @@ class PushNotificationService {
   async getInitialNotification() {
     const response = await Notifications.getLastNotificationResponseAsync();
     if (response) {
+      const responseId =
+        response?.notification?.request?.identifier ||
+        response?.notification?.date ||
+        null;
+
+      if (
+        responseId &&
+        this._lastHandledNotificationResponseId === String(responseId)
+      ) {
+        return;
+      }
+
+      this._lastHandledNotificationResponseId = responseId
+        ? String(responseId)
+        : String(Date.now());
+
+      try {
+        await Notifications.clearLastNotificationResponseAsync?.();
+      } catch {
+        // Older SDKs may not expose clear API.
+      }
+
       console.log("[Push] App opened from notification");
       const content = response.notification.request.content;
       const notifData = content.data || {};
@@ -611,8 +745,8 @@ class PushNotificationService {
   // ─── NOTIFICATION TAP NAVIGATION ──────────────────────────
 
   handleNotificationPress(data) {
-    const { type, screen, orderId } = data || {};
-    console.log("[Push] Navigate:", { type, screen, orderId });
+    const { type, screen, orderId, paymentId } = data || {};
+    console.log("[Push] Navigate:", { type, screen, orderId, paymentId });
 
     if (!this.navigationRef) return;
     const nav = this.navigationRef;
@@ -638,7 +772,9 @@ class PushNotificationService {
         nav.navigate("DriverTabs", { screen: "Available" });
         break;
       case "payment_received":
-        nav.navigate("DriverTabs", { screen: "Earnings" });
+        nav.navigate("DriverWithdrawals", {
+          paymentId: paymentId ? String(paymentId) : null,
+        });
         break;
       case "deposit_approved":
         nav.navigate("DriverDeposits");
@@ -665,6 +801,19 @@ class PushNotificationService {
    * Full initialization - call after login or on app start
    */
   async initialize(authToken) {
+    if (this._initializePromise) {
+      return this._initializePromise;
+    }
+
+    this._initializePromise = this._initialize(authToken);
+    try {
+      return await this._initializePromise;
+    } finally {
+      this._initializePromise = null;
+    }
+  }
+
+  async _initialize(authToken) {
     console.log("[Push] Initializing...");
 
     // Store the user role so we can filter notifications by role
