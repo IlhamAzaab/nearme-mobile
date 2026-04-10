@@ -330,7 +330,7 @@ export default function DriverMapScreen({ route, navigation }) {
     try {
       let token = await AsyncStorage.getItem("token");
       if (!token) {
-        navigation.replace("Login");
+        await logout();
         return;
       }
 

@@ -41,90 +41,28 @@ const generateLeafletHTML = (customerLat, customerLng) => `
     html, body, #map { width: 100%; height: 100%; }
     .leaflet-control-attribution { display: none !important; }
 
-    /* Premium Driver Marker */
+    /* Icon-only driver marker */
     .driver-marker {
-      position: relative;
-      width: 56px;
-      height: 68px;
-    }
-    .driver-marker-pin {
-      width: 56px;
-      height: 56px;
-      background: linear-gradient(145deg, #06C168 0%, #05a85a 100%);
-      border-radius: 50% 50% 50% 0;
-      transform: rotate(-45deg);
-      position: absolute;
-      top: 0;
-      left: 0;
-      box-shadow:
-        0 4px 12px rgba(6, 193, 104, 0.4),
-        0 2px 4px rgba(0, 0, 0, 0.1),
-        inset 0 2px 4px rgba(255, 255, 255, 0.3);
-      border: 3px solid #fff;
-    }
-    .driver-marker-icon {
-      position: absolute;
-      top: 8px;
-      left: 8px;
-      width: 40px;
-      height: 40px;
       display: flex;
       align-items: center;
       justify-content: center;
-      z-index: 10;
+      width: 30px;
+      height: 30px;
     }
     .driver-marker-icon svg {
-      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2));
-    }
-    .driver-pulse {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      width: 36px;
-      height: 36px;
-      background: rgba(6, 193, 104, 0.3);
-      border-radius: 50%;
-      animation: pulse 2s ease-out infinite;
-    }
-    @keyframes pulse {
-      0% { transform: scale(1); opacity: 1; }
-      100% { transform: scale(2.5); opacity: 0; }
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
     }
 
-    /* Premium Home Marker */
+    /* Icon-only home marker */
     .home-marker {
-      position: relative;
-      width: 52px;
-      height: 64px;
-    }
-    .home-marker-pin {
-      width: 52px;
-      height: 52px;
-      background: linear-gradient(145deg, #10B981 0%, #059669 100%);
-      border-radius: 50% 50% 50% 0;
-      transform: rotate(-45deg);
-      position: absolute;
-      top: 0;
-      left: 0;
-      box-shadow:
-        0 4px 12px rgba(16, 185, 129, 0.4),
-        0 2px 4px rgba(0, 0, 0, 0.1),
-        inset 0 2px 4px rgba(255, 255, 255, 0.3);
-      border: 3px solid #fff;
-    }
-    .home-marker-icon {
-      position: absolute;
-      top: 7px;
-      left: 7px;
-      width: 38px;
-      height: 38px;
       display: flex;
       align-items: center;
       justify-content: center;
-      z-index: 10;
+      width: 28px;
+      height: 28px;
     }
     .home-marker-icon svg {
-      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2));
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
     }
   </style>
 </head>
@@ -153,42 +91,39 @@ const generateLeafletHTML = (customerLat, customerLng) => `
       subdomains: 'abcd',
     }).addTo(map);
 
-    // Premium Driver Icon - Modern pin with delivery bike SVG
+    // Driver icon only (no pin background)
     const driverIcon = L.divIcon({
       html: \`
         <div class="driver-marker">
-          <div class="driver-pulse"></div>
-          <div class="driver-marker-pin"></div>
           <div class="driver-marker-icon">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M19 17C19 18.1046 18.1046 19 17 19C15.8954 19 15 18.1046 15 17C15 15.8954 15.8954 15 17 15C18.1046 15 19 15.8954 19 17Z" stroke="white" stroke-width="2"/>
-              <path d="M9 17C9 18.1046 8.10457 19 7 19C5.89543 19 5 18.1046 5 17C5 15.8954 5.89543 15 7 15C8.10457 15 9 15.8954 9 17Z" stroke="white" stroke-width="2"/>
-              <path d="M15 17H9M7 17H5C3.89543 17 3 16.1046 3 15V11C3 9.89543 3.89543 9 5 9H12L15 13H17C18.1046 13 19 13.8954 19 15V17H17" stroke="white" stroke-width="2" stroke-linecap="round"/>
-              <path d="M12 9V5C12 4.44772 12.4477 4 13 4H16" stroke="white" stroke-width="2" stroke-linecap="round"/>
+              <path d="M19 17C19 18.1046 18.1046 19 17 19C15.8954 19 15 18.1046 15 17C15 15.8954 15.8954 15 17 15C18.1046 15 19 15.8954 19 17Z" stroke="#06C168" stroke-width="2"/>
+              <path d="M9 17C9 18.1046 8.10457 19 7 19C5.89543 19 5 18.1046 5 17C5 15.8954 5.89543 15 7 15C8.10457 15 9 15.8954 9 17Z" stroke="#06C168" stroke-width="2"/>
+              <path d="M15 17H9M7 17H5C3.89543 17 3 16.1046 3 15V11C3 9.89543 3.89543 9 5 9H12L15 13H17C18.1046 13 19 13.8954 19 15V17H17" stroke="#06C168" stroke-width="2" stroke-linecap="round"/>
+              <path d="M12 9V5C12 4.44772 12.4477 4 13 4H16" stroke="#06C168" stroke-width="2" stroke-linecap="round"/>
             </svg>
           </div>
         </div>
       \`,
-      iconSize: [56, 68],
-      iconAnchor: [28, 68],
+      iconSize: [30, 30],
+      iconAnchor: [15, 15],
       className: '',
     });
 
-    // Premium Home Icon - Modern pin with home SVG
+    // Home icon only (no pin background)
     const customerIcon = L.divIcon({
       html: \`
         <div class="home-marker">
-          <div class="home-marker-pin"></div>
           <div class="home-marker-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M3 10.5L12 3L21 10.5V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V10.5Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M9 22V12H15V22" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M3 10.5L12 3L21 10.5V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V10.5Z" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M9 22V12H15V22" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </div>
         </div>
       \`,
-      iconSize: [52, 64],
-      iconAnchor: [26, 64],
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
       className: '',
     });
 

@@ -140,27 +140,27 @@ const getProgressLabel = (status) => {
   }
 };
 
-// ─── Animated Segment (sliding shimmer on active, Uber Eats style) ───────────
+// ─── Animated Segment (matching OrderTracking sweep animation) ───────────────
 const AnimatedSeg = React.memo(({ active, done }) => {
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  const flow = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (active) {
-      slideAnim.setValue(0);
+      flow.setValue(0);
       const loop = Animated.loop(
-        Animated.timing(slideAnim, {
+        Animated.timing(flow, {
           toValue: 1,
-          duration: 2000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
+          duration: 1300,
+          easing: Easing.linear,
+          useNativeDriver: true,
         }),
       );
       loop.start();
       return () => loop.stop();
-    } else {
-      slideAnim.stopAnimation();
-      slideAnim.setValue(0);
     }
+
+    flow.stopAnimation();
+    flow.setValue(0);
   }, [active]);
 
   if (done) {
@@ -168,22 +168,34 @@ const AnimatedSeg = React.memo(({ active, done }) => {
   }
 
   if (active) {
-    const left = slideAnim.interpolate({
+    const sweepLead = flow.interpolate({
       inputRange: [0, 1],
-      outputRange: ["-60%", "100%"],
+      outputRange: [-26, 82],
     });
+    const sweepTrail = flow.interpolate({
+      inputRange: [0, 1],
+      outputRange: [-56, 52],
+    });
+
     return (
-      <View style={[styles.segment, { backgroundColor: "#d4f7e2", overflow: "hidden" }]}>
+      <View style={[styles.segment, styles.segmentActive]}>
         <Animated.View
-          style={{
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            width: "60%",
-            left,
-            backgroundColor: "#06C168",
-            borderRadius: 4,
-          }}
+          style={[
+            styles.segmentSweep,
+            {
+              opacity: 0.95,
+              transform: [{ translateX: sweepLead }],
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.segmentSweep,
+            {
+              opacity: 0.5,
+              transform: [{ translateX: sweepTrail }],
+            },
+          ]}
         />
       </View>
     );
@@ -203,8 +215,8 @@ function SegmentedProgress({ currentStatus }) {
         {ORDER_STEPS.map((step, i) => (
           <AnimatedSeg
             key={step.key}
-            done={i < stepIndex}
-            active={i === stepIndex}
+            done={i <= stepIndex}
+            active={stepIndex < ORDER_STEPS.length - 1 && i === stepIndex + 1}
           />
         ))}
       </View>
@@ -312,9 +324,23 @@ export default function OrdersScreen({ navigation }) {
   };
 
   const navigateToOrder = (order) => {
+    const resolvedStatus = getOrderStatus(order);
+    const initialPlacedUiStatuses = new Set([
+      "placed",
+      "pending",
+      "received",
+      "preparing",
+      "ready",
+    ]);
+
+    // Match checkout flow: start with placed-style UI for early order stages.
+    const trackingEntryStatus = initialPlacedUiStatuses.has(resolvedStatus)
+      ? "placed"
+      : resolvedStatus;
+
     navigation.navigate("OrderTracking", { 
       orderId: order.id,
-      status: getOrderStatus(order),
+      status: trackingEntryStatus,
       order: order
     });
   };
@@ -991,12 +1017,24 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 4,
     marginHorizontal: 2,
+    overflow: "hidden",
   },
   segmentFilled: {
-    backgroundColor: "#2ecc71",
+    backgroundColor: "#06C168",
+  },
+  segmentActive: {
+    backgroundColor: "#B8F0D0",
   },
   segmentEmpty: {
     backgroundColor: "#e0e0e0",
+  },
+  segmentSweep: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 24,
+    borderRadius: 4,
+    backgroundColor: "#06C168",
   },
 
   // ── Past Order Card ──

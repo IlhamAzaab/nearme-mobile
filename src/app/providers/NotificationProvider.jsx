@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { API_BASE_URL } from '../../constants/api';
+import { getAccessToken } from '../../lib/authStorage';
 import pushNotificationService from '../../services/pushNotificationService';
 
 const UNREAD_COUNT_KEY = '@notifications_unread_count';
@@ -22,6 +23,7 @@ export function NotificationProvider({ children }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushToken, setPushToken] = useState(null);
+  const notificationsRef = useRef([]);
   const appState = useRef(AppState.currentState);
   const navigationRef = useRef(null);
 
@@ -42,8 +44,12 @@ export function NotificationProvider({ children }) {
     return Number.isFinite(ms) ? ms : 0;
   }, []);
 
+  useEffect(() => {
+    notificationsRef.current = notifications;
+  }, [notifications]);
+
   const fetchCustomerNotifications = useCallback(async () => {
-    const token = await AsyncStorage.getItem('token');
+    const token = (await getAccessToken()) || (await AsyncStorage.getItem('token'));
     const role = await AsyncStorage.getItem('role');
     if (!token || role !== 'customer') {
       return [];
@@ -178,6 +184,7 @@ export function NotificationProvider({ children }) {
 
       setUnreadCount(unread);
       persistUnreadCount(unread);
+      pushNotificationService.setBadgeCount(unread).catch(() => {});
     } catch (e) {
       console.log('[NotificationProvider] refreshUnreadCount error:', e?.message);
     }
@@ -257,6 +264,57 @@ export function NotificationProvider({ children }) {
     pushNotificationService.showEnableNotificationsAlert();
   }, []);
 
+  const addIncomingPushNotification = useCallback((incoming) => {
+    if (!incoming || typeof incoming !== 'object') return;
+
+    const normalizedId = String(
+      incoming.id ||
+      incoming.notification_id ||
+      incoming.notificationId ||
+      `push:${incoming.type || 'general'}:${incoming.order_id || incoming.orderId || ''}:${incoming.title || ''}:${incoming.message || ''}`,
+    );
+
+    const exists = notificationsRef.current.some(
+      (n) => String(n?.id) === normalizedId,
+    );
+    if (exists) return;
+
+    const nextNotification = {
+      id: normalizedId,
+      title: incoming.title || 'Notification',
+      message: incoming.message || '',
+      type: incoming.type || incoming.data?.type || 'info',
+      is_read: !!incoming.is_read,
+      created_at:
+        incoming.created_at || incoming.createdAt || incoming.timestamp || new Date().toISOString(),
+      data: incoming.data || null,
+      order_id: incoming.order_id || incoming.orderId || incoming.data?.order_id || incoming.data?.orderId,
+      _transient: incoming._transient !== false,
+    };
+
+    setNotifications((prev) => [nextNotification, ...prev]);
+    notificationsRef.current = [nextNotification, ...notificationsRef.current];
+
+    if (!nextNotification.is_read) {
+      setUnreadCount((prev) => {
+        const next = prev + 1;
+        persistUnreadCount(next);
+        pushNotificationService.setBadgeCount(next).catch(() => {});
+        return next;
+      });
+    }
+  }, [persistUnreadCount]);
+
+  useEffect(() => {
+    pushNotificationService.onNotificationReceived(addIncomingPushNotification);
+    pushNotificationService.onNotificationOpened(addIncomingPushNotification);
+
+    return () => {
+      pushNotificationService.onNotificationReceived(null);
+      pushNotificationService.onNotificationOpened(null);
+    };
+  }, [addIncomingPushNotification]);
+
   // Add in-app notification (local)
   const addNotification = useCallback((notification) => {
     const newNotification = {
@@ -277,18 +335,32 @@ export function NotificationProvider({ children }) {
       }
       const next = prev + 1;
       persistUnreadCount(next);
+      pushNotificationService.setBadgeCount(next).catch(() => {});
       return next;
     });
   }, [getNotificationTimeMs, persistUnreadCount]);
 
   const markAsRead = useCallback((notificationId) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
-    );
-    setUnreadCount((prev) => {
-      const next = Math.max(0, prev - 1);
-      persistUnreadCount(next);
-      return next;
+    setNotifications((prev) => {
+      let decremented = false;
+      const nextList = prev.map((n) => {
+        if (String(n.id) === String(notificationId)) {
+          if (!n.is_read) decremented = true;
+          return { ...n, is_read: true };
+        }
+        return n;
+      });
+
+      if (decremented) {
+        setUnreadCount((prevCount) => {
+          const next = Math.max(0, prevCount - 1);
+          persistUnreadCount(next);
+          pushNotificationService.setBadgeCount(next).catch(() => {});
+          return next;
+        });
+      }
+
+      return nextList;
     });
   }, [persistUnreadCount]);
 
@@ -310,7 +382,7 @@ export function NotificationProvider({ children }) {
   const markAllReadOnServer = useCallback(async (notificationIds) => {
     if (!notificationIds || notificationIds.length === 0) return;
 
-    const token = await AsyncStorage.getItem('token');
+    const token = (await getAccessToken()) || (await AsyncStorage.getItem('token'));
     if (!token) return;
 
     const promise = Promise.all(

@@ -14,6 +14,7 @@ import DriverPendingScreen from "../screens/driver/DriverPendingScreen";
 import DriverAccountProfileScreen from "../screens/driver/DriverAccountProfileScreen";
 import DriverProfileScreen from "../screens/driver/DriverProfileScreen";
 import DriverWithdrawalsScreen from "../screens/driver/DriverWithdrawalsScreen";
+import WebViewScreen from "../screens/common/WebViewScreen";
 import OnboardingStep1Screen from "../screens/driver/onboarding/OnboardingStep1Screen";
 import OnboardingStep2Screen from "../screens/driver/onboarding/OnboardingStep2Screen";
 import OnboardingStep3Screen from "../screens/driver/onboarding/OnboardingStep3Screen";
@@ -168,6 +169,7 @@ export default function DriverNavigator() {
         component={DriverAccountProfileScreen}
       />
       <Stack.Screen name="DriverProfile" component={DriverProfileScreen} />
+      <Stack.Screen name="WebView" component={WebViewScreen} />
       <Stack.Screen
         name="DriverWithdrawals"
         component={DriverWithdrawalsScreen}

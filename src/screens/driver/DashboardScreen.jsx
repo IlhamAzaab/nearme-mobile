@@ -335,7 +335,7 @@ export default function DashboardScreen({ navigation }) {
 
   const fetchStatusInfo = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       if (!token) return;
 
       const res = await rateLimitedFetch(
@@ -408,9 +408,9 @@ export default function DashboardScreen({ navigation }) {
 
   const fetchDriverProfile = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       if (!token) {
-        navigation.replace("Login");
+        await logout();
         return;
       }
 
@@ -419,8 +419,7 @@ export default function DashboardScreen({ navigation }) {
       });
 
       if (res.status === 401 || res.status === 403 || res.status === 404) {
-        await AsyncStorage.clear();
-        navigation.replace("Login");
+        await logout();
         return;
       }
 
@@ -434,11 +433,10 @@ export default function DashboardScreen({ navigation }) {
       console.error("Profile fetch error:", error);
       // Only logout on auth errors, not on network/read errors
       if (error?.message?.includes("401") || error?.message?.includes("403")) {
-        await AsyncStorage.clear();
-        navigation.replace("Login");
+        await logout();
       }
     }
-  }, [navigation]);
+  }, [logout]);
 
   // ============================================================================
   // CHECK WORKING HOURS STATUS
@@ -446,7 +444,7 @@ export default function DashboardScreen({ navigation }) {
 
   const checkWorkingHoursStatus = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const res = await rateLimitedFetch(
         `${API_URL}/driver/working-hours-status`,
         {
@@ -656,9 +654,9 @@ export default function DashboardScreen({ navigation }) {
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       if (!token) {
-        navigation.replace("Login");
+        await logout();
         return;
       }
 
@@ -944,7 +942,7 @@ export default function DashboardScreen({ navigation }) {
     setTogglingStatus(true);
 
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
 
       const res = await fetch(`${API_URL}/driver/status`, {
         method: "PATCH",
@@ -995,7 +993,7 @@ export default function DashboardScreen({ navigation }) {
 
     setAcceptingOrder(deliveryId);
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const delivery = availableDeliveries.find(
         (d) => d.delivery_id === deliveryId,
       );

@@ -33,8 +33,10 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Ellipse, Path, Rect } from "react-native-svg";
 import OSMMapView from "../../components/maps/OSMMapView";
 import LiveDriverMap from "../../components/maps/LiveDriverMap";
@@ -43,6 +45,10 @@ import OrderPlacedBackground from "../../components/customer/OrderPlacedBackgrou
 import { API_BASE_URL } from "../../constants/api";
 
 const { width: SW, height: SH } = Dimensions.get("window");
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
 
 // =============================================================================
 // CONSTANTS
@@ -77,6 +83,66 @@ const COOKING_STATUSES = new Set(["placed", "pending", "received", "preparing", 
 /** Statuses that show the live map (pending → on_the_way) */
 const MAP_STATUSES = new Set(["pending", "received", "preparing", "ready", "accepted", "driver_accepted", "driver_assigned", "picked_up", "on_the_way"]);
 const PREPARING_MAP_STATUSES = new Set(["pending", "received", "preparing"]);
+const ETA_VISIBLE_STATUSES = new Set(["accepted", "driver_accepted", "driver_assigned", "picked_up", "on_the_way"]);
+const RESTAURANT_MARKER_HTML = `
+  <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;">
+    <svg width="44" height="44" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="restaurant pin">
+      <defs>
+        <linearGradient id="pinGrad" x1="128" y1="20" x2="128" y2="220" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#FF5A4F"/>
+          <stop offset="1" stop-color="#D81E1E"/>
+        </linearGradient>
+
+        <linearGradient id="plateGrad" x1="128" y1="88" x2="128" y2="150" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#F8FAFC"/>
+          <stop offset="1" stop-color="#CBD5E1"/>
+        </linearGradient>
+
+        <linearGradient id="domeGrad" x1="128" y1="92" x2="128" y2="142" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#FFFFFF"/>
+          <stop offset="1" stop-color="#94A3B8"/>
+        </linearGradient>
+
+        <filter id="shadow" x="0" y="0" width="256" height="256" filterUnits="userSpaceOnUse">
+          <feDropShadow dx="0" dy="6" stdDeviation="6" flood-opacity="0.18"/>
+        </filter>
+      </defs>
+
+      <g filter="url(#shadow)">
+        <path d="M128 20C84.92 20 50 54.92 50 98C50 151.5 111.93 213.04 122.02 222.67C125.36 225.86 130.64 225.86 133.98 222.67C144.07 213.04 206 151.5 206 98C206 54.92 171.08 20 128 20Z" fill="url(#pinGrad)"/>
+        <circle cx="128" cy="98" r="58" fill="white"/>
+        <circle cx="128" cy="98" r="52" fill="#FFF7ED"/>
+
+        <g transform="translate(72 63)">
+          <rect x="0" y="18" width="8" height="50" rx="4" fill="#1E293B"/>
+          <rect x="-2" y="0" width="3" height="22" rx="1.5" fill="#1E293B"/>
+          <rect x="2.5" y="0" width="3" height="22" rx="1.5" fill="#1E293B"/>
+          <rect x="7" y="0" width="3" height="22" rx="1.5" fill="#1E293B"/>
+          <rect x="11.5" y="0" width="3" height="22" rx="1.5" fill="#1E293B"/>
+        </g>
+
+        <g transform="translate(170 62)">
+          <path d="M10 0C22 10 24 28 24 48V68H16V0H10Z" fill="#1E293B"/>
+          <path d="M0 0H16V68H0C4 52 6 34 6 16C6 10 4 5 0 0Z" fill="#CBD5E1"/>
+        </g>
+
+        <ellipse cx="128" cy="134" rx="38" ry="8" fill="url(#plateGrad)" stroke="#334155" stroke-width="3"/>
+        <path d="M90 126C90 105 107 88 128 88C149 88 166 105 166 126H90Z" fill="url(#domeGrad)" stroke="#334155" stroke-width="3"/>
+        <rect x="123" y="80" width="10" height="8" rx="3" fill="#334155"/>
+        <circle cx="128" cy="79" r="6" fill="#64748B" stroke="#334155" stroke-width="2"/>
+        <path d="M110 98C114 93 119 91 124 91C116 95 112 101 111 108" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.8"/>
+      </g>
+    </svg>
+  </div>
+`;
+const CUSTOMER_MARKER_HTML =
+  "<div style='width:36px;height:36px;border-radius:18px;background:linear-gradient(145deg,#EF4444,#DC2626);display:flex;align-items:center;justify-content:center;border:2px solid #FFFFFF;box-shadow:0 8px 18px rgba(220,38,38,0.35),0 3px 8px rgba(0,0,0,0.2);'>" +
+  "<svg width='18' height='18' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>" +
+  "<path d='M3 10.5L12 3L21 10.5' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/>" +
+  "<path d='M5 9.8V21H19V9.8' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/>" +
+  "<path d='M9.5 21V15H14.5V21' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/>" +
+  "</svg>" +
+  "</div>";
 
 function createTopArcRoute(start, end, steps = 32) {
   const midLat = (start.latitude + end.latitude) / 2;
@@ -175,17 +241,17 @@ const STATUS_MESSAGES = {
   accepted: "Your driver is on the way to pick up your order.",
   driver_accepted: "Your driver is on the way to pick up your order.",
   driver_assigned: "A driver has been assigned and is heading to the restaurant.",
-  picked_up: "Your order is now with the driver and on the way.",
+  picked_up: "The driver will head towards you soon",
   on_the_way: "Your driver is on the way to your location.",
   delivered: "Your order has been delivered. Bon app\u00e9tit!",
 };
 
 const STATUS_SVG_PATHS = {
-  placed: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  placed: "M5 13l4 4L19 7",
   pending: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
   received: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
   preparing: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
-  ready: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  ready: "M5 13l4 4L19 7",
   accepted: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
   driver_accepted: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
   driver_assigned: "M12 22s-8-4.5-8-11.8A8 8 0 0112 2a8 8 0 018 8.2c0 7.3-8 11.8-8 11.8zM12 13a3 3 0 100-6 3 3 0 000 6z",
@@ -196,16 +262,96 @@ const STATUS_SVG_PATHS = {
 
 const POLL_INTERVAL = 2000;
 
-/** Format ETA as clock time (e.g. "12:30 PM") */
-function getFormattedETA(minMinutes, maxMinutes) {
-  const now = new Date();
-  const avgMin = Math.round((minMinutes + maxMinutes) / 2);
-  const arrival = new Date(now.getTime() + avgMin * 60000);
-  let h = arrival.getHours();
-  const m = arrival.getMinutes();
+function normalizeStatus(status) {
+  const raw = String(status || "")
+    .trim()
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  const aliasMap = {
+    driveraccepted: "driver_accepted",
+    driver_accept: "driver_accepted",
+    accepted_by_driver: "driver_accepted",
+    driverassigned: "driver_assigned",
+    assigned_to_driver: "driver_assigned",
+    pickedup: "picked_up",
+    pickup: "picked_up",
+    ontheway: "on_the_way",
+    on_the_way_to_customer: "on_the_way",
+    order_placed: "placed",
+  };
+
+  return aliasMap[raw] || raw;
+}
+
+function formatDotClockTime(date) {
+  let h = date.getHours();
   const ampm = h >= 12 ? "PM" : "AM";
   h = h % 12 || 12;
-  return `${h}:${m.toString().padStart(2, "0")} ${ampm}`;
+  const m = date.getMinutes().toString().padStart(2, "0");
+  return `${h}.${m} ${ampm}`;
+}
+
+/** Format ETA range as clock window (e.g. "2.20-2.25") */
+function getFormattedETA(minMinutes, maxMinutes) {
+  const now = new Date();
+
+  const start = new Date(now.getTime() + Math.max(0, Number(minMinutes) || 0) * 60000);
+  const end = new Date(now.getTime() + Math.max(0, Number(maxMinutes) || 0) * 60000);
+
+  const startText = formatDotClockTime(start);
+  const endText = formatDotClockTime(end);
+  return startText === endText ? startText : `${startText}-${endText}`;
+}
+
+/** Format ETA as final expected clock time (max-minute based) */
+function getFinalExpectedETA(maxMinutes) {
+  const now = new Date();
+  const finalArrival = new Date(
+    now.getTime() + Math.max(0, Number(maxMinutes) || 0) * 60000,
+  );
+  return formatDotClockTime(finalArrival);
+}
+
+function getNextStepMessage(currentStatus) {
+  if (currentStatus === "placed") {
+    return "Please wait until the restaurant accepts your order.";
+  }
+
+  if (
+    currentStatus === "pending" ||
+    currentStatus === "received" ||
+    currentStatus === "preparing" ||
+    currentStatus === "ready"
+  ) {
+    return "Please wait until a driver accepts your delivery.";
+  }
+
+  if (
+    currentStatus === "accepted" ||
+    currentStatus === "driver_accepted" ||
+    currentStatus === "driver_assigned"
+  ) {
+    return "Driver will pick up your order soon.";
+  }
+
+  if (currentStatus === "picked_up") {
+    return "The driver will head towards you soon";
+  }
+
+  if (currentStatus === "delivered") {
+    return "This order is complete.";
+  }
+
+  const currentIndex = STEP_INDEX[currentStatus] ?? 0;
+  const nextStep = PROGRESS_STEPS[currentIndex + 1];
+  if (!nextStep) {
+    return "We are finalizing your order updates.";
+  }
+
+  const nextInfo = STATUS_TEXT[nextStep.key] || STATUS_TEXT.placed;
+  return `${nextInfo.title}. We will update this screen automatically.`;
 }
 
 // =============================================================================
@@ -214,23 +360,24 @@ function getFormattedETA(minMinutes, maxMinutes) {
 
 /* ─── Animated Segment (progress bar fill) ─── */
 const AnimatedSegment = React.memo(({ active, done }) => {
-  const shimmer = useRef(new Animated.Value(0)).current;
+  const flow = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (active) {
-      shimmer.setValue(0);
+      flow.setValue(0);
       const loop = Animated.loop(
-        Animated.timing(shimmer, {
+        Animated.timing(flow, {
           toValue: 1,
-          duration: 1400,
+          duration: 1300,
           easing: Easing.linear,
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
       );
       loop.start();
       return () => loop.stop();
     } else {
-      shimmer.setValue(0);
+      flow.stopAnimation();
+      flow.setValue(0);
     }
   }, [active]);
 
@@ -239,20 +386,31 @@ const AnimatedSegment = React.memo(({ active, done }) => {
   }
 
   if (active) {
-    const left = shimmer.interpolate({
+    const sweepLead = flow.interpolate({
       inputRange: [0, 1],
-      outputRange: ["-40%", "100%"],
+      outputRange: [-26, 82],
+    });
+    const sweepTrail = flow.interpolate({
+      inputRange: [0, 1],
+      outputRange: [-56, 52],
     });
     return (
       <View style={[st.progressSeg, { backgroundColor: "#B8F0D0" }]}>
         <Animated.View
           style={[
-            st.progressFill,
+            st.progressSweep,
             {
-              width: "40%",
-              left,
-              backgroundColor: "#06C168",
-              borderRadius: 3,
+              opacity: 0.95,
+              transform: [{ translateX: sweepLead }],
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            st.progressSweep,
+            {
+              opacity: 0.5,
+              transform: [{ translateX: sweepTrail }],
             },
           ]}
         />
@@ -268,7 +426,11 @@ const ProgressBar = React.memo(({ stepIndex }) => (
   <View style={st.progressContainer}>
     <View style={st.progressTrack}>
       {PROGRESS_STEPS.map((step, i) => (
-        <AnimatedSegment key={step.key} done={i < stepIndex} active={i === stepIndex} />
+        <AnimatedSegment
+          key={step.key}
+          done={i <= stepIndex}
+          active={stepIndex < PROGRESS_STEPS.length - 1 && i === stepIndex + 1}
+        />
       ))}
     </View>
     <View style={st.progressLabelRow}>
@@ -319,57 +481,15 @@ const FloatingFoodIcons = React.memo(() => {
   );
 });
 
-/* ─── Status Icon Bubble (white circle + SVG + 3 pulse rings, web-matching) ─── */
+/* ─── Status Icon Bubble (plain SVG icon, no circular shell) ─── */
 const StatusIconBubble = React.memo(({ status }) => {
-  const ring1 = useRef(new Animated.Value(0)).current;
-  const ring2 = useRef(new Animated.Value(0)).current;
-  const ring3 = useRef(new Animated.Value(0)).current;
-  const isDelivered = status === "delivered";
-
-  useEffect(() => {
-    if (isDelivered) return;
-    const makeRing = (anim, delay) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(anim, { toValue: 1, duration: 2000, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-          Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
-        ]),
-      );
-    makeRing(ring1, 0).start();
-    makeRing(ring2, 660).start();
-    makeRing(ring3, 1320).start();
-  }, [isDelivered]);
-
-  const ringStyle = (anim) => ({
-    position: "absolute",
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 2,
-    borderColor: "#06C168",
-    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] }) }],
-    opacity: anim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0.8, 0.2, 0] }),
-  });
-
   const svgPath = STATUS_SVG_PATHS[status] || STATUS_SVG_PATHS.placed;
 
   return (
     <View style={st.statusBubbleWrap}>
-      {isDelivered ? (
-        <View style={st.successRing} />
-      ) : (
-        <>
-          <Animated.View style={ringStyle(ring1)} />
-          <Animated.View style={ringStyle(ring2)} />
-          <Animated.View style={ringStyle(ring3)} />
-        </>
-      )}
-      <View style={[st.statusIconCircle, isDelivered && st.statusIconCircleSuccess]}>
-        <Svg width={40} height={40} viewBox="0 0 24 24" fill="none" stroke={isDelivered ? "#fff" : "#06C168"} strokeWidth="2">
-          <Path d={svgPath} strokeLinecap="round" strokeLinejoin="round" />
-        </Svg>
-      </View>
+      <Svg width={50} height={50} viewBox="0 0 24 24" fill="none" stroke="#06C168" strokeWidth="2.4">
+        <Path d={svgPath} strokeLinecap="round" strokeLinejoin="round" />
+      </Svg>
     </View>
   );
 });
@@ -479,7 +599,6 @@ const OrderSummaryCard = React.memo(({ data, expanded, onToggle }) => {
           {/* Ordered Items */}
           {items.length > 0 && (
             <View style={st.detailBlock}>
-              <Text style={st.detailBlockLabel}>ORDERED ITEMS</Text>
               <View style={st.detailItemsBox}>
                 {items.map((item, idx) => {
                   const itemName = item.food_name || item.name || item.menu_item_name || "Item";
@@ -598,7 +717,7 @@ const ScooterAnimation = React.memo(({ status }) => {
       {/* Restaurant marker */}
       <View style={[st.heroMarker, { left: 24 }]}>
         <View style={st.heroMarkerCircle}>
-          <Text style={{ fontSize: 20 }}>🍳</Text>
+          <Text style={{ fontSize: 18 }}>🥄🥄</Text>
         </View>
         <View style={st.heroMarkerDot} />
       </View>
@@ -849,6 +968,10 @@ const RatingSection = React.memo(({ rating, onRate, onSubmit, submitted }) => {
 export default function OrderTrackingScreen({ route, navigation }) {
   const params = route.params || {};
   const orderId = params.orderId;
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const initialRouteStatus = normalizeStatus(params.status || "");
+  const keepInitialPlacedUI = initialRouteStatus === "placed";
 
   // Guard: if no orderId, this screen was opened without valid data — go back
   useEffect(() => {
@@ -871,7 +994,9 @@ export default function OrderTrackingScreen({ route, navigation }) {
 
   /* ── tracking state ── */
   const [currentStatus, setCurrentStatus] = useState(
-    (params.status || params.order?.status || params.order?.delivery_status || "placed").toLowerCase()
+    normalizeStatus(
+      params.status || params.order?.status || params.order?.delivery_status || "placed",
+    )
   );
   const [driverInfo, setDriverInfo] = useState(null);
   const [estimatedTime, setEstimatedTime] = useState("Calculating...");
@@ -902,6 +1027,41 @@ export default function OrderTrackingScreen({ route, navigation }) {
   const isOTW = currentStatus === "on_the_way";
   const isDone = currentStatus === "delivered";
   const isPreparingMapStage = PREPARING_MAP_STATUSES.has(currentStatus);
+  const shouldShowEta = ETA_VISIBLE_STATUSES.has(currentStatus);
+  const nextStepMessage = useMemo(() => getNextStepMessage(currentStatus), [currentStatus]);
+  const shouldShowDriverCard =
+    !!driverInfo &&
+    (currentStatus === "accepted" ||
+      currentStatus === "driver_accepted" ||
+      currentStatus === "driver_assigned" ||
+      currentStatus === "picked_up" ||
+      isOTW);
+  const shouldHideDeliveryAddress =
+    currentStatus === "accepted" ||
+    currentStatus === "driver_accepted" ||
+    currentStatus === "driver_assigned" ||
+    currentStatus === "picked_up" ||
+    currentStatus === "on_the_way";
+  const mapSectionHeight = useMemo(
+    () => clamp(Math.round(windowHeight * 0.48), 280, 460),
+    [windowHeight],
+  );
+  const sheetTopOffset = useMemo(
+    () => clamp(Math.round(windowHeight * 0.40), 220, mapSectionHeight - 22),
+    [windowHeight, mapSectionHeight],
+  );
+  const mapBottomPadding = Math.max(34, mapSectionHeight - sheetTopOffset + 20);
+  const mapCenterShiftFactor = 0.2;
+  const sheetBottomPadding = Math.max(18, insets.bottom + 12);
+  const shouldLowerSheetContent =
+    currentStatus === "picked_up" || currentStatus === "on_the_way";
+  const sheetContentTopPadding = shouldLowerSheetContent ? 18 : 2;
+
+  const statusEtaDisplay = useMemo(() => {
+    if (isDone) return "Delivered";
+    if (estimatedTime && estimatedTime !== "Calculating...") return estimatedTime;
+    return info.eta || estimatedTime;
+  }, [isDone, estimatedTime, info.eta]);
 
   // ===========================================================================
   // FETCH ORDER (if navigated from Orders list, not checkout)
@@ -930,8 +1090,8 @@ export default function OrderTrackingScreen({ route, navigation }) {
       // Use params data for immediate display (optimistic UI)
       if (orderData.order) {
         const o = orderData.order;
-        const resolvedStatus = (o.effective_status || o.status || "").toLowerCase();
-        if (resolvedStatus) setCurrentStatus(resolvedStatus);
+        const resolvedStatus = normalizeStatus(o.effective_status || o.status || "");
+        if (resolvedStatus && !keepInitialPlacedUI) setCurrentStatus(resolvedStatus);
         if (o.restaurant_latitude && o.restaurant_longitude) {
           setRestaurantLocation({
             lat: parseFloat(o.restaurant_latitude),
@@ -968,8 +1128,8 @@ export default function OrderTrackingScreen({ route, navigation }) {
           if (!orderData.restaurantLogoUrl && !o.restaurant_logo_url) {
             fetchRestaurantLogo(o.restaurant_id || o.restaurant?.id);
           }
-          const resolvedFetchStatus = (o.effective_status || o.status || "").toLowerCase();
-          if (resolvedFetchStatus) setCurrentStatus(resolvedFetchStatus);
+          const resolvedFetchStatus = normalizeStatus(o.effective_status || o.status || "");
+          if (resolvedFetchStatus && !keepInitialPlacedUI) setCurrentStatus(resolvedFetchStatus);
 
           if (o.restaurant_latitude && o.restaurant_longitude) {
             setRestaurantLocation({
@@ -998,7 +1158,7 @@ export default function OrderTrackingScreen({ route, navigation }) {
     };
     if (orderId) fetchOrder();
     else setLoading(false);
-  }, [orderId]);
+  }, [orderId, keepInitialPlacedUI]);
 
   // ===========================================================================
   // ENTRANCE ANIMATION
@@ -1036,7 +1196,9 @@ export default function OrderTrackingScreen({ route, navigation }) {
         );
         if (!res.ok) return;
         const data = await res.json();
-        const newStatus = (data.effective_status || data.delivery_status || data.status || "").toLowerCase();
+        const newStatus = normalizeStatus(
+          data.effective_status || data.delivery_status || data.status || "",
+        );
 
         if (data.driver) setDriverInfo(data.driver);
 
@@ -1075,22 +1237,37 @@ export default function OrderTrackingScreen({ route, navigation }) {
 
         // ETA
         if (data.eta?.etaRangeMin != null && data.eta?.etaRangeMax != null) {
-          const otw =
-            data.eta.driverStatus === "on_the_way" ||
-            data.eta.driverStatus === "at_customer";
-          if (otw) {
+          const etaStatus = normalizeStatus(
+            newStatus || data.eta?.driverStatus || currentStatus || "",
+          );
+          const shouldShowFinalOnly =
+            etaStatus === "accepted" ||
+            etaStatus === "driver_accepted" ||
+            etaStatus === "driver_assigned";
+
+          if (shouldShowFinalOnly) {
+            setEstimatedTime(getFinalExpectedETA(data.eta.etaRangeMax));
+          } else {
             setEstimatedTime(
               getFormattedETA(data.eta.etaRangeMin, data.eta.etaRangeMax),
             );
-          } else {
-            setEstimatedTime(
-              `${Math.round(data.eta.etaRangeMin)}-${Math.round(data.eta.etaRangeMax)} mins`,
-            );
           }
         } else if (data.estimatedDuration) {
+          const shouldShowFinalOnly =
+            newStatus === "accepted" ||
+            newStatus === "driver_accepted" ||
+            newStatus === "driver_assigned" ||
+            currentStatus === "accepted" ||
+            currentStatus === "driver_accepted" ||
+            currentStatus === "driver_assigned";
+
+          if (shouldShowFinalOnly) {
+            setEstimatedTime(getFinalExpectedETA(data.estimatedDuration));
+          } else {
           setEstimatedTime(
             getFormattedETA(data.estimatedDuration, data.estimatedDuration),
           );
+          }
         }
 
         // Status transition
@@ -1172,7 +1349,7 @@ export default function OrderTrackingScreen({ route, navigation }) {
               edgePadding: {
                 top: 60,
                 right: 50,
-                bottom: Math.round(SH * 0.55),
+                bottom: mapBottomPadding,
                 left: 50,
               },
             },
@@ -1181,7 +1358,7 @@ export default function OrderTrackingScreen({ route, navigation }) {
       }, 1200);
       return () => clearTimeout(timer);
     }
-  }, [currentStatus, isOTW, restaurantLocation, deliveryLocation]);
+  }, [currentStatus, isOTW, restaurantLocation, deliveryLocation, mapBottomPadding]);
 
   // ===========================================================================
   // HANDLERS
@@ -1248,6 +1425,103 @@ export default function OrderTrackingScreen({ route, navigation }) {
     );
   }
 
+  if (isDone) {
+    const itemCount = (orderData.items || []).reduce(
+      (sum, item) => sum + (Number(item?.quantity) || 1),
+      0,
+    );
+    const restaurantName = orderData.restaurantName || "Restaurant";
+    const orderNumber =
+      orderData.orderNumber || orderData.order?.order_number || "Not available";
+    const deliveryAddress =
+      orderData.address || orderData.order?.delivery_address || "Not available";
+    const orderTotal = parseFloat(orderData.totalAmount || 0).toFixed(2);
+    const reportTopPadding = Math.max(insets.top + 26, 46);
+
+    return (
+      <View style={st.reportRoot}>
+        <StatusBar barStyle="dark-content" backgroundColor="#EEF8F1" />
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            st.reportScrollContent,
+            {
+              paddingTop: reportTopPadding,
+              paddingBottom: Math.max(insets.bottom + 20, 30),
+            },
+          ]}
+          bounces={false}
+        >
+          <View style={st.reportHeroCard}>
+            <View style={st.reportHeroIconWrap}>
+              <Ionicons name="checkmark-circle" size={56} color="#06C168" />
+            </View>
+            <Text style={st.reportHeroTitle}>Thank you for your order!</Text>
+            <Text style={st.reportHeroSubtitle}>
+              Your delivery is complete and everything is now marked as received.
+            </Text>
+            <Text style={st.reportHeroGoodNote}>
+              We hope your meal brought a smile to your day. We look forward to serving you again soon.
+            </Text>
+          </View>
+
+          <View style={st.reportCardBox}>
+            <View style={st.reportPill}>
+              <Text style={st.reportPillTxt}>Delivery Report</Text>
+            </View>
+
+            <View style={st.reportRow}>
+              <Text style={st.reportLabel}>Status</Text>
+              <Text style={st.reportValueSuccess}>Delivered</Text>
+            </View>
+            <View style={st.reportDivider} />
+
+            <View style={st.reportRow}>
+              <Text style={st.reportLabel}>Restaurant</Text>
+              <Text style={st.reportValue} numberOfLines={1}>{restaurantName}</Text>
+            </View>
+            <View style={st.reportDivider} />
+
+            <View style={st.reportRow}>
+              <Text style={st.reportLabel}>Order ID</Text>
+              <Text style={st.reportValue} numberOfLines={1}>{orderNumber}</Text>
+            </View>
+            <View style={st.reportDivider} />
+
+            <View style={st.reportRow}>
+              <Text style={st.reportLabel}>Items</Text>
+              <Text style={st.reportValue}>{itemCount}</Text>
+            </View>
+            <View style={st.reportDivider} />
+
+            <View style={st.reportRow}>
+              <Text style={st.reportLabel}>Total Paid</Text>
+              <Text style={st.reportTotal}>LKR {orderTotal}</Text>
+            </View>
+            <View style={st.reportDivider} />
+
+            <View style={[st.reportRow, st.reportRowTop]}>
+              <Text style={st.reportLabel}>Delivered To</Text>
+              <Text style={st.reportValueAddress} numberOfLines={3}>{deliveryAddress}</Text>
+            </View>
+          </View>
+
+          <View style={st.actionRow}>
+            <Pressable style={st.orderAgainBtn} onPress={goHome}>
+              <Ionicons name="refresh" size={20} color="#fff" />
+              <Text style={st.orderAgainTxt}>Order Again</Text>
+            </Pressable>
+            <Pressable style={st.goHomeBtn} onPress={goHome}>
+              <Ionicons name="home-outline" size={20} color="#06C168" />
+              <Text style={st.goHomeTxt}>Back to Home</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
+
   // ===========================================================================
   // RENDER
   // ===========================================================================
@@ -1259,97 +1533,86 @@ export default function OrderTrackingScreen({ route, navigation }) {
       <StatusBar barStyle="dark-content" backgroundColor="#E6F9EE" />
 
       {/* ══════ HERO: MAP or GREEN BACKGROUND ══════ */}
-      {isOTW ? (
-        /* ── On-the-way: dedicated tight-zoom driver-only map ── */
-        <View style={st.mapWrap}>
-          <LiveDriverMap
-            orderId={orderId}
-            driverLocation={driverLocation}
-            deliveryLocation={deliveryLocation}
-            style={StyleSheet.absoluteFillObject}
-          />
-        </View>
-      ) : MAP_STATUSES.has(currentStatus) && restaurantLocation && deliveryLocation ? (
-        <View style={st.mapWrap}>
-          <OSMMapView
-            ref={mapRef}
-            style={StyleSheet.absoluteFillObject}
-            initialRegion={(() => {
-              const latD = Math.abs(restaurantLocation.lat - deliveryLocation.lat) * 2.2 + 0.012;
-              const lngD = Math.abs(restaurantLocation.lng - deliveryLocation.lng) * 2.2 + 0.012;
-              // Shift center south so markers appear above the bottom sheet
-              return {
-                latitude: (restaurantLocation.lat + deliveryLocation.lat) / 2 - latD * 0.28,
-                longitude: (restaurantLocation.lng + deliveryLocation.lng) / 2,
-                latitudeDelta: latD,
-                longitudeDelta: lngD,
-              };
-            })()}
-            scrollEnabled={true}
-            zoomEnabled={true}
-            markers={[
-              {
-                id: "restaurant",
-                coordinate: { latitude: restaurantLocation.lat, longitude: restaurantLocation.lng },
-                type: "restaurant",
-                title: orderData.restaurantName || "Restaurant",
-                emoji: isPreparingMapStage ? "🍴" : "🍽️",
-              },
-              {
-                id: "customer",
-                coordinate: { latitude: deliveryLocation.lat, longitude: deliveryLocation.lng },
-                type: isPreparingMapStage ? "restaurant" : "customer",
-                title: "Delivery",
-                emoji: isPreparingMapStage ? "🏡" : "🏠",
-              },
-            ]}
-            polylines={
-              routeCoords.length > 1
-                ? isPreparingMapStage
+      <View style={[st.mapStage, { height: mapSectionHeight }]}>
+        {isOTW ? (
+          /* ── On-the-way: dedicated tight-zoom driver-only map ── */
+          <View style={st.mapWrap}>
+            <LiveDriverMap
+              orderId={orderId}
+              driverLocation={driverLocation}
+              deliveryLocation={deliveryLocation}
+              style={StyleSheet.absoluteFillObject}
+            />
+          </View>
+        ) : MAP_STATUSES.has(currentStatus) && restaurantLocation && deliveryLocation ? (
+          <View style={st.mapWrap}>
+            <OSMMapView
+              ref={mapRef}
+              style={StyleSheet.absoluteFillObject}
+              initialRegion={(() => {
+                const latD = Math.abs(restaurantLocation.lat - deliveryLocation.lat) * 2.2 + 0.012;
+                const lngD = Math.abs(restaurantLocation.lng - deliveryLocation.lng) * 2.2 + 0.012;
+                // Keep map center slightly upward so both markers remain visible above the sheet overlap.
+                return {
+                  latitude: (restaurantLocation.lat + deliveryLocation.lat) / 2 - latD * mapCenterShiftFactor,
+                  longitude: (restaurantLocation.lng + deliveryLocation.lng) / 2,
+                  latitudeDelta: latD,
+                  longitudeDelta: lngD,
+                };
+              })()}
+              scrollEnabled={true}
+              zoomEnabled={true}
+              markers={[
+                {
+                  id: "restaurant",
+                  coordinate: { latitude: restaurantLocation.lat, longitude: restaurantLocation.lng },
+                  type: "restaurant",
+                  title: orderData.restaurantName || "Restaurant",
+                  emoji: "",
+                  customHtml: RESTAURANT_MARKER_HTML,
+                  iconOnly: true,
+                },
+                {
+                  id: "customer",
+                  coordinate: { latitude: deliveryLocation.lat, longitude: deliveryLocation.lng },
+                  type: "customer",
+                  title: "Delivery",
+                  emoji: "",
+                  customHtml: CUSTOMER_MARKER_HTML,
+                  iconOnly: true,
+                },
+              ]}
+              polylines={
+                routeCoords.length > 1
                   ? [
                       {
-                        id: "route-glow",
-                        coordinates: routeCoords,
-                        strokeColor: "#4B5563",
-                        strokeWidth: 4,
-                        dashArray: "10, 12",
-                      },
-                      {
                         id: "route",
                         coordinates: routeCoords,
                         strokeColor: "#111827",
-                        strokeWidth: 2,
-                        dashArray: "10, 12",
+                        strokeWidth: isPreparingMapStage ? 2 : 3,
+                        dashArray: isPreparingMapStage ? "10, 12" : "10, 10",
                       },
                     ]
-                  : [
-                      {
-                        id: "route",
-                        coordinates: routeCoords,
-                        strokeColor: "#111827",
-                        strokeWidth: 3,
-                        dashArray: "10, 10",
-                      },
-                    ]
-                : []
-            }
-          />
-        </View>
-      ) : currentStatus === "placed" || isDone ? (
-        <View style={st.heroWrap}>
-          <OrderPlacedBackground />
-        </View>
-      ) : (
-        <View style={st.heroWrap}>
-          {/* bg gradient layers */}
-          <View style={st.heroBgLayer1} />
-          <View style={st.heroBgLayer2} />
-          {/* Floating food icons */}
-          <FloatingFoodIcons />
-          {/* Status icon with pulse rings */}
-          <StatusIconBubble status={currentStatus} />
-        </View>
-      )}
+                  : []
+              }
+            />
+          </View>
+        ) : currentStatus === "placed" || isDone ? (
+          <View style={st.heroWrap}>
+            <OrderPlacedBackground />
+          </View>
+        ) : (
+          <View style={st.heroWrap}>
+            {/* bg gradient layers */}
+            <View style={st.heroBgLayer1} />
+            <View style={st.heroBgLayer2} />
+            {/* Floating food icons */}
+            <FloatingFoodIcons />
+            {/* Status icon with pulse rings */}
+            <StatusIconBubble status={currentStatus} />
+          </View>
+        )}
+      </View>
 
       {/* Back Button */}
       {!isDone && (
@@ -1367,28 +1630,33 @@ export default function OrderTrackingScreen({ route, navigation }) {
       )}
 
       {/* ══════ BOTTOM SHEET (web-matching structure) ══════ */}
-      <Animated.View style={[st.sheet, { transform: [{ translateY: sheetY }], opacity: contentFade }]}>
+      <Animated.View style={[st.sheet, { top: sheetTopOffset, transform: [{ translateY: sheetY }], opacity: contentFade }]}>
         {/* Drag handle */}
         <View style={st.handle} />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.sheetInner} bounces={false}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            st.sheetInner,
+            {
+              paddingTop: sheetContentTopPadding,
+              paddingBottom: sheetBottomPadding,
+            },
+          ]}
+          bounces={false}
+        >
           {/* 1) Status title + ETA */}
           <Animated.View style={{ opacity: statusFade }}>
             <Text style={[st.title, isDone && st.titleSuccess]}>{info.title}</Text>
-            <Text style={st.statusEtaTxt}>
-              {isDone
-                ? "Delivered"
-                : estimatedTime === "Calculating..."
-                ? (info.eta || estimatedTime)
-                : estimatedTime}
-            </Text>
+            {shouldShowEta ? <Text style={st.statusEtaTxt}>{statusEtaDisplay}</Text> : null}
+            <Text style={st.statusNextTxt}>{nextStepMessage}</Text>
           </Animated.View>
 
           {/* 2) Segmented progress bar */}
           <ProgressBar stepIndex={stepIndex} />
 
           {/* 3) Driver card (accepted / picked_up / on_the_way) */}
-          {(currentStatus === "accepted" || currentStatus === "picked_up" || isOTW) && driverInfo && (
+          {shouldShowDriverCard && (
             <DriverCard driver={driverInfo} />
           )}
 
@@ -1409,22 +1677,26 @@ export default function OrderTrackingScreen({ route, navigation }) {
           ) : (
             <>
               {/* 4) Delivery Address Card */}
-              <View style={st.deliveryAddressCard}>
-                <View style={st.deliveryAddressRow}>
-                  <Ionicons name="location" size={18} color="#06C168" />
-                  <View style={st.deliveryAddressContent}>
-                    <Text style={st.deliveryAddressLabel}>DELIVERY ADDRESS</Text>
-                    <Text style={st.deliveryAddressText} numberOfLines={2}>{orderData.address || "Your delivery address"}</Text>
+              {!shouldHideDeliveryAddress && (
+                <View style={st.deliveryAddressCard}>
+                  <View style={st.deliveryAddressRow}>
+                    <Ionicons name="location" size={18} color="#06C168" />
+                    <View style={st.deliveryAddressContent}>
+                      <Text style={st.deliveryAddressLabel}>DELIVERY ADDRESS</Text>
+                      <Text style={st.deliveryAddressText} numberOfLines={2}>{orderData.address || "Your delivery address"}</Text>
+                    </View>
                   </View>
                 </View>
-              </View>
+              )}
 
               {/* 5) Order Summary Card */}
-              <OrderSummaryCard
-                data={orderData}
-                expanded={viewOrderExpanded}
-                onToggle={() => setViewOrderExpanded(!viewOrderExpanded)}
-              />
+              <View style={shouldHideDeliveryAddress ? st.summaryCardOffset : null}>
+                <OrderSummaryCard
+                  data={orderData}
+                  expanded={viewOrderExpanded}
+                  onToggle={() => setViewOrderExpanded(!viewOrderExpanded)}
+                />
+              </View>
             </>
           )}
 
@@ -1454,18 +1726,148 @@ export default function OrderTrackingScreen({ route, navigation }) {
 const st = StyleSheet.create({
   /* ── layout ── */
   root: { flex: 1, backgroundColor: "#E6F9EE" },
+  reportRoot: { flex: 1, backgroundColor: "#EEF8F1" },
+  reportScrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  reportHeroCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 18,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+  },
+  reportHeroIconWrap: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: "#EAFBF1",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  reportHeroTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#111827",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  reportHeroSubtitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  reportHeroGoodNote: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#6B7280",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  reportCardBox: {
+    marginTop: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+  },
+  reportPill: {
+    alignSelf: "flex-start",
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    marginBottom: 10,
+  },
+  reportPillTxt: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#047857",
+    letterSpacing: 0.3,
+  },
+  reportRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 9,
+  },
+  reportRowTop: {
+    alignItems: "flex-start",
+  },
+  reportLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#6B7280",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  reportValue: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  reportValueSuccess: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#06C168",
+  },
+  reportTotal: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#06C168",
+  },
+  reportValueAddress: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#374151",
+    lineHeight: 18,
+  },
+  reportDivider: {
+    height: 1,
+    backgroundColor: "#F3F4F6",
+  },
 
   /* ── map container ── */
-  mapWrap: {
-    flex: 1,
+  mapStage: {
     width: "100%",
+    overflow: "hidden",
+    backgroundColor: "#E6F9EE",
+  },
+  mapWrap: {
+    width: "100%",
+    height: "100%",
     overflow: "hidden",
   },
 
   /* ── hero background (light green gradient, web-matching) ── */
   heroWrap: {
-    flex: 1,
     width: "100%",
+    height: "100%",
     overflow: "hidden",
     justifyContent: "center",
     alignItems: "center",
@@ -1489,39 +1891,12 @@ const st = StyleSheet.create({
     fontSize: 32,
   },
 
-  /* ── status icon bubble (white circle + SVG + pulse rings) ── */
+  /* ── status icon area (icon only, no circle shell) ── */
   statusBubbleWrap: {
     alignItems: "center",
     justifyContent: "center",
-    width: 140,
-    height: 140,
-  },
-  statusIconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#fff",
-    justifyContent: "center",
-    alignItems: "center",
-    elevation: 8,
-    shadowColor: "rgba(34,197,94,0.4)",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 1,
-    shadowRadius: 20,
-    zIndex: 1,
-  },
-  statusIconCircleSuccess: {
-    backgroundColor: "#06C168",
-    borderWidth: 0,
-  },
-  successRing: {
-    position: "absolute",
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 3,
-    borderColor: "#06C168",
-    opacity: 0.5,
+    width: 72,
+    height: 72,
   },
 
   /* ── back button (light bg for light hero) ── */
@@ -1570,7 +1945,6 @@ const st = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    maxHeight: SH * 0.78,
     backgroundColor: "#fff",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
@@ -1586,29 +1960,35 @@ const st = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#D1D5DB",
     alignSelf: "center",
-    marginTop: 12,
-    marginBottom: 4,
+    marginTop: 10,
+    marginBottom: 2,
   },
-  sheetInner: { paddingHorizontal: 20, paddingBottom: 34, paddingTop: 4 },
+  sheetInner: { paddingHorizontal: 20, paddingBottom: 34, paddingTop: 2 },
 
   /* ── 1) title + ETA ── */
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "700",
     color: "#111827",
-    marginTop: 8,
-    marginBottom: 2,
+    marginTop: 6,
+    marginBottom: 1,
   },
   titleSuccess: { color: "#06C168" },
   statusEtaTxt: {
     fontSize: 13,
     color: "#6B7280",
-    marginBottom: 16,
+    marginBottom: 4,
     fontWeight: "400",
+  },
+  statusNextTxt: {
+    fontSize: 13,
+    color: "#4B5563",
+    marginBottom: 12,
+    fontWeight: "500",
   },
 
   /* ── 2) progress bar (6 segments + labels) ── */
-  progressContainer: { marginBottom: 20 },
+  progressContainer: { marginBottom: 14 },
   progressTrack: { flexDirection: "row", gap: 4, height: 6 },
   progressSeg: {
     flex: 1,
@@ -1621,15 +2001,24 @@ const st = StyleSheet.create({
   progressFill: {
     position: "absolute",
     left: 0,
+    right: 0,
     top: 0,
     bottom: 0,
     backgroundColor: "#06C168",
     borderRadius: 3,
   },
+  progressSweep: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 28,
+    borderRadius: 3,
+    backgroundColor: "#06C168",
+  },
   progressLabelRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 8,
+    marginTop: 6,
   },
   progressLabel: {
     flex: 1,
@@ -1692,9 +2081,9 @@ const st = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    marginBottom: 12,
+    marginBottom: 10,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   deliveryAddressRow: {
     flexDirection: "row",
@@ -1724,7 +2113,7 @@ const st = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    marginBottom: 16,
+    marginBottom: 12,
     overflow: "hidden",
     elevation: 2,
     shadowColor: "#000",
@@ -1732,13 +2121,16 @@ const st = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 8,
   },
+  summaryCardOffset: {
+    marginTop: 6,
+  },
   /* restaurant section (always visible) */
   summaryRestaurantSection: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
   summaryRestaurantLogoWrap: {
     width: 52,
@@ -1786,7 +2178,7 @@ const st = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 11,
   },
   summaryTotalLabel: {
     fontSize: 13,
@@ -1805,7 +2197,7 @@ const st = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 16,
-    paddingVertical: 13,
+    paddingVertical: 11,
     backgroundColor: "#F9FAFB",
   },
   viewDetailsText: {
@@ -1884,7 +2276,7 @@ const st = StyleSheet.create({
   /* ordered items in View Details */
   orderedItemRow: {
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 9,
   },
   orderedItemName: {
     fontSize: 14,
@@ -1934,8 +2326,8 @@ const st = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#fff",
     borderRadius: 12,
-    padding: 10,
-    marginBottom: 10,
+    padding: 9,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: "#F3F4F6",
   },

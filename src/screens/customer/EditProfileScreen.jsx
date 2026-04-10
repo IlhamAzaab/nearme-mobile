@@ -23,8 +23,6 @@ export default function EditProfileScreen({ navigation }) {
   const { user } = useAuth();
 
   const [name, setName] = useState(user?.name || "");
-  const [email, setEmail] = useState(user?.email || "");
-  const [phone, setPhone] = useState("");
   const [profilePic, setProfilePic] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -32,10 +30,8 @@ export default function EditProfileScreen({ navigation }) {
     (async () => {
       try {
         const pic = await AsyncStorage.getItem("@profile_pic");
-        const ph = await AsyncStorage.getItem("@profile_phone");
         const nm = await AsyncStorage.getItem("userName");
         if (pic) setProfilePic(pic);
-        if (ph) setPhone(ph);
         if (nm) setName(nm);
       } catch {}
     })();
@@ -70,9 +66,7 @@ export default function EditProfileScreen({ navigation }) {
     setSaving(true);
     try {
       await AsyncStorage.setItem("userName", name.trim());
-      if (phone.trim()) await AsyncStorage.setItem("@profile_phone", phone.trim());
       if (profilePic) await AsyncStorage.setItem("@profile_pic", profilePic);
-      if (email.trim()) await AsyncStorage.setItem("userEmail", email.trim());
 
       Alert.alert("Saved", "Your profile has been updated.", [
         { text: "OK", onPress: () => navigation.goBack() },
@@ -82,7 +76,7 @@ export default function EditProfileScreen({ navigation }) {
     } finally {
       setSaving(false);
     }
-  }, [name, phone, email, profilePic, navigation]);
+  }, [name, profilePic, navigation]);
 
   const initial = (name || "U").charAt(0).toUpperCase();
 
@@ -133,25 +127,6 @@ export default function EditProfileScreen({ navigation }) {
               value={name}
               onChangeText={setName}
               placeholder="Enter your name"
-            />
-            <View style={st.divider} />
-            <FieldRow
-              icon="mail-outline"
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="Enter your email"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <View style={st.divider} />
-            <FieldRow
-              icon="call-outline"
-              label="Phone"
-              value={phone}
-              onChangeText={setPhone}
-              placeholder="Enter phone number"
-              keyboardType="phone-pad"
             />
           </View>
 

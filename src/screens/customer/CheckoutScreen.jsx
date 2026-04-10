@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -11,12 +12,22 @@ import {
   Modal,
   Dimensions,
 } from "react-native";
+import { Ionicons, Feather, MaterialIcons } from "@expo/vector-icons";
+import SkeletonBlock from "../../components/common/SkeletonBlock";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import OSMMapView from "../../components/maps/OSMMapView";
 import * as Location from "expo-location";
 import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const CHECKOUT_ADDRESS_PIN_HTML =
+  "<div style='width:44px;height:44px;display:flex;align-items:center;justify-content:center;'>" +
+  "<svg width='30' height='30' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' aria-label='delivery pin'>" +
+  "<path d='M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z' fill='#E11D48'/>" +
+  "<circle cx='12' cy='9' r='3' fill='#FFFFFF'/>" +
+  "</svg>" +
+  "</div>";
 
 // ============================================================================
 // OSRM route distance
@@ -72,6 +83,7 @@ export default function CheckoutScreen({ route, navigation }) {
   // Route info
   const [routeInfo, setRouteInfo] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false);
 
   // Payment
   const [paymentMethod] = useState("cash");
@@ -114,6 +126,42 @@ export default function CheckoutScreen({ route, navigation }) {
     fetchCheckoutData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartId]);
+
+  // Sync address changes automatically when screen focuses
+  useFocusEffect(
+    useCallback(() => {
+      const checkSavedAddress = async () => {
+        try {
+          const savedStr = await AsyncStorage.getItem("@saved_address");
+          if (savedStr) {
+            const saved = JSON.parse(savedStr);
+            if (saved.latitude && saved.longitude) {
+              setPosition({ latitude: saved.latitude, longitude: saved.longitude });
+              if (saved.label) {
+                setAddress(saved.label);
+                setCity(saved.city || "");
+              }
+              // Animate map to new saved pin location
+              if (mapRef.current?.animateToRegion) {
+                mapRef.current.animateToRegion({
+                  latitude: saved.latitude,
+                  longitude: saved.longitude,
+                  latitudeDelta: 0.01,
+                  longitudeDelta: 0.01,
+                });
+              } else if (mapRef.current?.panTo) {
+                mapRef.current.panTo(saved.latitude, saved.longitude, 15);
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Error reading saved address on checkout:", error);
+        }
+      };
+      
+      checkSavedAddress();
+    }, [])
+  );
 
   // ============================================================================
   // GET LIVE LOCATION
@@ -225,7 +273,7 @@ export default function CheckoutScreen({ route, navigation }) {
       setLoading(true);
       setError("");
 
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const role = await AsyncStorage.getItem("role");
 
       if (!token || token === "null" || token === "undefined") {
@@ -269,14 +317,28 @@ export default function CheckoutScreen({ route, navigation }) {
 
       if (profileData.customer) {
         setPhone(profileData.customer.phone || "");
-        setAddress(profileData.customer.address || "");
-        setCity(profileData.customer.city || "");
-
-        if (profileData.customer.latitude && profileData.customer.longitude) {
-          setPosition({
-            latitude: parseFloat(profileData.customer.latitude),
-            longitude: parseFloat(profileData.customer.longitude),
-          });
+        
+        // Prefer AsyncStorage saved address if user updated it
+        const savedAddressStr = await AsyncStorage.getItem("@saved_address");
+        if (savedAddressStr) {
+          const saved = JSON.parse(savedAddressStr);
+          setAddress(saved.label || profileData.customer.address || "");
+          setCity(saved.city || profileData.customer.city || "");
+          if (saved.latitude && saved.longitude) {
+            setPosition({
+              latitude: saved.latitude,
+              longitude: saved.longitude,
+            });
+          }
+        } else {
+          setAddress(profileData.customer.address || "");
+          setCity(profileData.customer.city || "");
+          if (profileData.customer.latitude && profileData.customer.longitude) {
+            setPosition({
+              latitude: parseFloat(profileData.customer.latitude),
+              longitude: parseFloat(profileData.customer.longitude),
+            });
+          }
         }
       }
     } catch (e) {
@@ -293,7 +355,7 @@ export default function CheckoutScreen({ route, navigation }) {
   }) => {
     try {
       setSavingAddress(true);
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
 
       const res = await fetch(`${API_BASE_URL}/customer/address`, {
         method: "PUT",
@@ -323,6 +385,31 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
+  const resolveDeliveryCity = async () => {
+    const currentCity = String(city || "").trim();
+    if (currentCity) return currentCity;
+
+    try {
+      const [geocode] = await Location.reverseGeocodeAsync({
+        latitude: position.latitude,
+        longitude: position.longitude,
+      });
+
+      const geocodeCity = geocode?.city || geocode?.subregion || geocode?.region || "";
+      if (geocodeCity) return geocodeCity;
+    } catch (error) {
+      console.log("Resolve city failed:", error);
+    }
+
+    const addressParts = String(address || "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (addressParts.length > 1) return addressParts[addressParts.length - 1];
+
+    return "Unknown";
+  };
+
   const handlePlaceOrder = async () => {
     try {
       if (!phone || !address || !position)
@@ -338,7 +425,8 @@ export default function CheckoutScreen({ route, navigation }) {
       setPlacing(true);
       setError("");
 
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
+      const deliveryCity = await resolveDeliveryCity();
 
       const res = await fetch(`${API_BASE_URL}/orders/place`, {
         method: "POST",
@@ -351,7 +439,7 @@ export default function CheckoutScreen({ route, navigation }) {
           delivery_latitude: position.latitude,
           delivery_longitude: position.longitude,
           delivery_address: address,
-          delivery_city: city,
+          delivery_city: deliveryCity,
           payment_method: paymentMethod,
           distance_km: routeInfo.distance,
           estimated_duration_min: routeInfo.duration,
@@ -426,9 +514,36 @@ export default function CheckoutScreen({ route, navigation }) {
   // ✅ Loading / Error
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.muted}>Loading checkout...</Text>
+      <View style={styles.page}>
+        <ScrollView contentContainerStyle={{ padding: 12 }}>
+          {/* Map Skeleton */}
+          <SkeletonBlock width="100%" height={200} borderRadius={18} style={{ marginBottom: 12 }} />
+          
+          {/* Address Card Skeleton */}
+          <View style={[styles.card, { marginTop: 0 }]}>
+             <SkeletonBlock width="40%" height={20} style={{ marginBottom: 8 }} />
+             <SkeletonBlock width="70%" height={16} style={{ marginBottom: 4 }} />
+             <SkeletonBlock width="50%" height={14} />
+          </View>
+
+          {/* Phone Skeleton */}
+          <View style={styles.card}>
+             <SkeletonBlock width="30%" height={20} style={{ marginBottom: 8 }} />
+             <SkeletonBlock width="60%" height={16} />
+          </View>
+
+          {/* Estimated Skeleton */}
+          <View style={styles.card}>
+             <SkeletonBlock width="40%" height={20} style={{ marginBottom: 8 }} />
+             <SkeletonBlock width="35%" height={16} />
+          </View>
+          
+          {/* Summary Skeleton */}
+          <View style={styles.card}>
+             <SkeletonBlock width="45%" height={20} style={{ marginBottom: 12 }} />
+             <SkeletonBlock width="100%" height={60} borderRadius={12} />
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -452,12 +567,7 @@ export default function CheckoutScreen({ route, navigation }) {
     <View style={styles.page}>
       <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
         {/* ✅ Map */}
-        <View
-          style={[
-            styles.mapWrap,
-            isMapEditMode ? { height: 280 } : { height: 200 },
-          ]}
-        >
+        <View style={[styles.mapWrap, { height: 200 }]}>
           <OSMMapView
             ref={mapRef}
             style={{ flex: 1 }}
@@ -467,74 +577,39 @@ export default function CheckoutScreen({ route, navigation }) {
               latitudeDelta: 0.01,
               longitudeDelta: 0.01,
             }}
-            scrollEnabled={isMapEditMode}
-            zoomEnabled={isMapEditMode}
-            onPress={(e) => {
-              if (!isMapEditMode) return;
-              const { latitude, longitude } = e.nativeEvent.coordinate;
-              setPosition({ latitude, longitude });
-            }}
+            scrollEnabled={false}
+            zoomEnabled={false}
             markers={[
               {
                 id: "delivery",
                 coordinate: position,
                 type: "customer",
                 title: "Delivery Location",
-                emoji: "📍",
+                emoji: "",
+                customHtml: CHECKOUT_ADDRESS_PIN_HTML,
+                iconOnly: true,
               },
             ]}
           />
 
-          {/* Find My Location Button */}
+          {/* Edit Pin Button */}
           <Pressable
-            disabled={fetchingLocation}
-            onPress={getCurrentLocation}
-            style={[styles.locationBtn, fetchingLocation && { opacity: 0.7 }]}
+            onPress={() => navigation.navigate("AddressPicker")}
+            style={styles.mapBtn}
           >
-            {fetchingLocation ? (
-              <ActivityIndicator size="small" color="#06C168" />
-            ) : (
-              <Text style={styles.locationBtnIcon}>📍</Text>
-            )}
-            <Text style={styles.locationBtnText}>
-              {fetchingLocation ? "Finding..." : "Find My Location"}
-            </Text>
-          </Pressable>
-
-          {/* Edit/Done Button */}
-          <Pressable
-            disabled={savingAddress}
-            onPress={async () => {
-              if (isMapEditMode) {
-                if (address) {
-                  await saveAddressAndLocation({
-                    newAddress: address,
-                    newCity: city,
-                    newPosition: position,
-                  });
-                }
-                setIsMapEditMode(false);
-              } else {
-                setIsMapEditMode(true);
-              }
-            }}
-            style={[styles.mapBtn, savingAddress && { opacity: 0.6 }]}
-          >
-            <Text style={styles.mapBtnText}>
-              {savingAddress ? "Saving..." : isMapEditMode ? "Done" : "Edit"}
-            </Text>
+            <Text style={styles.mapBtnText}>Change Map Pin</Text>
           </Pressable>
         </View>
 
         {/* ✅ Address card */}
         <View style={styles.card}>
           <View style={styles.rowBetween}>
+            <View style={styles.iconContainer}>
+               <Feather name="map-pin" size={20} color="#06C168" />
+            </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Delivery Address</Text>
-              <Text style={styles.value}>
-                {address || "Add delivery address"}
-              </Text>
-              {!!city && <Text style={styles.muted}>{city}</Text>}
+              <Text style={styles.value}>{address || "Add delivery address"}</Text>
             </View>
 
             <Pressable
@@ -545,43 +620,129 @@ export default function CheckoutScreen({ route, navigation }) {
               }}
               style={styles.iconBtn}
             >
-              <Text style={{ fontSize: 16 }}>✏️</Text>
+              <Feather name="edit-2" size={16} color="#06C168" />
             </Pressable>
           </View>
         </View>
 
         {/* ✅ Phone */}
         <View style={styles.card}>
-          <Text style={styles.label}>Phone Number</Text>
-          <Text style={styles.value}>{phone || "No phone number"}</Text>
+          <View style={styles.rowInfo}>
+            <View style={styles.iconContainer}>
+              <Feather name="phone-call" size={20} color="#06C168" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Phone Number</Text>
+              <Text style={styles.value}>{phone || "No phone number"}</Text>
+            </View>
+          </View>
         </View>
 
         {/* ✅ Estimated */}
         <View style={styles.card}>
-          <Text style={styles.label}>Estimated Delivery</Text>
-          <Text style={styles.value}>
-            {routeLoading
-              ? "Calculating..."
-              : routeInfo
-                ? `~${Math.ceil(routeInfo.duration) + 15} mins`
-                : "—"}
-          </Text>
+          <View style={styles.rowInfo}>
+             <View style={styles.iconContainer}>
+               <Feather name="clock" size={20} color="#06C168" />
+             </View>
+             <View style={{ flex: 1 }}>
+               <Text style={styles.label}>Estimated Delivery</Text>
+               <Text style={styles.value}>
+                 {routeLoading ? "Calculating..." : routeInfo ? `~${Math.ceil(routeInfo.duration) + 15} mins` : "—"}
+               </Text>
+             </View>
+          </View>
+        </View>
+
+        {/* ✅ Order Summary */}
+        <View style={styles.card}>
+           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={styles.sectionTitleNoMargin}>Order Summary</Text>
+           </View>
+           
+           <View style={styles.summaryBox}>
+             <View style={{ flex: 1 }}>
+               <Text style={styles.value}>{cart?.restaurant?.restaurant_name || "Restaurant"}</Text>
+               <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                  <Feather name="map-pin" size={12} color="#06C168" />
+                  <Text style={[styles.muted, { fontSize: 12, marginLeft: 4, color: "#06C168" }]}>
+                     {routeInfo ? `${routeInfo.distance.toFixed(1)} km away` : "Calculating..."}
+                  </Text>
+               </View>
+               <Text style={[styles.muted, { fontSize: 13, marginTop: 4 }]}>
+                 {cart?.items?.length || 0} item{cart?.items?.length !== 1 ? 's' : ''} • {formatPrice(subtotal)}
+               </Text>
+             </View>
+             <Pressable
+               onPress={() => setIsOrderSummaryExpanded((prev) => !prev)}
+               style={styles.summaryToggleBtn}
+             >
+               <Feather
+                 name={isOrderSummaryExpanded ? "chevron-up" : "chevron-down"}
+                 size={18}
+                 color="#6b7280"
+               />
+             </Pressable>
+           </View>
+
+           {isOrderSummaryExpanded && (
+             <View style={styles.orderItemsWrap}>
+               {(cart?.items || []).length > 0 ? (
+                 (cart?.items || []).map((item, idx) => {
+                   const itemName = item?.food_name || item?.name || `Item ${idx + 1}`;
+                   const qty = Number(item?.quantity) || 1;
+                   const unitPrice = Number(item?.unit_price ?? item?.price ?? 0);
+
+                   return (
+                     <View
+                       key={item?.id || `${itemName}-${idx}`}
+                       style={[
+                         styles.orderItemRow,
+                         idx === (cart?.items || []).length - 1 && styles.orderItemLastRow,
+                       ]}
+                     >
+                       <View style={styles.orderItemInfo}>
+                         <Text numberOfLines={1} style={styles.orderItemName}>{itemName}</Text>
+                         <Text style={styles.orderItemMeta}>{qty} x {formatPrice(unitPrice)}</Text>
+                       </View>
+                       <Text style={styles.orderItemTotal}>{formatPrice(unitPrice * qty)}</Text>
+                     </View>
+                   );
+                 })
+               ) : (
+                 <Text style={styles.orderItemEmpty}>No items found in this cart.</Text>
+               )}
+             </View>
+           )}
+        </View>
+
+        {/* ✅ Payment Method */}
+        <View style={styles.card}>
+           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={styles.sectionTitleNoMargin}>Payment Method</Text>
+           </View>
+           
+           <View style={styles.summaryBox}>
+              <View style={styles.iconContainer}>
+                 <Ionicons name="cash-outline" size={24} color="#06C168" />
+              </View>
+              <View style={{ flex: 1 }}>
+                 <Text style={styles.value}>Cash on Delivery</Text>
+                 <Text style={[styles.muted, { fontSize: 12 }]}>Pay when your order arrives</Text>
+              </View>
+           </View>
         </View>
 
         {/* ✅ Price summary */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Price Details</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <MaterialIcons name="receipt-long" size={20} color="#06C168" style={{ marginRight: 8 }} />
+              <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
+          </View>
 
           <Row label="Subtotal" value={formatPrice(subtotal)} />
           <Row
-            label={`Delivery fee${routeInfo ? ` (${routeInfo.distance.toFixed(1)} km)` : ""}`}
-            value={
-              routeLoading
-                ? "..."
-                : deliveryFee !== null
-                  ? formatPrice(deliveryFee)
-                  : "--"
-            }
+            label="Delivery fee"
+            value={routeLoading ? "..." : deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
           />
           <Row label="Service fee" value={formatPrice(serviceFee)} />
 
@@ -723,13 +884,9 @@ export default function CheckoutScreen({ route, navigation }) {
 
 function Row({ label, value, isBold }) {
   return (
-    <View style={styles.rowBetween}>
-      <Text style={[styles.rowLabel, isBold && { fontWeight: "900" }]}>
-        {label}
-      </Text>
-      <Text style={[styles.rowValue, isBold && { fontWeight: "900" }]}>
-        {value}
-      </Text>
+    <View style={[styles.rowBetween, { marginBottom: 8 }]}>
+      <Text style={[styles.rowLabel, isBold && { fontWeight: "900", color: TEXT }]}>{label}</Text>
+      <Text style={[styles.rowValue, isBold && { fontWeight: "900", color: TEXT }]}>{value}</Text>
     </View>
   );
 }
@@ -804,33 +961,124 @@ const styles = StyleSheet.create({
   },
 
   label: { fontSize: 12, color: MUTED },
-  value: { marginTop: 2, fontSize: 15, fontWeight: "900", color: TEXT },
+  value: { marginTop: 2, fontSize: 15, fontWeight: "800", color: TEXT },
 
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "900",
-    color: TEXT,
-    marginBottom: 10,
+  sectionTitle: { fontSize: 16, fontWeight: "900", color: TEXT, marginBottom: 10 },
+  sectionTitleNoMargin: { fontSize: 16, fontWeight: "900", color: TEXT },
+
+  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  rowInfo: { flexDirection: "row", alignItems: "center", gap: 10 },
+  rowLabel: { color: MUTED, fontSize: 14 },
+  rowValue: { color: TEXT, fontWeight: "700", fontSize: 14 },
+
+  divider: { height: 1, backgroundColor: "#E5E7EB", marginVertical: 12 },
+
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#DCFCE7", // soft green
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  
+  iconContainer: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
   },
 
-  rowBetween: {
+  summaryBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb', // soft gray bg
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 4,
+  },
+
+  summaryToggleBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#f1f5f9",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 10,
+  },
+
+  orderItemsWrap: {
+    marginTop: 8,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+
+  orderItemRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
   },
-  rowLabel: { color: MUTED },
-  rowValue: { color: TEXT, fontWeight: "800" },
 
-  divider: { height: 1, backgroundColor: "#E5E7EB", marginVertical: 10 },
+  orderItemLastRow: {
+    borderBottomWidth: 0,
+  },
 
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: GREEN_SOFT,
-    alignItems: "center",
-    justifyContent: "center",
+  orderItemInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+
+  orderItemName: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  orderItemMeta: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  orderItemTotal: {
+    color: TEXT,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  orderItemEmpty: {
+    color: MUTED,
+    fontSize: 13,
+    paddingVertical: 12,
+  },
+
+  restaurantIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  
+  restaurantIcon: {
+    width: 30,
+    height: 30,
+    resizeMode: 'contain',
   },
 
   warn: {
@@ -913,15 +1161,6 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   successTitle: { fontSize: 20, fontWeight: "900", color: TEXT, marginTop: 10 },
-
-  summaryBox: {
-    marginTop: 14,
-    width: "100%",
-    backgroundColor: "#F3F4F6",
-    borderRadius: 18,
-    padding: 12,
-    gap: 10,
-  },
 
   modalWrap: { flex: 1, justifyContent: "flex-end" },
   modalBackdrop: {

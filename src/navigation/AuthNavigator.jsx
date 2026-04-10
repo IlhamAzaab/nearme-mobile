@@ -5,6 +5,7 @@ import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
 import VerifyEmailScreen from '../screens/auth/VerifyEmailScreen';
 import CompleteProfileScreen from '../screens/auth/CompleteProfileScreen';
+import CompleteProfileLocationScreen from '../screens/auth/CompleteProfileLocationScreen';
 import VerifyOtpScreen from '../screens/auth/VerifyOtpScreen';
 import WebViewScreen from '../screens/common/WebViewScreen';
 
@@ -18,6 +19,7 @@ export default function AuthNavigator() {
       <Stack.Screen name="Signup" component={SignupScreen} />
       <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
       <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
+      <Stack.Screen name="CompleteProfileLocation" component={CompleteProfileLocationScreen} />
       <Stack.Screen name="VerifyOtp" component={VerifyOtpScreen} />
       <Stack.Screen name="WebView" component={WebViewScreen} />
     </Stack.Navigator>

@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   Image,
+  Keyboard,
+  Modal,
   Pressable,
   ScrollView,
   StatusBar,
@@ -18,10 +20,17 @@ import Svg, { G, Path } from "react-native-svg";
 import { useNotifications } from "../../app/providers/NotificationProvider";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
 import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 import {
   fuzzySearchFoods,
   fuzzySearchRestaurants,
 } from "../../utils/fuzzySearch";
+
+const LAUNCH_PROMO_DEFAULTS = {
+  first_km_rate: 1,
+  max_km: 5,
+  beyond_km_rate: 40,
+};
 
 // Format 24h time string → "11.00a.m" style
 const formatTime = (t) => {
@@ -31,6 +40,12 @@ const formatTime = (t) => {
   const ampm = hour >= 12 ? "p.m" : "a.m";
   const h12 = hour % 12 || 12;
   return `${h12}.${m}${ampm}`;
+};
+
+const formatPrice = (price) => {
+  const value = Number(price);
+  if (Number.isNaN(value)) return "Rs. 0.00";
+  return `Rs. ${value.toFixed(2)}`;
 };
 
 // Verified badge (scalloped seal with checkmark)
@@ -124,9 +139,12 @@ export default function HomeScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState("restaurant"); // restaurant | food
   const [selectedCategory, setSelectedCategory] = useState(null);
 
-  const { unreadCount, markAllReadForCustomer } = useNotifications();
+  const { unreadCount, refreshUnreadCount } = useNotifications();
   const [cartCount, setCartCount] = useState(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [launchPromo, setLaunchPromo] = useState(null);
+  const [showLaunchPromoModal, setShowLaunchPromoModal] = useState(false);
+  const [acknowledgingPromo, setAcknowledgingPromo] = useState(false);
 
   const categories = useMemo(
     () => [
@@ -139,23 +157,77 @@ export default function HomeScreen({ navigation }) {
     [],
   );
 
+  const fetchLaunchPromotionStatus = useCallback(async (tokenArg) => {
+    try {
+      const token = tokenArg || (await getAccessToken());
+      if (!token) {
+        setShowLaunchPromoModal(false);
+        return;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/customer/launch-promotion`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        setShowLaunchPromoModal(false);
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
+      setLaunchPromo(data);
+      setShowLaunchPromoModal(Boolean(data?.should_show_popup));
+    } catch (err) {
+      console.log("Launch promotion status fetch error:", err?.message || err);
+    }
+  }, []);
+
+  const handleLaunchPromoOk = useCallback(async () => {
+    try {
+      setAcknowledgingPromo(true);
+      const token = await getAccessToken();
+      if (!token) {
+        setShowLaunchPromoModal(false);
+        return;
+      }
+
+      const res = await fetch(
+        `${API_BASE_URL}/customer/launch-promotion/acknowledge`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      if (res.ok) {
+        setShowLaunchPromoModal(false);
+        await fetchLaunchPromotionStatus(token);
+      }
+    } catch (err) {
+      console.log("Launch promotion acknowledge error:", err?.message || err);
+    } finally {
+      setAcknowledgingPromo(false);
+    }
+  }, [fetchLaunchPromotionStatus]);
+
   // 🔐 auth check
   useEffect(() => {
     const init = async () => {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const role = await AsyncStorage.getItem("role");
 
       if (token && role === "customer") {
         setIsLoggedIn(true);
         fetchCartCount(token);
+        fetchLaunchPromotionStatus(token);
       }
     };
     init();
-  }, []);
+  }, [fetchLaunchPromotionStatus]);
 
   const fetchCartCount = async (tokenArg) => {
     try {
-      const token = tokenArg || (await AsyncStorage.getItem("token"));
+      const token = tokenArg || (await getAccessToken());
       if (!token) return;
       const res = await fetch(`${API_BASE_URL}/cart`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -181,9 +253,20 @@ export default function HomeScreen({ navigation }) {
     useCallback(() => {
       if (isLoggedIn) {
         fetchCartCount();
+        refreshUnreadCount({ force: true });
       }
-    }, [isLoggedIn]),
+    }, [isLoggedIn, refreshUnreadCount]),
   );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) {
+        fetchLaunchPromotionStatus();
+      }
+    }, [isLoggedIn, fetchLaunchPromotionStatus]),
+  );
+
+  const promoConfig = launchPromo?.promotion || LAUNCH_PROMO_DEFAULTS;
 
   // Fetch all restaurants (no search filter, we'll do fuzzy search client-side)
   const fetchRestaurants = async () => {
@@ -265,9 +348,72 @@ export default function HomeScreen({ navigation }) {
     setSearchQuery(category.name);
   };
 
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery("");
+    setSelectedCategory(null);
+
+    // Reset visible list immediately without waiting for debounce.
+    if (activeTab === "food") {
+      setAllFoods(allFoodsData);
+    } else {
+      setRestaurants(allRestaurants);
+    }
+
+    Keyboard.dismiss();
+  }, [activeTab, allFoodsData, allRestaurants]);
+
   return (
     <SafeAreaView style={styles.page} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+
+      <Modal
+        visible={showLaunchPromoModal}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <View style={styles.promoBackdrop}>
+          <View style={styles.promoCard}>
+            <View style={styles.promoHeader}>
+              <Text style={styles.promoKicker}>Launch Offer</Text>
+              <Text style={styles.promoTitle}>Welcome to Meezo</Text>
+              <Text style={styles.promoSubtitle}>
+                Your first delivery gets a special offer.
+              </Text>
+            </View>
+
+            <View style={styles.promoBody}>
+              <View style={styles.promoPriceCard}>
+                <Text style={styles.promoPriceMain}>
+                  Only 1 rupees per km
+                </Text>
+                <Text style={styles.promoPriceSub}>
+                  Up to 5km
+                </Text>
+              </View>
+
+              <Text style={styles.promoNote}>
+                This offer applies only to your first order for this account.
+              </Text>
+
+              <Pressable
+                onPress={handleLaunchPromoOk}
+                disabled={acknowledgingPromo}
+                style={({ pressed }) => [
+                  styles.promoOkBtn,
+                  acknowledgingPromo && styles.promoOkBtnDisabled,
+                  pressed && !acknowledgingPromo ? { opacity: 0.9 } : null,
+                ]}
+              >
+                <Text style={styles.promoOkText}>
+                  {acknowledgingPromo ? "Saving..." : "OK"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Header - Glass Morphism */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
@@ -294,23 +440,30 @@ export default function HomeScreen({ navigation }) {
             <Ionicons
               name="search"
               size={26}
-              color="#06C168"
+              color="#94A3B8"
               style={styles.searchIcon}
             />
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholder="Search..."
-              placeholderTextColor="rgba(6,193,104,0.6)"
+              placeholderTextColor="#94A3B8"
               style={styles.searchInput}
             />
+            {searchQuery.trim().length > 0 && (
+              <Pressable
+                onPress={handleClearSearch}
+                style={styles.searchClearBtn}
+                hitSlop={8}
+              >
+                <Ionicons name="close-circle" size={20} color="#94A3B8" />
+              </Pressable>
+            )}
           </View>
 
           {/* Notifications */}
           <Pressable
             onPress={() => {
-              // Fire-and-forget: immediately acknowledge and sync seen IDs.
-              markAllReadForCustomer();
               navigation.navigate("Notifications");
             }}
             style={({ pressed }) => [
@@ -318,7 +471,7 @@ export default function HomeScreen({ navigation }) {
               pressed && { opacity: 0.85 },
             ]}
           >
-            <Ionicons name="notifications" size={22} color="#06C168" />
+            <Ionicons name="notifications" size={32} color="#06C168" />
             {unreadCount > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>
@@ -599,6 +752,27 @@ export default function HomeScreen({ navigation }) {
                       pressed && { opacity: 0.92 },
                     ]}
                   >
+                    {(() => {
+                      const regularPrice = item.regular_price ?? item.price;
+                      const restaurantName =
+                        item?.restaurants?.restaurant_name ||
+                        item?.restaurant_name ||
+                        "Restaurant";
+                      const hasOffer =
+                        item.offer_price != null &&
+                        Number(item.offer_price) > 0 &&
+                        Number(item.offer_price) < Number(regularPrice || 0);
+                      const timeTags = Array.isArray(item.available_time)
+                        ? item.available_time
+                        : typeof item.available_time === "string"
+                        ? item.available_time
+                            .split(",")
+                            .map((tag) => tag.trim())
+                            .filter(Boolean)
+                        : [];
+
+                      return (
+                        <>
                     <View style={styles.foodImgWrap}>
                       <Image
                         source={{
@@ -608,9 +782,17 @@ export default function HomeScreen({ navigation }) {
                         }}
                         style={styles.foodImg}
                       />
+                      {Number(item.stars || 0) > 0 && (
+                        <View style={styles.foodRatingBadge}>
+                          <Ionicons name="star" size={11} color="#FBBF24" />
+                          <Text style={styles.foodRatingText}>{item.stars}</Text>
+                        </View>
+                      )}
                       {item.is_available === false && (
-                        <View style={styles.notAvailBadge}>
-                          <Text style={styles.notAvailText}>Not Available</Text>
+                        <View style={styles.notAvailOverlay}>
+                          <View style={styles.notAvailPill}>
+                            <Text style={styles.notAvailText}>Unavailable</Text>
+                          </View>
                         </View>
                       )}
                     </View>
@@ -618,16 +800,42 @@ export default function HomeScreen({ navigation }) {
                       <Text style={styles.foodTitle} numberOfLines={1}>
                         {item.name}
                       </Text>
-                      <Text style={styles.foodSub} numberOfLines={1}>
-                        {item?.restaurants?.restaurant_name || "Restaurant"}
+                      <Text style={styles.foodRestaurant} numberOfLines={1}>
+                        {restaurantName}
                       </Text>
+                      <Text style={styles.foodDesc} numberOfLines={2}>
+                        {item.description || ""}
+                      </Text>
+
+                      {timeTags.length > 0 && (
+                        <View style={styles.tagsRow}>
+                          {timeTags.map((tag) => (
+                            <View key={`${item.id}-${tag}`} style={styles.tag}>
+                              <Text style={styles.tagText}>
+                                {tag.charAt(0).toUpperCase() + tag.slice(1)}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
                       <View style={styles.foodRow}>
-                        <Text style={styles.foodPrice}>Rs. {item.price}</Text>
+                        {hasOffer ? (
+                          <View style={styles.priceGroup}>
+                            <Text style={styles.foodPrice}>{formatPrice(item.offer_price)}</Text>
+                            <Text style={styles.oldPrice}>{formatPrice(regularPrice)}</Text>
+                          </View>
+                        ) : (
+                          <Text style={styles.foodPrice}>{formatPrice(regularPrice)}</Text>
+                        )}
                         <Text style={styles.foodTime}>
-                          {item.prep_time ? `⏱ ${item.prep_time}` : ""}
+                          {item.prep_time ? `Prep ${item.prep_time}` : ""}
                         </Text>
                       </View>
                     </View>
+                        </>
+                      );
+                    })()}
                   </Pressable>
                 )}
               />
@@ -666,6 +874,103 @@ function EmptyState() {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#FFFFFF" },
 
+  promoBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  promoCard: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 28,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  promoHeader: {
+    backgroundColor: "#06C168",
+    paddingHorizontal: 22,
+    paddingVertical: 20,
+  },
+  promoKicker: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  promoTitle: {
+    marginTop: 8,
+    color: "#FFFFFF",
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+  },
+  promoSubtitle: {
+    marginTop: 8,
+    color: "#ECFDF5",
+    fontSize: 34,
+    lineHeight: 39,
+    fontWeight: "800",
+    letterSpacing: -0.8,
+  },
+  promoBody: {
+    paddingHorizontal: 22,
+    paddingVertical: 20,
+    gap: 14,
+  },
+  promoPriceCard: {
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    backgroundColor: "#ECFDF5",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  promoPriceMain: {
+    color: "#374151",
+    fontSize: 26,
+    lineHeight: 31,
+    fontWeight: "700",
+  },
+  promoPriceSub: {
+    marginTop: 6,
+    color: "#6B7280",
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: "500",
+  },
+  promoNote: {
+    color: "#6B7280",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "500",
+  },
+  promoOkBtn: {
+    marginTop: 2,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "#06C168",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  promoOkBtnDisabled: {
+    backgroundColor: "#CBD5E1",
+  },
+  promoOkText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "900",
+    letterSpacing: 0.4,
+  },
+
   header: {
     backgroundColor: "rgba(255, 255, 255, 0.9)",
     paddingHorizontal: 16,
@@ -700,8 +1005,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
-    borderWidth: 2,
-    borderColor: "#06C168",
     flexShrink: 0,
   },
   badge: {
@@ -728,16 +1031,21 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 14,
     height: 44,
-    borderWidth: 2,
-    borderColor: "#06C168",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
   },
   searchIcon: { marginRight: 10 },
   searchInput: {
     flex: 1,
-    color: "#06C168",
+    color: "#111827",
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "500",
     paddingVertical: 0,
+  },
+  searchClearBtn: {
+    marginLeft: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   content: { padding: 16, paddingBottom: 100 },
@@ -1043,10 +1351,31 @@ const styles = StyleSheet.create({
   foodImgWrap: {
     position: "relative",
     width: "100%",
-    height: 140,
+    height: 130,
   },
   foodImg: { width: "100%", height: "100%" },
-  notAvailBadge: {
+  foodRatingBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  foodRatingText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  notAvailOverlay: {
     position: "absolute",
     top: 0,
     left: 0,
@@ -1056,31 +1385,70 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  notAvailText: {
-    backgroundColor: "#000",
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "800",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+  notAvailPill: {
+    backgroundColor: "#EF4444",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 999,
-    overflow: "hidden",
   },
-  foodBody: { padding: 12 },
+  notAvailText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  foodBody: { padding: 10 },
   foodTitle: {
-    fontWeight: "800",
-    color: "#0F172A",
+    fontWeight: "700",
+    color: "#111827",
     fontSize: 14,
-    letterSpacing: -0.3,
+    marginBottom: 2,
   },
-  foodSub: { color: "#06C168", marginTop: 4, fontSize: 12, fontWeight: "600" },
+  foodRestaurant: {
+    fontSize: 11,
+    color: "#06C168",
+    fontWeight: "700",
+    marginBottom: 3,
+  },
+  foodDesc: {
+    fontSize: 11,
+    color: "#6B7280",
+    lineHeight: 15,
+    marginBottom: 4,
+  },
+  tagsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    marginBottom: 6,
+  },
+  tag: {
+    backgroundColor: "#FFF7ED",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  tagText: {
+    fontSize: 10,
+    color: "#06C168",
+    fontWeight: "600",
+  },
   foodRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 10,
+    marginTop: 2,
   },
-  foodPrice: { color: "#0F172A", fontWeight: "900", fontSize: 15 },
+  priceGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  foodPrice: { color: "#06C168", fontWeight: "900", fontSize: 14 },
+  oldPrice: {
+    fontSize: 11,
+    color: "#9CA3AF",
+    textDecorationLine: "line-through",
+  },
   foodTime: { color: "#94A3B8", fontSize: 11, fontWeight: "600" },
 
   emptyBox: { alignItems: "center", paddingVertical: 60, gap: 8 },

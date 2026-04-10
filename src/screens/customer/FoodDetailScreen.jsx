@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  DeviceEventEmitter,
   Dimensions,
   Image,
   Pressable,
@@ -14,6 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 
 /* ── Skeleton shimmer block ── */
 function SkeletonBlock({ width: w, height: h, borderRadius: br = 12, style }) {
@@ -187,7 +189,7 @@ export default function FoodDetailScreen({ route, navigation }) {
 
   const addToCart = async ({ goToCheckout = false } = {}) => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const role = await AsyncStorage.getItem("role");
 
       if (!token || token === "null" || token === "undefined") {
@@ -221,6 +223,8 @@ export default function FoodDetailScreen({ route, navigation }) {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to add to cart");
+
+      DeviceEventEmitter.emit("cart:changed");
 
       if (goToCheckout) {
         // Navigate to Cart and auto-select this restaurant's cart

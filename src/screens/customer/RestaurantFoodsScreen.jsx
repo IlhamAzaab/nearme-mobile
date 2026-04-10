@@ -1,13 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  DeviceEventEmitter,
   Dimensions,
   FlatList,
   Image,
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
@@ -18,6 +20,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
 import { API_BASE_URL } from "../../constants/api";
 import { useLocationContext } from "../../context/LocationContext";
+import useDebounce from "../../hooks/useDebounce";
+import { getAccessToken } from "../../lib/authStorage";
 import { formatDistance } from "../../services/restaurantDistanceService";
 import { calculateDistance } from "../../utils/locationUtils";
 
@@ -26,6 +30,8 @@ const CARD_GAP = 12;
 const CARD_PADDING = 16;
 const CARD_WIDTH = (SCREEN_WIDTH - CARD_PADDING * 2 - CARD_GAP) / 2;
 const GREEN = "#06C168";
+const SEARCH_DEBOUNCE_MS = 300;
+const SUGGESTION_LIMIT = 6;
 
 /** Convert "14:00" or "14:00:00" to "2:00 PM" */
 const formatTime = (t) => {
@@ -40,17 +46,40 @@ const formatTime = (t) => {
 const formatPrice = (price) =>
   price ? `Rs. ${parseFloat(price).toFixed(2)}` : "N/A";
 
+function foodMatchesQuery(food, normalizedQuery) {
+  if (!normalizedQuery) return true;
+
+  const haystack = [
+    food?.name,
+    food?.description,
+    food?.category,
+    food?.restaurants?.restaurant_name,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(normalizedQuery);
+}
+
 export default function RestaurantFoodsScreen({ route, navigation }) {
   const { restaurantId } = route.params;
 
   // Restaurant & foods
   const [restaurant, setRestaurant] = useState(null);
   const [foods, setFoods] = useState([]);
+  const [allFoodsCache, setAllFoodsCache] = useState([]);
   const [restaurantLoading, setRestaurantLoading] = useState(true);
   const [foodsLoading, setFoodsLoading] = useState(true);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState(null);
   const [foodsError, setFoodsError] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+
+  const debouncedSearchQuery = useDebounce(searchQuery, SEARCH_DEBOUNCE_MS);
+  const searchAbortRef = useRef(null);
+  const searchRequestIdRef = useRef(0);
 
   // Cart
   const [cartCount, setCartCount] = useState(0);
@@ -82,7 +111,6 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Restaurant not found");
       setRestaurant(data.restaurant);
-      fetchFoods(searchQuery);
     } catch (err) {
       console.error("Error fetching restaurant:", err);
       setError(err.message);
@@ -91,35 +119,159 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
     }
   };
 
-  // ─── Fetch foods (with optional search) ───
-  const fetchFoods = async (search = "") => {
+  // ─── Fetch foods from API (supports abort) ───
+  const fetchFoodsFromApi = useCallback(async (search = "", options = {}) => {
+    const { signal } = options;
+
     try {
-      setFoodsLoading(true);
       setFoodsError(null);
       let url = `${API_BASE_URL}/public/restaurants/${restaurantId}/foods`;
       if (search) url += `?search=${encodeURIComponent(search)}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to fetch foods");
-      setFoods(data.foods || []);
+      return data.foods || [];
     } catch (err) {
+      if (err?.name === "AbortError") {
+        throw err;
+      }
       console.error("Error fetching foods:", err);
       setFoodsError(err.message);
-    } finally {
-      setFoodsLoading(false);
+      throw err;
     }
-  };
+  }, [restaurantId]);
 
-  // Debounced search
+  // Initial foods load for this restaurant
   useEffect(() => {
-    const t = setTimeout(() => fetchFoods(searchQuery), 300);
-    return () => clearTimeout(t);
-  }, [searchQuery, restaurantId]);
+    let isMounted = true;
+    const controller = new AbortController();
+
+    const loadFoods = async () => {
+      setFoodsLoading(true);
+
+      try {
+        const fetchedFoods = await fetchFoodsFromApi("", {
+          signal: controller.signal,
+        });
+
+        if (!isMounted) return;
+        setAllFoodsCache(fetchedFoods);
+        setFoods(fetchedFoods);
+      } catch (err) {
+        if (err?.name !== "AbortError") {
+          setAllFoodsCache([]);
+          setFoods([]);
+        }
+      } finally {
+        if (isMounted) {
+          setFoodsLoading(false);
+          setSearchLoading(false);
+        }
+      }
+    };
+
+    loadFoods();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [fetchFoodsFromApi]);
+
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  const localFilteredFoods = useMemo(() => {
+    if (!normalizedSearchQuery) return allFoodsCache;
+
+    return allFoodsCache.filter((food) =>
+      foodMatchesQuery(food, normalizedSearchQuery),
+    );
+  }, [allFoodsCache, normalizedSearchQuery]);
+
+  const localSuggestions = useMemo(
+    () => localFilteredFoods.slice(0, SUGGESTION_LIMIT),
+    [localFilteredFoods],
+  );
+
+  // Instant local update on every keystroke
+  useEffect(() => {
+    if (!normalizedSearchQuery) {
+      setFoods(allFoodsCache);
+      setSuggestions([]);
+      setFoodsError(null);
+      return;
+    }
+
+    setFoods(localFilteredFoods);
+    setSuggestions(localSuggestions);
+  }, [allFoodsCache, localFilteredFoods, localSuggestions, normalizedSearchQuery]);
+
+  // Debounced API sync with request cancellation
+  useEffect(() => {
+    const query = debouncedSearchQuery.trim();
+
+    if (!query) {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+        searchAbortRef.current = null;
+      }
+      setSearchLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const requestId = ++searchRequestIdRef.current;
+
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+    }
+
+    searchAbortRef.current = controller;
+    setSearchLoading(true);
+
+    fetchFoodsFromApi(query, { signal: controller.signal })
+      .then((fetchedFoods) => {
+        if (requestId !== searchRequestIdRef.current) return;
+        setFoods(fetchedFoods);
+        setSuggestions(fetchedFoods.slice(0, SUGGESTION_LIMIT));
+      })
+      .catch((err) => {
+        if (err?.name !== "AbortError") {
+          console.error("Search request failed:", err);
+        }
+      })
+      .finally(() => {
+        if (requestId === searchRequestIdRef.current) {
+          setSearchLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [debouncedSearchQuery, fetchFoodsFromApi]);
+
+  const handleClearSearch = useCallback(() => {
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+      searchAbortRef.current = null;
+    }
+
+    // Invalidate older responses so stale results can't overwrite reset UI.
+    searchRequestIdRef.current += 1;
+
+    setSearchQuery("");
+    setSuggestions([]);
+    setFoods(allFoodsCache);
+    setSearchLoading(false);
+    setFoodsError(null);
+    Keyboard.dismiss();
+  }, [allFoodsCache]);
 
   // ─── Cart count ───
   const fetchCartCount = async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       if (!token) return;
       const res = await fetch(`${API_BASE_URL}/cart`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -151,7 +303,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
 
   // ─── Quick add to cart ───
   const quickAddToCart = async (food) => {
-    const token = await AsyncStorage.getItem("token");
+    const token = await getAccessToken();
     if (!token) {
       Alert.alert("Login required", "Please login to add items to cart");
       return;
@@ -185,6 +337,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to add");
+      DeviceEventEmitter.emit("cart:changed");
       fetchCartCount();
     } catch (err) {
       console.error("Add to cart error:", err);
@@ -568,7 +721,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
                 name="search-outline"
                 size={18}
                 color="#9CA3AF"
-                style={{ marginRight: 8 }}
+                style={styles.searchIconLeft}
               />
               <TextInput
                 value={searchQuery}
@@ -577,15 +730,66 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
                 placeholderTextColor="#9CA3AF"
                 style={styles.searchInput}
               />
-              {searchQuery.length > 0 && (
-                <Pressable
-                  onPress={() => setSearchQuery("")}
-                  style={styles.clearBtn}
-                >
-                  <Ionicons name="close-circle" size={18} color="#9CA3AF" />
-                </Pressable>
-              )}
+              <View style={styles.searchRightSlot}>
+                {searchLoading && (
+                  <ActivityIndicator
+                    size="small"
+                    color={GREEN}
+                    style={styles.searchLoader}
+                  />
+                )}
+                {searchQuery.length > 0 && (
+                  <Pressable
+                    onPress={handleClearSearch}
+                    style={styles.clearBtn}
+                  >
+                    <Ionicons name="close-circle" size={18} color="#9CA3AF" />
+                  </Pressable>
+                )}
+              </View>
             </View>
+
+            {searchQuery.trim().length > 0 && (
+              <View style={styles.suggestionsWrap}>
+                {suggestions.length > 0 ? (
+                  suggestions.map((item, index) => (
+                    <Pressable
+                      key={String(item.id || `${item.name}-${index}`)}
+                      onPress={() => setSearchQuery(item.name || "")}
+                      style={({ pressed }) => [
+                        styles.suggestionRow,
+                        pressed && { backgroundColor: "#F3F4F6" },
+                        index === suggestions.length - 1 && {
+                          borderBottomWidth: 0,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="search-outline"
+                        size={14}
+                        color="#9CA3AF"
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.suggestionTitle} numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        {item?.description ? (
+                          <Text style={styles.suggestionSubtitle} numberOfLines={1}>
+                            {item.description}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  ))
+                ) : !searchLoading ? (
+                  <View style={styles.suggestionEmptyRow}>
+                    <Text style={styles.suggestionEmptyText}>
+                      No suggestions found
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
 
             {/* ── Menu heading ── */}
             <View style={styles.menuRow}>
@@ -931,11 +1135,12 @@ const styles = StyleSheet.create({
 
   /* ── Search ── */
   searchContainer: {
-    flexDirection: "row",
-    alignItems: "center",
+    position: "relative",
+    justifyContent: "center",
     backgroundColor: "#fff",
     borderRadius: 16,
-    paddingHorizontal: 14,
+    paddingLeft: 38,
+    paddingRight: 14,
     height: 46,
     marginBottom: 14,
     borderWidth: 1,
@@ -946,13 +1151,66 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
+  searchIconLeft: {
+    position: "absolute",
+    left: 12,
+    top: 13,
+  },
   searchInput: {
-    flex: 1,
+    width: "100%",
     color: "#111827",
     fontSize: 14,
+    paddingRight: 64,
+  },
+  searchRightSlot: {
+    position: "absolute",
+    right: 10,
+    top: 0,
+    bottom: 0,
+    flexDirection: "row",
+    alignItems: "center",
   },
   clearBtn: {
     padding: 4,
+  },
+  searchLoader: {
+    marginRight: 4,
+  },
+  suggestionsWrap: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginTop: -6,
+    marginBottom: 12,
+    overflow: "hidden",
+  },
+  suggestionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  suggestionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  suggestionSubtitle: {
+    fontSize: 11,
+    color: "#6B7280",
+    marginTop: 1,
+  },
+  suggestionEmptyRow: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  suggestionEmptyText: {
+    fontSize: 12,
+    color: "#9CA3AF",
   },
 
   /* ── Menu heading ── */
