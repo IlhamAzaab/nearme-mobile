@@ -36,7 +36,9 @@ function getFirstValue(obj, keys) {
 }
 
 function maskLast4(value) {
-  const clean = String(value || "").replace(/\s+/g, "").trim();
+  const clean = String(value || "")
+    .replace(/\s+/g, "")
+    .trim();
   if (!clean) return "-";
   if (clean.length <= 4) return clean;
   return clean.slice(-4);
@@ -64,7 +66,11 @@ function normalizeDriverProfile(payload) {
     payload?.vehicle_license ||
     payload?.vehicle ||
     {};
-  const profilePhoto = getFirstValue(source, ["profile_picture", "profile_photo", "avatar_url"]);
+  const profilePhoto = getFirstValue(source, [
+    "profile_picture",
+    "profile_photo",
+    "avatar_url",
+  ]);
   const onboardingCompletedDate = getFirstValue(source, [
     "onboarding_completed_at",
     "onboarding_completed_date",
@@ -73,24 +79,46 @@ function normalizeDriverProfile(payload) {
     "onboarding_done_at",
     "onboarding_updated_at",
   ]);
-  const fallbackJoinedDate = getFirstValue(source, ["joined_date", "joined_at", "created_at"]);
+  const fallbackJoinedDate = getFirstValue(source, [
+    "joined_date",
+    "joined_at",
+    "created_at",
+  ]);
 
   return {
     raw: source,
-    driverName: getFirstValue(source, ["full_name", "driver_name", "name", "user_name", "username"]) || "-",
-    driverId: getFirstValue(source, ["driver_id", "id", "user_id", "driver_code"]) || "-",
+    driverName:
+      getFirstValue(source, [
+        "full_name",
+        "driver_name",
+        "name",
+        "user_name",
+        "username",
+      ]) || "-",
+    driverId:
+      getFirstValue(source, ["driver_id", "id", "user_id", "driver_code"]) ||
+      "-",
     profilePhoto,
-    phoneNumber: getFirstValue(source, ["phone_number", "phone", "mobile_number"]) || "-",
+    phoneNumber:
+      getFirstValue(source, ["phone_number", "phone", "mobile_number"]) || "-",
     email: getFirstValue(source, ["email"]) || "-",
     nicLast4: maskLast4(
       getFirstValue(source, ["nic_number", "nic", "national_id", "id_number"]),
     ),
     vehicleType:
       getFirstValue(source, ["vehicle_type", "vehicle_category"]) ||
-      getFirstValue(vehicleSource, ["vehicle_type", "vehicle_category", "type"]) ||
+      getFirstValue(vehicleSource, [
+        "vehicle_type",
+        "vehicle_category",
+        "type",
+      ]) ||
       "-",
     vehicleNumber:
-      getFirstValue(source, ["vehicle_number", "vehicle_no", "vehicle_registration_number"]) ||
+      getFirstValue(source, [
+        "vehicle_number",
+        "vehicle_no",
+        "vehicle_registration_number",
+      ]) ||
       getFirstValue(vehicleSource, [
         "vehicle_number",
         "vehicle_no",
@@ -168,19 +196,29 @@ export default function DriverAccountProfileScreen({ navigation }) {
       <View style={styles.bgOrbOne} />
       <View style={styles.bgOrbTwo} />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.heroCard}>
           <View style={styles.heroAvatar}>
             {profile?.profilePhoto ? (
-              <Image source={{ uri: profile.profilePhoto }} style={styles.heroPhoto} />
+              <Image
+                source={{ uri: profile.profilePhoto }}
+                style={styles.heroPhoto}
+              />
             ) : (
               <Ionicons name="person" size={26} color="#fff" />
             )}
           </View>
           <View style={styles.heroContent}>
             <Text style={styles.heroKicker}>Driver Profile</Text>
-            <Text style={styles.heroName}>{profile?.driverName || "Driver"}</Text>
-            <Text style={styles.heroUsername}>Driver ID: {profile?.driverId || "-"}</Text>
+            <Text style={styles.heroName}>
+              {profile?.driverName || "Driver"}
+            </Text>
+            <Text style={styles.heroUsername}>
+              Driver ID: {profile?.driverId || "-"}
+            </Text>
           </View>
           <View style={styles.joinedPill}>
             <Ionicons name="calendar-outline" size={12} color="#0F766E" />
@@ -190,18 +228,46 @@ export default function DriverAccountProfileScreen({ navigation }) {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Personal Details</Text>
-          <InfoRow label="Driver Name" value={profile?.driverName} icon="person-outline" />
-          <InfoRow label="Driver ID" value={profile?.driverId} icon="id-card-outline" />
-          <InfoRow label="Phone Number" value={profile?.phoneNumber} icon="call-outline" />
+          <InfoRow
+            label="Driver Name"
+            value={profile?.driverName}
+            icon="person-outline"
+          />
+          <InfoRow
+            label="Driver ID"
+            value={profile?.driverId}
+            icon="id-card-outline"
+          />
+          <InfoRow
+            label="Phone Number"
+            value={profile?.phoneNumber}
+            icon="call-outline"
+          />
           <InfoRow label="Email" value={profile?.email} icon="mail-outline" />
-          <InfoRow label="NIC / ID (Last 4)" value={profile?.nicLast4} icon="card-outline" />
+          <InfoRow
+            label="NIC / ID (Last 4)"
+            value={profile?.nicLast4}
+            icon="card-outline"
+          />
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Vehicle Details</Text>
-          <InfoRow label="Vehicle Type" value={profile?.vehicleType} icon="car-outline" />
-          <InfoRow label="Vehicle Number" value={profile?.vehicleNumber} icon="bicycle-outline" />
-          <InfoRow label="Joined Date" value={profile?.joinedDate} icon="calendar-outline" />
+          <InfoRow
+            label="Vehicle Type"
+            value={profile?.vehicleType}
+            icon="car-outline"
+          />
+          <InfoRow
+            label="Vehicle Number"
+            value={profile?.vehicleNumber}
+            icon="bicycle-outline"
+          />
+          <InfoRow
+            label="Joined Date"
+            value={profile?.joinedDate}
+            icon="calendar-outline"
+          />
         </View>
 
         <View style={styles.card}>
@@ -261,19 +327,16 @@ export default function DriverAccountProfileScreen({ navigation }) {
           />
         </View>
 
-            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-              <Ionicons name="log-out-outline" size={20} color="#fff" />
-              <Text style={styles.logoutText}>Logout</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </DriverScreenSection>
-      </View>
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+          <Ionicons name="log-out-outline" size={20} color="#fff" />
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 function InfoRow({ label, value, icon }) {
-
   return (
     <View style={styles.infoRow}>
       <View style={styles.infoLeft}>
@@ -289,7 +352,14 @@ function InfoRow({ label, value, icon }) {
   );
 }
 
-function ActionButton({ label, icon, iconBg, iconColor, onPress, isLast = false }) {
+function ActionButton({
+  label,
+  icon,
+  iconBg,
+  iconColor,
+  onPress,
+  isLast = false,
+}) {
   return (
     <TouchableOpacity
       style={[styles.actionRow, isLast ? styles.actionRowLast : null]}
@@ -365,7 +435,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.7,
   },
   heroName: { fontSize: 22, fontWeight: "800", color: "#0F172A", marginTop: 4 },
-  heroUsername: { fontSize: 13, color: "#475569", marginTop: 3, fontWeight: "600" },
+  heroUsername: {
+    fontSize: 13,
+    color: "#475569",
+    marginTop: 3,
+    fontWeight: "600",
+  },
   joinedPill: {
     borderRadius: 999,
     borderWidth: 1,
