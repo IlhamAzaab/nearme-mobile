@@ -39,6 +39,7 @@ import FreeMapView from "../../components/maps/FreeMapView";
 import { DriverMapSheetLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 import {
   approximateDistanceMeters,
   fetchOSRMRoute,
@@ -314,6 +315,7 @@ const DeliveryCard = ({ delivery, index, isFirst, driverLocation }) => {
 export default function ActiveDeliveriesScreen({ navigation }) {
   const isFocused = useIsFocused();
   const queryClient = useQueryClient();
+  const { logout } = useAuth();
   const isFocusedRef = useRef(true);
 
   useEffect(() => {
@@ -352,7 +354,7 @@ export default function ActiveDeliveriesScreen({ navigation }) {
 
   const initScreen = async () => {
     const role = await AsyncStorage.getItem("role");
-    if (role !== "driver") {
+    if (role && role !== "driver") {
       await logout();
       return;
     }
@@ -972,35 +974,35 @@ export default function ActiveDeliveriesScreen({ navigation }) {
       )}
 
       <DriverScreenSection screenKey="ActiveDeliveries" sectionIndex={0}>
-      {/* Header */}
-      <SafeAreaView edges={["top"]} style={styles.header}>
-        <View style={styles.headerContent}>
-          <View style={styles.headerLeft}>
-            <View style={styles.headerTitleRow}>
-              <Text style={styles.headerTitle}>Active Deliveries</Text>
-              {isRefreshing && (
-                <View style={styles.headerSpinner}>
-                  <ActivityIndicator size="small" color="#06C168" />
-                </View>
-              )}
+        {/* Header */}
+        <SafeAreaView edges={["top"]} style={styles.header}>
+          <View style={styles.headerContent}>
+            <View style={styles.headerLeft}>
+              <View style={styles.headerTitleRow}>
+                <Text style={styles.headerTitle}>Active Deliveries</Text>
+                {isRefreshing && (
+                  <View style={styles.headerSpinner}>
+                    <ActivityIndicator size="small" color="#06C168" />
+                  </View>
+                )}
+              </View>
+              <Text style={styles.headerSubtitle}>
+                {mode === "pickup"
+                  ? `${pickups.length} pickup${pickups.length !== 1 ? "s" : ""} ready`
+                  : `${deliveries.length} deliver${deliveries.length !== 1 ? "ies" : "y"} ready`}
+              </Text>
+              <Text style={styles.modeLabel}>
+                Mode: {mode === "pickup" ? "Pick-up" : "Delivering"}
+              </Text>
             </View>
-            <Text style={styles.headerSubtitle}>
-              {mode === "pickup"
-                ? `${pickups.length} pickup${pickups.length !== 1 ? "s" : ""} ready`
-                : `${deliveries.length} deliver${deliveries.length !== 1 ? "ies" : "y"} ready`}
-            </Text>
-            <Text style={styles.modeLabel}>
-              Mode: {mode === "pickup" ? "Pick-up" : "Delivering"}
-            </Text>
+            <Pressable
+              style={styles.availableBtn}
+              onPress={() => navigation.navigate("Available")}
+            >
+              <Text style={styles.availableBtnText}>Available</Text>
+            </Pressable>
           </View>
-          <Pressable
-            style={styles.availableBtn}
-            onPress={() => navigation.navigate("Available")}
-          >
-            <Text style={styles.availableBtnText}>Available</Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
+        </SafeAreaView>
       </DriverScreenSection>
 
       <DriverScreenSection
@@ -1008,114 +1010,114 @@ export default function ActiveDeliveriesScreen({ navigation }) {
         sectionIndex={1}
         style={{ flex: 1 }}
       >
-      {/* Content */}
-      {initialLoading ? (
-        <DriverMapSheetLoadingSkeleton />
-      ) : fetchError ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorIcon}>⚠️</Text>
-          <Text style={styles.errorTitle}>Connection Error</Text>
-          <Text style={styles.errorMessage}>{fetchError}</Text>
-          <Text style={styles.errorHint}>
-            Please check your internet connection and try again
-          </Text>
-          <Pressable
-            style={styles.retryBtn}
-            onPress={() => {
-              setFetchError(null);
-              setInitialLoading(true);
-              fetchWithLocation(false);
-            }}
-          >
-            <Text style={styles.retryBtnIcon}>🔄</Text>
-            <Text style={styles.retryBtnText}>Retry</Text>
-          </Pressable>
-        </View>
-      ) : !hasActiveDeliveries ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>📦</Text>
-          <Text style={styles.emptyTitle}>
-            {mode === "pickup" ? "No Active Pickups" : "No Active Deliveries"}
-          </Text>
-          <Text style={styles.emptySubtitle}>
-            {mode === "pickup"
-              ? "Accept deliveries to start picking up orders"
-              : "Pick up orders to start delivering to customers"}
-          </Text>
-          <Pressable
-            style={styles.findDeliveriesBtn}
-            onPress={() => navigation.navigate("Available")}
-          >
-            <Text style={styles.findDeliveriesBtnText}>
-              View Available Deliveries
+        {/* Content */}
+        {initialLoading ? (
+          <DriverMapSheetLoadingSkeleton />
+        ) : fetchError ? (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorIcon}>⚠️</Text>
+            <Text style={styles.errorTitle}>Connection Error</Text>
+            <Text style={styles.errorMessage}>{fetchError}</Text>
+            <Text style={styles.errorHint}>
+              Please check your internet connection and try again
             </Text>
-          </Pressable>
-        </View>
-      ) : (
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={onRefresh}
-              tintColor="#06C168"
-              colors={["#06C168"]}
-            />
-          }
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Pickup/Delivery Cards List */}
-          {mode === "pickup" && pickups.length > 0 && (
-            <View style={styles.deliveryCardsContainer}>
-              {pickups.map((pickup, idx) => (
-                <PickupCard
-                  key={pickup.delivery_id}
-                  pickup={pickup}
-                  index={idx}
-                  isFirst={idx === 0}
-                  driverLocation={driverLocation}
-                />
-              ))}
-            </View>
-          )}
-
-          {mode === "deliver" && deliveries.length > 0 && (
-            <View style={styles.deliveryCardsContainer}>
-              {deliveries.map((delivery, idx) => (
-                <DeliveryCard
-                  key={delivery.delivery_id}
-                  delivery={delivery}
-                  index={idx}
-                  isFirst={idx === 0}
-                  driverLocation={driverLocation}
-                />
-              ))}
-            </View>
-          )}
-
-          {/* Full Route Overview Map (optional, loads after optimization) */}
-          {mode === "pickup" && pickups.length > 1 && fullRouteData && (
-            <FullRouteMap
-              driverLocation={driverLocation}
-              pickups={pickups}
-              fullRouteData={fullRouteData}
-            />
-          )}
-        </ScrollView>
-      )}
-
-      {/* Fixed Start Button */}
-      {hasActiveDeliveries && (
-        <SafeAreaView edges={["bottom"]} style={styles.fixedBottom}>
-          <Pressable style={styles.startBtn} onPress={handlePrimaryAction}>
-            <Text style={styles.startBtnIcon}>📍</Text>
-            <Text style={styles.startBtnText}>
-              {mode === "pickup" ? "START PICK-UP" : "START DELIVERY"}
+            <Pressable
+              style={styles.retryBtn}
+              onPress={() => {
+                setFetchError(null);
+                setInitialLoading(true);
+                fetchWithLocation(false);
+              }}
+            >
+              <Text style={styles.retryBtnIcon}>🔄</Text>
+              <Text style={styles.retryBtnText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : !hasActiveDeliveries ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>📦</Text>
+            <Text style={styles.emptyTitle}>
+              {mode === "pickup" ? "No Active Pickups" : "No Active Deliveries"}
             </Text>
-          </Pressable>
-        </SafeAreaView>
-      )}
+            <Text style={styles.emptySubtitle}>
+              {mode === "pickup"
+                ? "Accept deliveries to start picking up orders"
+                : "Pick up orders to start delivering to customers"}
+            </Text>
+            <Pressable
+              style={styles.findDeliveriesBtn}
+              onPress={() => navigation.navigate("Available")}
+            >
+              <Text style={styles.findDeliveriesBtnText}>
+                View Available Deliveries
+              </Text>
+            </Pressable>
+          </View>
+        ) : (
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={onRefresh}
+                tintColor="#06C168"
+                colors={["#06C168"]}
+              />
+            }
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Pickup/Delivery Cards List */}
+            {mode === "pickup" && pickups.length > 0 && (
+              <View style={styles.deliveryCardsContainer}>
+                {pickups.map((pickup, idx) => (
+                  <PickupCard
+                    key={pickup.delivery_id}
+                    pickup={pickup}
+                    index={idx}
+                    isFirst={idx === 0}
+                    driverLocation={driverLocation}
+                  />
+                ))}
+              </View>
+            )}
+
+            {mode === "deliver" && deliveries.length > 0 && (
+              <View style={styles.deliveryCardsContainer}>
+                {deliveries.map((delivery, idx) => (
+                  <DeliveryCard
+                    key={delivery.delivery_id}
+                    delivery={delivery}
+                    index={idx}
+                    isFirst={idx === 0}
+                    driverLocation={driverLocation}
+                  />
+                ))}
+              </View>
+            )}
+
+            {/* Full Route Overview Map (optional, loads after optimization) */}
+            {mode === "pickup" && pickups.length > 1 && fullRouteData && (
+              <FullRouteMap
+                driverLocation={driverLocation}
+                pickups={pickups}
+                fullRouteData={fullRouteData}
+              />
+            )}
+          </ScrollView>
+        )}
+
+        {/* Fixed Start Button */}
+        {hasActiveDeliveries && (
+          <SafeAreaView edges={["bottom"]} style={styles.fixedBottom}>
+            <Pressable style={styles.startBtn} onPress={handlePrimaryAction}>
+              <Text style={styles.startBtnIcon}>📍</Text>
+              <Text style={styles.startBtnText}>
+                {mode === "pickup" ? "START PICK-UP" : "START DELIVERY"}
+              </Text>
+            </Pressable>
+          </SafeAreaView>
+        )}
       </DriverScreenSection>
     </View>
   );
@@ -1332,7 +1334,6 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
           });
 
           if (route?.geometry?.coordinates?.length) {
-
             const segmentPath = route.geometry.coordinates.map((coord) => ({
               latitude: coord[1],
               longitude: coord[0],
@@ -1352,7 +1353,9 @@ function FullRouteMap({ driverLocation, pickups, fullRouteData }) {
               `📍 [SEGMENT ${i + 1}/${waypoints.length - 1}] ✓ ${(route.distance / 1000).toFixed(2)} km, ${Math.ceil(route.duration / 60)} min`,
             );
           } else {
-            console.warn(`📍 [SEGMENT ${i + 1}] Failed to get OSRM route segment`);
+            console.warn(
+              `📍 [SEGMENT ${i + 1}] Failed to get OSRM route segment`,
+            );
             return;
           }
 

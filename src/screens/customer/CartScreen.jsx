@@ -1,12 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
-import * as Location from "expo-location";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,29 +13,11 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
-
-/* ── Distance & delivery fee helpers ── */
-async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
-  try {
-    const url = `https://router.project-osrm.org/route/v1/foot/${lon1},${lat1};${lon2},${lat2}?overview=false`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.code === "Ok" && data.routes?.length) {
-      const r = data.routes[0];
-      return {
-        success: true,
-        distance: r.distance / 1000,
-        duration: r.duration / 60,
-      };
-    }
-    return { success: false };
-  } catch {
-    return { success: false };
-  }
-}
+import { prefetchImageUrls } from "../../lib/imageCache";
 
 const PRIMARY = "#06C168";
 const TEXT_DARK = "#0F172A";
@@ -51,11 +31,6 @@ export default function CartScreen({ navigation, route }) {
   const [error, setError] = useState("");
   const [updatingItem, setUpdatingItem] = useState(null);
   const [selectedCartId, setSelectedCartId] = useState(null);
-  const [deliveryInfo, setDeliveryInfo] = useState({
-    distanceKm: null,
-    fee: null,
-    loading: false,
-  });
 
   const selectedCart = useMemo(
     () => carts.find((c) => c.id === selectedCartId) || null,
@@ -144,6 +119,14 @@ export default function CartScreen({ navigation, route }) {
 
       const fetchedCarts = data.carts || [];
       setCarts(fetchedCarts);
+      prefetchImageUrls(
+        fetchedCarts
+          .flatMap((cart) => [
+            cart?.restaurant?.logo_url,
+            ...(cart?.items || []).map((item) => item?.food_image_url),
+          ])
+          .slice(0, 64),
+      );
 
       // Auto-select logic: buyNow params > cartId param > keep current
       const { autoSelectCartId, autoSelectRestaurantId } = opts || {};
@@ -342,54 +325,6 @@ export default function CartScreen({ navigation, route }) {
     navigation.navigate("Checkout", { cartId });
   };
 
-  // ── Calculate delivery distance when a cart is selected ──
-  useEffect(() => {
-    if (
-      !selectedCart?.restaurant?.latitude ||
-      !selectedCart?.restaurant?.longitude
-    ) {
-      setDeliveryInfo({ distanceKm: null, fee: null, loading: false });
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setDeliveryInfo((p) => ({ ...p, loading: true }));
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") {
-          setDeliveryInfo({ distanceKm: null, fee: null, loading: false });
-          return;
-        }
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        const result = await calculateRouteDistance(
-          loc.coords.latitude,
-          loc.coords.longitude,
-          parseFloat(selectedCart.restaurant.latitude),
-          parseFloat(selectedCart.restaurant.longitude),
-        );
-        if (cancelled) return;
-        if (result.success) {
-          const fee = calculateDeliveryFee(result.distance);
-          setDeliveryInfo({ distanceKm: result.distance, fee, loading: false });
-        } else {
-          setDeliveryInfo({ distanceKm: null, fee: null, loading: false });
-        }
-      } catch {
-        if (!cancelled)
-          setDeliveryInfo({ distanceKm: null, fee: null, loading: false });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    selectedCart?.id,
-    selectedCart?.restaurant?.latitude,
-    selectedCart?.restaurant?.longitude,
-  ]);
-
   // ============================================================================
   // LOADING STATE
   // ============================================================================
@@ -545,6 +480,7 @@ export default function CartScreen({ navigation, route }) {
   if (selectedCart) {
     const itemCount =
       selectedCart?.item_count || selectedCart?.items?.length || 0;
+    const itemSubtotal = Number(selectedCart?.cart_total) || 0;
 
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -595,13 +531,13 @@ export default function CartScreen({ navigation, route }) {
                     styles.itemRowBorder,
                 ]}
               >
-                <Image
-                  source={{
-                    uri:
-                      item.food_image_url ||
-                      "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400",
-                  }}
+                <OptimizedImage
+                  uri={
+                    item.food_image_url ||
+                    "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400"
+                  }
                   style={styles.itemImage}
+                  transition={110}
                 />
                 <View style={styles.itemDetails}>
                   <View style={styles.itemTopRow}>
@@ -678,14 +614,10 @@ export default function CartScreen({ navigation, route }) {
 
           {/* Pricing Summary */}
           <View style={styles.pricingSection}>
-            <View style={styles.pricingDivider} />
             <View style={styles.pricingRow}>
-              <Text style={styles.pricingTotalLabel}>Sub Total</Text>
+              <Text style={styles.pricingTotalLabel}>Subtotal</Text>
               <Text style={styles.pricingTotalValue}>
-                {formatPrice(
-                  (Number(selectedCart.cart_total) || 0) +
-                    (deliveryInfo.fee || 0),
-                )}
+                {formatPrice(itemSubtotal)}
               </Text>
             </View>
           </View>
@@ -766,9 +698,10 @@ export default function CartScreen({ navigation, route }) {
                 <View style={styles.restaurantCardRow}>
                   {/* Round Logo */}
                   {item?.restaurant?.logo_url ? (
-                    <Image
-                      source={{ uri: item.restaurant.logo_url }}
+                    <OptimizedImage
+                      uri={item.restaurant.logo_url}
                       style={styles.restaurantAvatar}
+                      transition={90}
                     />
                   ) : (
                     <View style={styles.restaurantAvatarFallback}>
@@ -797,7 +730,8 @@ export default function CartScreen({ navigation, route }) {
                       </Text>
                     </View>
                     <Text style={styles.restaurantCardMeta}>
-                      {count} item{count !== 1 ? "s" : ""} • {formatPrice(cartTotal)}
+                      {count} item{count !== 1 ? "s" : ""} •{" "}
+                      {formatPrice(cartTotal)}
                     </Text>
                   </View>
                 </View>
@@ -879,7 +813,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 4,
     backgroundColor: "rgba(255,255,255,0.9)",
     borderBottomWidth: 1,
     borderBottomColor: BORDER,

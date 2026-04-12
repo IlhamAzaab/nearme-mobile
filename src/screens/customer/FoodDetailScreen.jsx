@@ -3,10 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Animated,
   DeviceEventEmitter,
   Dimensions,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,47 +12,12 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import OptimizedImage from "../../components/common/OptimizedImage";
+import SkeletonBlock from "../../components/common/SkeletonBlock";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
-
-/* ── Skeleton shimmer block ── */
-function SkeletonBlock({ width: w, height: h, borderRadius: br = 12, style }) {
-  const shimmer = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(shimmer, {
-          toValue: 1,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shimmer, {
-          toValue: 0,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-      ]),
-    ).start();
-  }, []);
-  const opacity = shimmer.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.25, 0.55],
-  });
-  return (
-    <Animated.View
-      style={[
-        {
-          width: w,
-          height: h,
-          borderRadius: br,
-          backgroundColor: "#CBD5E1",
-          opacity,
-        },
-        style,
-      ]}
-    />
-  );
-}
+import { prefetchImageUrls } from "../../lib/imageCache";
+import { fetchJsonWithCache, getCachedJson } from "../../lib/publicDataCache";
 
 function FoodDetailSkeleton({ onClose, insets }) {
   return (
@@ -125,10 +88,16 @@ export default function FoodDetailScreen({ route, navigation }) {
   // react-router useParams -> RN route.params
   const { restaurantId, foodId } = route.params;
   const insets = useSafeAreaInsets();
+  const restaurantCacheKey = `public:restaurant:${restaurantId}`;
+  const foodCacheKey = `public:restaurant:${restaurantId}:food:${foodId}`;
+  const cachedRestaurantData = getCachedJson(restaurantCacheKey, 180000);
+  const cachedFoodData = getCachedJson(foodCacheKey, 180000);
 
-  const [restaurant, setRestaurant] = useState(null);
-  const [food, setFood] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [restaurant, setRestaurant] = useState(() => cachedRestaurantData?.restaurant || null);
+  const [food, setFood] = useState(() => cachedFoodData?.food || null);
+  const [loading, setLoading] = useState(
+    () => !(cachedRestaurantData?.restaurant && cachedFoodData?.food),
+  );
   const [error, setError] = useState("");
 
   const [selectedSize, setSelectedSize] = useState("regular");
@@ -141,26 +110,51 @@ export default function FoodDetailScreen({ route, navigation }) {
 
   const fetchFood = async () => {
     try {
-      setLoading(true);
+      const shouldShowLoading = !(restaurant && food);
+      if (shouldShowLoading) {
+        setLoading(true);
+      }
       setError("");
 
       // Restaurant
-      const restaurantRes = await fetch(
-        `${API_BASE_URL}/public/restaurants/${restaurantId}`,
+      const restaurantData = await fetchJsonWithCache(
+        restaurantCacheKey,
+        async () => {
+          const restaurantRes = await fetch(
+            `${API_BASE_URL}/public/restaurants/${restaurantId}`,
+          );
+          const payload = await restaurantRes.json().catch(() => ({}));
+          if (!restaurantRes.ok) {
+            throw new Error(payload.message || "Restaurant not found");
+          }
+          return payload;
+        },
+        { ttlMs: 180000 },
       );
-      const restaurantData = await restaurantRes.json().catch(() => ({}));
-      if (!restaurantRes.ok)
-        throw new Error(restaurantData.message || "Restaurant not found");
       setRestaurant(restaurantData.restaurant);
 
       // Food
-      const foodRes = await fetch(
-        `${API_BASE_URL}/public/restaurants/${restaurantId}/foods/${foodId}`,
+      const foodData = await fetchJsonWithCache(
+        foodCacheKey,
+        async () => {
+          const foodRes = await fetch(
+            `${API_BASE_URL}/public/restaurants/${restaurantId}/foods/${foodId}`,
+          );
+          const payload = await foodRes.json().catch(() => ({}));
+          if (!foodRes.ok) {
+            throw new Error(payload.message || "Food not found");
+          }
+          return payload;
+        },
+        { ttlMs: 180000 },
       );
-      const foodData = await foodRes.json().catch(() => ({}));
-      if (!foodRes.ok) throw new Error(foodData.message || "Food not found");
 
       setFood(foodData.food);
+      prefetchImageUrls([
+        restaurantData?.restaurant?.logo_url,
+        restaurantData?.restaurant?.cover_image_url,
+        foodData?.food?.image_url,
+      ]);
       setSelectedSize(foodData.food?.extra_price ? "regular" : "regular");
     } catch (e) {
       setError(e.message || "Something went wrong");
@@ -292,19 +286,19 @@ export default function FoodDetailScreen({ route, navigation }) {
 
       <ScrollView
         style={styles.page}
-        contentContainerStyle={{ paddingBottom: 130 }}
+        contentContainerStyle={{ paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
       >
         {/* Hero Image */}
         <View style={styles.heroWrap}>
           <View style={styles.heroContainer}>
-            <Image
-              source={{
-                uri:
-                  food.image_url ||
-                  "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=900&q=80",
-              }}
+            <OptimizedImage
+              uri={
+                food.image_url ||
+                "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=900&q=80"
+              }
               style={styles.heroImg}
+              transition={120}
             />
             {/* Restaurant Badge */}
             <View style={styles.restaurantBadge}>
@@ -340,69 +334,82 @@ export default function FoodDetailScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* Product Info */}
-        <View style={styles.productInfo}>
-          <View style={styles.productTop}>
-            <View style={styles.productLeft}>
-              <Text style={styles.productName}>{food.name}</Text>
+        {/* Unified details card */}
+        <View style={styles.detailsCard}>
+          {/* Product Info */}
+          <View style={styles.productInfo}>
+            <View style={styles.productTop}>
+              <View style={styles.productLeft}>
+                <Text style={styles.productName}>{food.name}</Text>
+              </View>
             </View>
+            {!!food.description && (
+              <Text style={styles.productDesc}>{food.description}</Text>
+            )}
           </View>
-          {!!food.description && (
-            <Text style={styles.productDesc}>{food.description}</Text>
-          )}
-        </View>
 
-        {/* Size Selection */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionLabel}>SELECT SIZE</Text>
-          <View style={styles.sizeContainer}>
-            <Pressable
-              onPress={() => setSelectedSize("regular")}
-              style={[
-                styles.sizeOption,
-                selectedSize === "regular" && styles.sizeOptionActive,
-              ]}
-            >
-              {food.regular_size ? (
-                <Text
-                  style={[
-                    styles.sizeOptionName,
-                    selectedSize === "regular" && styles.sizeOptionNameActive,
-                  ]}
-                >
-                  {food.regular_size}
-                </Text>
-              ) : (
-                <Text
-                  style={[
-                    styles.sizeOptionName,
-                    selectedSize === "regular" && styles.sizeOptionNameActive,
-                  ]}
-                >
-                  Regular
-                </Text>
-              )}
-              {food.regular_portion ? (
-                <Text
-                  style={[
-                    styles.sizePortionText,
-                    selectedSize === "regular" && styles.sizePortionTextActive,
-                  ]}
-                >
-                  portion {food.regular_portion}
-                </Text>
-              ) : null}
-              <View style={styles.sizePriceWrap}>
-                {food.offer_price ? (
-                  <>
-                    <Text
-                      style={[
-                        styles.sizeOldPrice,
-                        selectedSize === "regular" && styles.sizeOldPriceActive,
-                      ]}
-                    >
-                      {formatPrice(food.regular_price)}
-                    </Text>
+          {/* Size Selection */}
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionLabel}>SELECT SIZE</Text>
+            <View style={styles.sizeContainer}>
+              <Pressable
+                onPress={() => setSelectedSize("regular")}
+                style={[
+                  styles.sizeOption,
+                  selectedSize === "regular" && styles.sizeOptionActive,
+                ]}
+              >
+                {food.regular_size ? (
+                  <Text
+                    style={[
+                      styles.sizeOptionName,
+                      selectedSize === "regular" && styles.sizeOptionNameActive,
+                    ]}
+                  >
+                    {food.regular_size}
+                  </Text>
+                ) : (
+                  <Text
+                    style={[
+                      styles.sizeOptionName,
+                      selectedSize === "regular" && styles.sizeOptionNameActive,
+                    ]}
+                  >
+                    Regular
+                  </Text>
+                )}
+                {food.regular_portion ? (
+                  <Text
+                    style={[
+                      styles.sizePortionText,
+                      selectedSize === "regular" && styles.sizePortionTextActive,
+                    ]}
+                  >
+                    portion {food.regular_portion}
+                  </Text>
+                ) : null}
+                <View style={styles.sizePriceWrap}>
+                  {food.offer_price ? (
+                    <>
+                      <Text
+                        style={[
+                          styles.sizeOldPrice,
+                          selectedSize === "regular" && styles.sizeOldPriceActive,
+                        ]}
+                      >
+                        {formatPrice(food.regular_price)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.sizeOptionPrice,
+                          selectedSize === "regular" &&
+                            styles.sizeOptionPriceActive,
+                        ]}
+                      >
+                        {formatPrice(food.offer_price)}
+                      </Text>
+                    </>
+                  ) : (
                     <Text
                       style={[
                         styles.sizeOptionPrice,
@@ -410,176 +417,165 @@ export default function FoodDetailScreen({ route, navigation }) {
                           styles.sizeOptionPriceActive,
                       ]}
                     >
-                      {formatPrice(food.offer_price)}
+                      {formatPrice(food.regular_price)}
                     </Text>
-                  </>
-                ) : (
-                  <Text
-                    style={[
-                      styles.sizeOptionPrice,
-                      selectedSize === "regular" &&
-                        styles.sizeOptionPriceActive,
-                    ]}
-                  >
-                    {formatPrice(food.regular_price)}
-                  </Text>
-                )}
-              </View>
-              {selectedSize === "regular" && (
-                <View style={styles.sizeCheck}>
-                  <Ionicons name="checkmark-circle" size={16} color="#06C168" />
+                  )}
                 </View>
-              )}
-            </Pressable>
-
-            {!!food.extra_price && (
-              <Pressable
-                onPress={() => setSelectedSize("large")}
-                style={[
-                  styles.sizeOption,
-                  selectedSize === "large" && styles.sizeOptionActive,
-                ]}
-              >
-                {food.extra_size ? (
-                  <Text
-                    style={[
-                      styles.sizeOptionName,
-                      selectedSize === "large" && styles.sizeOptionNameActive,
-                    ]}
-                  >
-                    {food.extra_size}
-                  </Text>
-                ) : (
-                  <Text
-                    style={[
-                      styles.sizeOptionName,
-                      selectedSize === "large" && styles.sizeOptionNameActive,
-                    ]}
-                  >
-                    Large
-                  </Text>
+                {selectedSize === "regular" && (
+                  <View style={styles.sizeCheck}>
+                    <Ionicons name="checkmark-circle" size={16} color="#06C168" />
+                  </View>
                 )}
-                {food.extra_portion ? (
-                  <Text
-                    style={[
-                      styles.sizePortionText,
-                      selectedSize === "large" && styles.sizePortionTextActive,
-                    ]}
-                  >
-                    portion {food.extra_portion}
-                  </Text>
-                ) : null}
-                <View style={styles.sizePriceWrap}>
-                  {food.extra_offer_price ? (
-                    <>
+              </Pressable>
+
+              {!!food.extra_price && (
+                <Pressable
+                  onPress={() => setSelectedSize("large")}
+                  style={[
+                    styles.sizeOption,
+                    selectedSize === "large" && styles.sizeOptionActive,
+                  ]}
+                >
+                  {food.extra_size ? (
+                    <Text
+                      style={[
+                        styles.sizeOptionName,
+                        selectedSize === "large" && styles.sizeOptionNameActive,
+                      ]}
+                    >
+                      {food.extra_size}
+                    </Text>
+                  ) : (
+                    <Text
+                      style={[
+                        styles.sizeOptionName,
+                        selectedSize === "large" && styles.sizeOptionNameActive,
+                      ]}
+                    >
+                      Large
+                    </Text>
+                  )}
+                  {food.extra_portion ? (
+                    <Text
+                      style={[
+                        styles.sizePortionText,
+                        selectedSize === "large" && styles.sizePortionTextActive,
+                      ]}
+                    >
+                      portion {food.extra_portion}
+                    </Text>
+                  ) : null}
+                  <View style={styles.sizePriceWrap}>
+                    {food.extra_offer_price ? (
+                      <>
+                        <Text
+                          style={[
+                            styles.sizeOldPrice,
+                            selectedSize === "large" && styles.sizeOldPriceActive,
+                          ]}
+                        >
+                          {formatPrice(food.extra_price)}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.sizeOptionPrice,
+                            selectedSize === "large" &&
+                              styles.sizeOptionPriceActive,
+                          ]}
+                        >
+                          {formatPrice(food.extra_offer_price)}
+                        </Text>
+                      </>
+                    ) : (
                       <Text
                         style={[
-                          styles.sizeOldPrice,
-                          selectedSize === "large" && styles.sizeOldPriceActive,
+                          styles.sizeOptionPrice,
+                          selectedSize === "large" && styles.sizeOptionPriceActive,
                         ]}
                       >
                         {formatPrice(food.extra_price)}
                       </Text>
-                      <Text
-                        style={[
-                          styles.sizeOptionPrice,
-                          selectedSize === "large" &&
-                            styles.sizeOptionPriceActive,
-                        ]}
-                      >
-                        {formatPrice(food.extra_offer_price)}
-                      </Text>
-                    </>
-                  ) : (
-                    <Text
-                      style={[
-                        styles.sizeOptionPrice,
-                        selectedSize === "large" &&
-                          styles.sizeOptionPriceActive,
-                      ]}
-                    >
-                      {formatPrice(food.extra_price)}
-                    </Text>
-                  )}
-                </View>
-                {selectedSize === "large" && (
-                  <View style={styles.sizeCheck}>
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={16}
-                      color="#06C168"
-                    />
+                    )}
                   </View>
-                )}
-              </Pressable>
-            )}
+                  {selectedSize === "large" && (
+                    <View style={styles.sizeCheck}>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={16}
+                        color="#06C168"
+                      />
+                    </View>
+                  )}
+                </Pressable>
+              )}
+            </View>
           </View>
-        </View>
 
-        {/* Quantity Stepper */}
-        <View style={styles.quantityContainer}>
-          <View style={styles.quantityInner}>
-            <Text style={styles.quantityLabel}>Quantity</Text>
-            <View style={styles.quantityStepper}>
+          {/* Quantity Stepper */}
+          <View style={styles.quantityContainer}>
+            <View style={styles.quantityInner}>
+              <Text style={styles.quantityLabel}>Quantity</Text>
+              <View style={styles.quantityStepper}>
+                <Pressable
+                  onPress={() => setQuantity(Math.max(1, quantity - 1))}
+                  style={styles.qtyBtnMinus}
+                >
+                  <Ionicons name="remove" size={20} color="#0F172A" />
+                </Pressable>
+                <Text style={styles.qtyValue}>
+                  {String(quantity).padStart(2, "0")}
+                </Text>
+                <Pressable
+                  onPress={() => setQuantity(quantity + 1)}
+                  style={styles.qtyBtnPlus}
+                >
+                  <Ionicons name="add" size={20} color="#fff" />
+                </Pressable>
+              </View>
+            </View>
+          </View>
+
+          {/* Actions in same unified view */}
+          <View style={styles.bottomActions}>
+            <View style={styles.btnRow}>
               <Pressable
-                onPress={() => setQuantity(Math.max(1, quantity - 1))}
-                style={styles.qtyBtnMinus}
+                disabled={addingToCart}
+                onPress={() => addToCart({ goToCheckout: true })}
+                style={({ pressed }) => [
+                  styles.buyNowBtn,
+                  pressed && { opacity: 0.8 },
+                  addingToCart && { opacity: 0.6 },
+                ]}
               >
-                <Ionicons name="remove" size={20} color="#0F172A" />
+                <Text style={styles.buyNowText}>
+                  {addingToCart ? "Buying..." : "Buy Now"}
+                </Text>
               </Pressable>
-              <Text style={styles.qtyValue}>
-                {String(quantity).padStart(2, "0")}
-              </Text>
               <Pressable
-                onPress={() => setQuantity(quantity + 1)}
-                style={styles.qtyBtnPlus}
+                disabled={addingToCart}
+                onPress={() => addToCart()}
+                style={({ pressed }) => [
+                  styles.addToCartBtn,
+                  pressed && { opacity: 0.8 },
+                  addingToCart && { opacity: 0.6 },
+                ]}
               >
-                <Ionicons name="add" size={20} color="#fff" />
+                <Ionicons
+                  name="cart"
+                  size={18}
+                  color="#fff"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.addToCartText}>
+                  {addingToCart
+                    ? "Adding..."
+                    : `Add to Cart • ${formatPrice(totalPrice)}`}
+                </Text>
               </Pressable>
             </View>
           </View>
         </View>
       </ScrollView>
-
-      {/* Bottom Actions - Fixed */}
-      <View style={styles.bottomActions}>
-        <View style={styles.btnRow}>
-          <Pressable
-            disabled={addingToCart}
-            onPress={() => addToCart({ goToCheckout: true })}
-            style={({ pressed }) => [
-              styles.buyNowBtn,
-              pressed && { opacity: 0.8 },
-              addingToCart && { opacity: 0.6 },
-            ]}
-          >
-            <Text style={styles.buyNowText}>
-              {addingToCart ? "Buying..." : "Buy Now"}
-            </Text>
-          </Pressable>
-          <Pressable
-            disabled={addingToCart}
-            onPress={() => addToCart()}
-            style={({ pressed }) => [
-              styles.addToCartBtn,
-              pressed && { opacity: 0.8 },
-              addingToCart && { opacity: 0.6 },
-            ]}
-          >
-            <Ionicons
-              name="cart"
-              size={18}
-              color="#fff"
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles.addToCartText}>
-              {addingToCart
-                ? "Adding..."
-                : `Add to Cart • ${formatPrice(totalPrice)}`}
-            </Text>
-          </Pressable>
-        </View>
-      </View>
     </View>
   );
 }
@@ -601,7 +597,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 2,
     backgroundColor: "rgba(255,255,255,0.85)",
   },
   closeBtn: {
@@ -647,7 +643,7 @@ const styles = StyleSheet.create({
   },
   heroContainer: {
     width: "100%",
-    aspectRatio: 4 / 3,
+    height: 260,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
     overflow: "hidden",
@@ -718,10 +714,26 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
 
+  detailsCard: {
+    marginHorizontal: 14,
+    marginTop: 14,
+    marginBottom: 8,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#EEF2F7",
+    paddingVertical: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+
   // Product Info
   productInfo: {
     paddingHorizontal: 20,
-    paddingTop: 24,
+    paddingTop: 8,
   },
   productTop: {
     flexDirection: "row",
@@ -772,7 +784,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   productDesc: {
-    marginTop: 12,
+    marginTop: 8,
     fontSize: 14,
     color: "#64748B",
     lineHeight: 20,
@@ -782,7 +794,7 @@ const styles = StyleSheet.create({
   // Size Selection
   sectionContainer: {
     paddingHorizontal: 20,
-    marginTop: 32,
+    marginTop: 20,
   },
   sectionLabel: {
     fontSize: 12,
@@ -793,7 +805,7 @@ const styles = StyleSheet.create({
   sizeContainer: {
     flexDirection: "row",
     gap: 12,
-    marginTop: 16,
+    marginTop: 12,
   },
   sizeOption: {
     flex: 1,
@@ -866,7 +878,7 @@ const styles = StyleSheet.create({
   // Quantity
   quantityContainer: {
     paddingHorizontal: 20,
-    marginTop: 32,
+    marginTop: 18,
   },
   quantityInner: {
     flexDirection: "row",
@@ -924,16 +936,10 @@ const styles = StyleSheet.create({
 
   // Bottom Actions
   bottomActions: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "rgba(255,255,255,0.97)",
+    backgroundColor: "transparent",
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 24,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F5F9",
+    paddingBottom: 6,
   },
   btnRow: {
     flexDirection: "row",

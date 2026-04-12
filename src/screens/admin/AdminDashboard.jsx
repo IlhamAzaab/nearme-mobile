@@ -39,7 +39,7 @@ const statusPalette = {
   cancelled: { label: "Cancelled", bg: "#f3f4f6", text: "#4b5563" },
 };
 
-const formatCurrency = (value) => `Rs. ${(value || 0).toLocaleString()}`;
+const formatCurrency = (value) => `Rs.${(value || 0).toLocaleString()}`;
 
 const formatOrderDateTime = (dateStr) => {
   if (!dateStr) return { date: "", time: "" };
@@ -654,7 +654,7 @@ export default function AdminDashboard() {
           <View style={styles.grid2}>
             <View style={styles.metricCard}>
               <View style={styles.metricHead}>
-                <Text style={styles.metricLabelTop}>Today's Sales</Text>
+                <Text style={styles.metricLabelTop}>Sales</Text>
                 <View
                   style={[
                     styles.changePill,
@@ -690,7 +690,7 @@ export default function AdminDashboard() {
 
             <View style={styles.metricCard}>
               <View style={styles.metricHead}>
-                <Text style={styles.metricLabelTop}>Today's Orders</Text>
+                <Text style={styles.metricLabelTop}>Orders</Text>
                 <View
                   style={[
                     styles.changePill,
@@ -1169,7 +1169,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   metricLabelTop: {
-    fontSize: 13,
+    fontSize: 14,
     color: "#374151",
     fontWeight: "700",
   },
@@ -1195,7 +1195,7 @@ const styles = StyleSheet.create({
     color: "#111827",
   },
   metricValuePriority: {
-    fontSize: 38,
+    fontSize: 25,
     lineHeight: 42,
     fontWeight: "900",
     color: "#111827",

@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#E0F2FE",
   },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  scroll: { padding: 16, paddingTop: 18, paddingBottom: 40 },
+  scroll: { padding: 16, paddingTop: 8, paddingBottom: 40 },
   heroCard: {
     flexDirection: "row",
     alignItems: "center",

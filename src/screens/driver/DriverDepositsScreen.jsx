@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { useIsFocused } from "@react-navigation/native";
 import { useState } from "react";
@@ -23,6 +22,7 @@ import { DriverDashboardLoadingSkeleton } from "../../components/driver/DriverAp
 import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 export default function DriverDepositsScreen({ navigation }) {
   const isFocused = useIsFocused();
@@ -36,8 +36,10 @@ export default function DriverDepositsScreen({ navigation }) {
   const depositsQuery = useQuery({
     queryKey: ["driver", "deposits", "overview"],
     queryFn: async () => {
-      const token = await AsyncStorage.getItem("token");
-      if (!token) throw new Error("No authentication token");
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error("Authentication session is unavailable");
+      }
 
       const headers = { Authorization: `Bearer ${token}` };
       const [bRes, hRes, mRes] = await Promise.all([
@@ -52,10 +54,31 @@ export default function DriverDepositsScreen({ navigation }) {
         mRes.json().catch(() => ({})),
       ]);
 
+      if (bRes.status === 401 || bRes.status === 403) {
+        throw new Error("Authentication expired. Please sign in again.");
+      }
+
+      if (!bRes.ok) {
+        throw new Error(bData?.message || "Failed to fetch deposit balance");
+      }
+
+      const normalizedBalance =
+        bData?.balance || bData?.data?.balance || bData?.result?.balance || {};
+      const normalizedHistory = Array.isArray(hData?.deposits)
+        ? hData.deposits
+        : Array.isArray(hData?.data?.deposits)
+          ? hData.data.deposits
+          : [];
+      const normalizedManagerBank =
+        mData?.bankDetails ||
+        mData?.data?.bankDetails ||
+        mData?.result?.bankDetails ||
+        null;
+
       return {
-        balance: bData?.success ? bData.balance || {} : {},
-        history: hData?.success ? hData.deposits || [] : [],
-        managerBank: mData?.success ? mData.bankDetails || null : null,
+        balance: normalizedBalance,
+        history: normalizedHistory,
+        managerBank: normalizedManagerBank,
       };
     },
     initialData: () =>
@@ -105,7 +128,11 @@ export default function DriverDepositsScreen({ navigation }) {
       return Alert.alert("Error", "Please attach proof of payment");
     setSubmitting(true);
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
+      if (!token) {
+        Alert.alert("Session issue", "Authentication session is unavailable.");
+        return;
+      }
       const formData = new FormData();
       formData.append("amount", String(amount));
       formData.append("proof", {
@@ -117,7 +144,6 @@ export default function DriverDepositsScreen({ navigation }) {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
-          "Content-Type": "multipart/form-data",
         },
         body: formData,
       });
@@ -154,16 +180,25 @@ export default function DriverDepositsScreen({ navigation }) {
   };
 
   const loading = depositsQuery.isLoading && !depositsQuery.data;
+  const queryErrorMessage = depositsQuery.isError
+    ? depositsQuery.error?.message || "Unable to load deposits"
+    : "";
 
   if (loading)
     return (
-      <SafeAreaView style={s.container} edges={["left", "right", "bottom"]}>
+      <SafeAreaView
+        style={s.container}
+        edges={["left", "right", "top"]}
+      >
         <DriverDashboardLoadingSkeleton />
       </SafeAreaView>
     );
 
   return (
-    <SafeAreaView style={s.container} edges={["left", "right", "bottom"]}>
+    <SafeAreaView
+      style={s.container}
+      edges={["left", "right", "top"]}
+    >
       <View style={{ flex: 1 }}>
         <DriverScreenSection screenKey="DriverDeposits" sectionIndex={0}>
           <DriverScreenHeader
@@ -188,6 +223,13 @@ export default function DriverDepositsScreen({ navigation }) {
               />
             }
           >
+            {queryErrorMessage ? (
+              <View style={s.errorBanner}>
+                <Ionicons name="alert-circle" size={16} color="#dc2626" />
+                <Text style={s.errorBannerText}>{queryErrorMessage}</Text>
+              </View>
+            ) : null}
+
             {/* Balance Card */}
             <View style={s.balanceCard}>
               <Text style={s.balanceLabel}>Pending Deposit</Text>
@@ -451,6 +493,24 @@ export default function DriverDepositsScreen({ navigation }) {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
   scroll: { padding: 16, paddingBottom: 40 },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#fee2e2",
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  errorBannerText: {
+    flex: 1,
+    color: "#991b1b",
+    fontSize: 12,
+    fontWeight: "600",
+  },
   balanceCard: {
     backgroundColor: "#fff",
     borderRadius: 20,

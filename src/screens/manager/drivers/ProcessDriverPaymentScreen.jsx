@@ -142,7 +142,7 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#13ECB9" />
         </View>
@@ -152,7 +152,7 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
 
   if (!driver) {
     return (
-      <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={styles.center}>
           <Ionicons name="person-outline" size={48} color="#D1D5DB" />
           <Text style={{ color: "#6B7280", marginTop: 8 }}>
@@ -170,7 +170,7 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}

@@ -108,6 +108,32 @@ function humanizeStatus(status) {
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
+function getStatusScreenName(status) {
+  const normalized = String(status || "").toLowerCase().trim();
+
+  switch (normalized) {
+    case "placed":
+      return "PlacingOrder";
+    case "pending":
+    case "received":
+    case "preparing":
+    case "ready":
+      return "OrderReceived";
+    case "accepted":
+    case "driver_accepted":
+    case "driver_assigned":
+      return "DriverAccepted";
+    case "picked_up":
+      return "OrderPickedUp";
+    case "on_the_way":
+      return "OrderOnTheWay";
+    case "delivered":
+      return "OrderDelivered";
+    default:
+      return "OrderReceived";
+  }
+}
+
 function buildItemsFromOrder(order) {
   const items = order?.order_items || order?.items || [];
   if (!Array.isArray(items)) return [];
@@ -578,9 +604,22 @@ export default function NotificationsScreen({ navigation, route }) {
                   ]}
                   onPress={() => {
                     const orderId = selectedNotification?.orderId;
+                    const status =
+                      selectedNotification?.order?.effective_status ||
+                      selectedNotification?.order?.delivery_status ||
+                      selectedNotification?.order?.status ||
+                      selectedNotification?.payload?.effective_status ||
+                      selectedNotification?.payload?.delivery_status ||
+                      selectedNotification?.payload?.status ||
+                      selectedNotification?.item?.status;
+                    const target = getStatusScreenName(status);
                     closeNotificationDetails();
                     if (orderId) {
-                      navigation.navigate("OrderTracking", { orderId });
+                      navigation.navigate(target, {
+                        orderId,
+                        status,
+                        statusScreenMode: true,
+                      });
                     }
                   }}
                 >

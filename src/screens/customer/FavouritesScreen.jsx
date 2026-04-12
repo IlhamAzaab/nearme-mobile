@@ -3,7 +3,6 @@ import React, { useCallback } from "react";
 import {
   Alert,
   FlatList,
-  Image,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import { useFavourites } from "../../context/FavouritesContext";
 
 export default function FavouritesScreen({ navigation }) {
@@ -35,7 +35,7 @@ export default function FavouritesScreen({ navigation }) {
       <View style={st.card}>
         <View style={st.imgWrap}>
           {item.image_url ? (
-            <Image source={{ uri: item.image_url }} style={st.img} />
+            <OptimizedImage uri={item.image_url} style={st.img} transition={100} />
           ) : (
             <View style={st.imgFallback}>
               <Ionicons name="fast-food" size={24} color="#06C168" />

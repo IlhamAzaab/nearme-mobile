@@ -285,7 +285,7 @@ const OperationsConfigScreen = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#13ECB9" />
           <Text style={{ marginTop: 12, color: "#64748B" }}>
@@ -318,7 +318,7 @@ const OperationsConfigScreen = ({ navigation }) => {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}

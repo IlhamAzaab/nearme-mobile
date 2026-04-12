@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import MeezoLogo from "../../components/common/MeezoLogo";
 import { useAuth } from "../../app/providers/AuthProvider";
@@ -256,7 +257,7 @@ export default function VerifyOtpScreen({ navigation, route }) {
   };
 
   return (
-    <View style={styles.pageContainer}>
+    <SafeAreaView style={styles.pageContainer} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
         style={styles.pageContainer}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -399,7 +400,7 @@ export default function VerifyOtpScreen({ navigation, route }) {
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
+    </SafeAreaView>
   );
 }
 

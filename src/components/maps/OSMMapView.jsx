@@ -3,7 +3,13 @@
  * NO Google Maps API key required!
  */
 
-import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from "react";
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import { View, StyleSheet, Platform, ActivityIndicator } from "react-native";
 import { WebView } from "react-native-webview";
 
@@ -90,11 +96,11 @@ const LEAFLET_HTML = `
       });
     }
 
-    function createIcon(type, emoji, iconOnly, customHtml) {
+    function createIcon(type, emoji, iconOnly, customHtml, iconSizeOverride, iconAnchorOverride) {
       const markerClass = iconOnly ? 'icon-only-marker' : (type + '-marker');
       const hasCustomHtml = !!customHtml;
-      const iconSize = hasCustomHtml ? [44, 44] : (iconOnly ? [24, 24] : [28, 28]);
-      const iconAnchor = hasCustomHtml ? [22, 22] : (iconOnly ? [12, 12] : [14, 14]);
+      const iconSize = iconSizeOverride || (hasCustomHtml ? [44, 44] : (iconOnly ? [24, 24] : [28, 28]));
+      const iconAnchor = iconAnchorOverride || (hasCustomHtml ? [22, 22] : (iconOnly ? [12, 12] : [14, 14]));
       return L.divIcon({
         className: 'custom-marker',
         html: customHtml || ('<div class="' + markerClass + '">' + emoji + '</div>'),
@@ -103,11 +109,11 @@ const LEAFLET_HTML = `
       });
     }
 
-    function addMarker(id, lat, lng, type, title, emoji, iconOnly, customHtml) {
+    function addMarker(id, lat, lng, type, title, emoji, iconOnly, customHtml, iconSizeOverride, iconAnchorOverride) {
       if (markers[id]) {
         map.removeLayer(markers[id]);
       }
-      const icon = createIcon(type, emoji || getDefaultEmoji(type), !!iconOnly, customHtml);
+      const icon = createIcon(type, emoji || getDefaultEmoji(type), !!iconOnly, customHtml, iconSizeOverride, iconAnchorOverride);
       markers[id] = L.marker([lat, lng], { icon: icon })
         .addTo(map);
       if (title) {
@@ -115,11 +121,11 @@ const LEAFLET_HTML = `
       }
     }
 
-    function smoothMoveMarker(id, lat, lng, type, title, emoji, iconOnly, customHtml) {
+    function smoothMoveMarker(id, lat, lng, type, title, emoji, iconOnly, customHtml, iconSizeOverride, iconAnchorOverride) {
       if (markers[id]) {
         markers[id].setLatLng([lat, lng]);
       } else {
-        addMarker(id, lat, lng, type, title, emoji, iconOnly, customHtml);
+        addMarker(id, lat, lng, type, title, emoji, iconOnly, customHtml, iconSizeOverride, iconAnchorOverride);
       }
     }
 
@@ -153,7 +159,7 @@ const LEAFLET_HTML = `
       }
     }
 
-    function addPolyline(id, coordinates, color, width, dashArray) {
+    function addPolyline(id, coordinates, color, width, dashArray, dashOffset, opacity) {
       if (polylines[id]) {
         map.removeLayer(polylines[id]);
       }
@@ -161,10 +167,13 @@ const LEAFLET_HTML = `
       let options = {
         color: color || '#3B82F6',
         weight: width || 4,
-        opacity: 0.8
+        opacity: (opacity === undefined || opacity === null || opacity === '') ? 0.8 : Number(opacity)
       };
       if (dashArray) {
         options.dashArray = dashArray;
+      }
+      if (dashOffset !== undefined && dashOffset !== null && dashOffset !== '') {
+        options.dashOffset = String(dashOffset);
       }
       polylines[id] = L.polyline(latlngs, options).addTo(map);
     }
@@ -176,12 +185,19 @@ const LEAFLET_HTML = `
       }
     }
 
-    function updatePolyline(id, coordinates, color, width, dashArray) {
+    function updatePolyline(id, coordinates, color, width, dashArray, dashOffset, opacity) {
       const latlngs = coordinates.map(c => [c.latitude, c.longitude]);
       if (polylines[id]) {
         polylines[id].setLatLngs(latlngs);
+        polylines[id].setStyle({
+          color: color || '#3B82F6',
+          weight: width || 4,
+          opacity: (opacity === undefined || opacity === null || opacity === '') ? 0.8 : Number(opacity),
+          dashArray: dashArray || null,
+          dashOffset: (dashOffset !== undefined && dashOffset !== null && dashOffset !== '') ? String(dashOffset) : null,
+        });
       } else {
-        addPolyline(id, coordinates, color, width, dashArray);
+        addPolyline(id, coordinates, color, width, dashArray, dashOffset, opacity);
       }
     }
 
@@ -228,232 +244,257 @@ const LEAFLET_HTML = `
 </html>
 `;
 
-const OSMMapView = forwardRef(({
-  initialRegion,
-  region,
-  style,
-  markers: markersProp = [],
-  polylines: polylinesProp = [],
-  showsUserLocation = false,
-  userLocation,
-  onPress,
-  onRegionChange,
-  onRegionChangeComplete,
-  scrollEnabled = true,
-  zoomEnabled = true,
-  children,
-}, ref) => {
-  const webViewRef = useRef(null);
-  const [isReady, setIsReady] = useState(false);
-  const syncedMarkerIdsRef = useRef(new Set());
-  const syncedPolylineIdsRef = useRef(new Set());
+const OSMMapView = forwardRef(
+  (
+    {
+      initialRegion,
+      region,
+      style,
+      markers: markersProp = [],
+      polylines: polylinesProp = [],
+      showsUserLocation = false,
+      userLocation,
+      onPress,
+      onRegionChange,
+      onRegionChangeComplete,
+      scrollEnabled = true,
+      zoomEnabled = true,
+      children,
+    },
+    ref,
+  ) => {
+    const webViewRef = useRef(null);
+    const [isReady, setIsReady] = useState(false);
+    const syncedMarkerIdsRef = useRef(new Set());
+    const syncedPolylineIdsRef = useRef(new Set());
 
-  const defaultRegion = {
-    latitude: 7.8731,
-    longitude: 80.7718,
-    latitudeDelta: 0.05,
-    longitudeDelta: 0.05,
-  };
+    const defaultRegion = {
+      latitude: 7.8731,
+      longitude: 80.7718,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+    };
 
-  const currentRegion = region || initialRegion || defaultRegion;
+    const currentRegion = region || initialRegion || defaultRegion;
 
-  useImperativeHandle(ref, () => ({
-    animateToRegion: (newRegion, duration) => {
-      if (webViewRef.current && isReady) {
-        webViewRef.current.injectJavaScript(`
+    useImperativeHandle(ref, () => ({
+      animateToRegion: (newRegion, duration) => {
+        if (webViewRef.current && isReady) {
+          webViewRef.current.injectJavaScript(`
           setCenter(${newRegion.latitude}, ${newRegion.longitude}, ${getZoomFromDelta(newRegion.latitudeDelta)});
           true;
         `);
-      }
-    },
-    fitToCoordinates: (coordinates, options) => {
-      if (webViewRef.current && isReady && coordinates.length > 0) {
-        const ep = options?.edgePadding;
-        if (ep && (ep.top !== ep.bottom || ep.left !== ep.right)) {
-          webViewRef.current.injectJavaScript(`
+        }
+      },
+      fitToCoordinates: (coordinates, options) => {
+        if (webViewRef.current && isReady && coordinates.length > 0) {
+          const ep = options?.edgePadding;
+          if (ep && (ep.top !== ep.bottom || ep.left !== ep.right)) {
+            webViewRef.current.injectJavaScript(`
             fitBoundsAsym(${JSON.stringify(coordinates)}, ${ep.top || 40}, ${ep.right || 40}, ${ep.bottom || 40}, ${ep.left || 40});
             true;
           `);
-        } else {
-          const padding = ep?.top || 50;
-          webViewRef.current.injectJavaScript(`
+          } else {
+            const padding = ep?.top || 50;
+            webViewRef.current.injectJavaScript(`
             fitBounds(${JSON.stringify(coordinates)}, ${padding});
             true;
           `);
+          }
         }
-      }
-    },
-    setCamera: (camera) => {
-      if (webViewRef.current && isReady) {
-        webViewRef.current.injectJavaScript(`
+      },
+      setCamera: (camera) => {
+        if (webViewRef.current && isReady) {
+          webViewRef.current.injectJavaScript(`
           setCenter(${camera.center.latitude}, ${camera.center.longitude}, ${camera.zoom || 15});
           true;
         `);
-      }
-    },
-    panTo: (lat, lng, zoom) => {
-      if (webViewRef.current && isReady) {
-        webViewRef.current.injectJavaScript(`
+        }
+      },
+      panTo: (lat, lng, zoom) => {
+        if (webViewRef.current && isReady) {
+          webViewRef.current.injectJavaScript(`
           panTo(${lat}, ${lng}, ${zoom || 0});
           true;
         `);
-      }
-    },
-    removeMarker: (id) => {
-      if (webViewRef.current && isReady) {
-        webViewRef.current.injectJavaScript(`
+        }
+      },
+      removeMarker: (id) => {
+        if (webViewRef.current && isReady) {
+          webViewRef.current.injectJavaScript(`
           removeMarker('${id}');
           true;
         `);
-      }
-    },
-    removePolyline: (id) => {
-      if (webViewRef.current && isReady) {
-        webViewRef.current.injectJavaScript(`
+        }
+      },
+      removePolyline: (id) => {
+        if (webViewRef.current && isReady) {
+          webViewRef.current.injectJavaScript(`
           removePolyline('${id}');
           true;
         `);
-      }
-    },
-    updatePolyline: (id, coordinates, color, width, dashArray) => {
-      if (webViewRef.current && isReady && coordinates.length > 0) {
-        webViewRef.current.injectJavaScript(`
-          updatePolyline('${id}', ${JSON.stringify(coordinates)}, '${color || '#3B82F6'}', ${width || 3}, '${dashArray || ""}');
+        }
+      },
+      updatePolyline: (
+        id,
+        coordinates,
+        color,
+        width,
+        dashArray,
+        dashOffset,
+        opacity,
+      ) => {
+        if (webViewRef.current && isReady && coordinates.length > 0) {
+          webViewRef.current.injectJavaScript(`
+          updatePolyline('${id}', ${JSON.stringify(coordinates)}, ${JSON.stringify(color || "#3B82F6")}, ${width || 3}, ${JSON.stringify(dashArray || "")}, ${JSON.stringify(dashOffset ?? "")}, ${JSON.stringify(opacity ?? "")});
           true;
         `);
-      }
-    },
-  }));
+        }
+      },
+    }));
 
-  const getZoomFromDelta = (delta) => {
-    return Math.round(Math.log2(360 / delta));
-  };
+    const getZoomFromDelta = (delta) => {
+      return Math.round(Math.log2(360 / delta));
+    };
 
-  useEffect(() => {
-    if (webViewRef.current && isReady) {
-      webViewRef.current.injectJavaScript(`
+    useEffect(() => {
+      if (webViewRef.current && isReady) {
+        webViewRef.current.injectJavaScript(`
         initMap(${currentRegion.latitude}, ${currentRegion.longitude}, ${getZoomFromDelta(currentRegion.latitudeDelta)});
         true;
       `);
-    }
-  }, [isReady]);
+      }
+    }, [isReady]);
 
-  // Update markers
-  useEffect(() => {
-    if (!webViewRef.current || !isReady) return;
+    // Update markers
+    useEffect(() => {
+      if (!webViewRef.current || !isReady) return;
 
-    const nextIds = new Set();
-    markersProp.forEach((marker, index) => {
-      const id = String(marker.id || index);
-      nextIds.add(id);
-      const fn = marker.smooth ? 'smoothMoveMarker' : 'addMarker';
-      const markerType = JSON.stringify(marker.type || 'customer');
-      const markerTitle = JSON.stringify(marker.title || '');
-      const markerEmoji = JSON.stringify(marker.emoji || '');
-      const markerCustomHtml = marker.customHtml ? JSON.stringify(marker.customHtml) : 'null';
-      webViewRef.current.injectJavaScript(`
-        ${fn}(${JSON.stringify(id)}, ${marker.coordinate.latitude}, ${marker.coordinate.longitude}, ${markerType}, ${markerTitle}, ${markerEmoji}, ${marker.iconOnly ? "true" : "false"}, ${markerCustomHtml});
+      const nextIds = new Set();
+      markersProp.forEach((marker, index) => {
+        const id = String(marker.id || index);
+        nextIds.add(id);
+        const fn = marker.smooth ? "smoothMoveMarker" : "addMarker";
+        const markerType = JSON.stringify(marker.type || "customer");
+        const markerTitle = JSON.stringify(marker.title || "");
+        const markerEmoji = JSON.stringify(marker.emoji || "");
+        const markerCustomHtml = marker.customHtml
+          ? JSON.stringify(marker.customHtml)
+          : "null";
+        const markerIconSize = marker.iconSize
+          ? JSON.stringify(marker.iconSize)
+          : "null";
+        const markerIconAnchor = marker.iconAnchor
+          ? JSON.stringify(marker.iconAnchor)
+          : "null";
+        webViewRef.current.injectJavaScript(`
+        ${fn}(${JSON.stringify(id)}, ${marker.coordinate.latitude}, ${marker.coordinate.longitude}, ${markerType}, ${markerTitle}, ${markerEmoji}, ${marker.iconOnly ? "true" : "false"}, ${markerCustomHtml}, ${markerIconSize}, ${markerIconAnchor});
         true;
       `);
-    });
+      });
 
-    syncedMarkerIdsRef.current.forEach((id) => {
-      if (!nextIds.has(id)) {
-        webViewRef.current.injectJavaScript(`
+      syncedMarkerIdsRef.current.forEach((id) => {
+        if (!nextIds.has(id)) {
+          webViewRef.current.injectJavaScript(`
           removeMarker(${JSON.stringify(id)});
           true;
         `);
-      }
-    });
+        }
+      });
 
-    syncedMarkerIdsRef.current = nextIds;
-  }, [isReady, markersProp]);
+      syncedMarkerIdsRef.current = nextIds;
+    }, [isReady, markersProp]);
 
-  // Update polylines
-  useEffect(() => {
-    if (!webViewRef.current || !isReady) return;
+    // Update polylines
+    useEffect(() => {
+      if (!webViewRef.current || !isReady) return;
 
-    const nextIds = new Set();
-    polylinesProp.forEach((polyline, index) => {
-      const id = String(polyline.id || index);
-      nextIds.add(id);
-      webViewRef.current.injectJavaScript(`
-        addPolyline(${JSON.stringify(id)}, ${JSON.stringify(polyline.coordinates)}, '${polyline.strokeColor || '#3B82F6'}', ${polyline.strokeWidth || 4}, '${polyline.dashArray || ""}');
+      const nextIds = new Set();
+      polylinesProp.forEach((polyline, index) => {
+        const id = String(polyline.id || index);
+        nextIds.add(id);
+        const polylineColor = JSON.stringify(polyline.strokeColor || "#3B82F6");
+        const polylineDashArray = JSON.stringify(polyline.dashArray || "");
+        const polylineDashOffset = JSON.stringify(polyline.dashOffset ?? "");
+        const polylineOpacity = JSON.stringify(polyline.strokeOpacity ?? "");
+        webViewRef.current.injectJavaScript(`
+        updatePolyline(${JSON.stringify(id)}, ${JSON.stringify(polyline.coordinates)}, ${polylineColor}, ${polyline.strokeWidth || 4}, ${polylineDashArray}, ${polylineDashOffset}, ${polylineOpacity});
         true;
       `);
-    });
+      });
 
-    syncedPolylineIdsRef.current.forEach((id) => {
-      if (!nextIds.has(id)) {
-        webViewRef.current.injectJavaScript(`
+      syncedPolylineIdsRef.current.forEach((id) => {
+        if (!nextIds.has(id)) {
+          webViewRef.current.injectJavaScript(`
           removePolyline(${JSON.stringify(id)});
           true;
         `);
-      }
-    });
+        }
+      });
 
-    syncedPolylineIdsRef.current = nextIds;
-  }, [isReady, polylinesProp]);
+      syncedPolylineIdsRef.current = nextIds;
+    }, [isReady, polylinesProp]);
 
-  // Show user location
-  useEffect(() => {
-    if (webViewRef.current && isReady && showsUserLocation && userLocation) {
-      webViewRef.current.injectJavaScript(`
+    // Show user location
+    useEffect(() => {
+      if (webViewRef.current && isReady && showsUserLocation && userLocation) {
+        webViewRef.current.injectJavaScript(`
         showUserLocation(${userLocation.latitude}, ${userLocation.longitude});
         true;
       `);
-    }
-  }, [isReady, showsUserLocation, userLocation]);
-
-  const handleMessage = (event) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      if (data.type === 'mapPress' && onPress) {
-        onPress({ nativeEvent: { coordinate: data.coordinate } });
-      } else if (data.type === 'regionChange') {
-        onRegionChange?.(data.region);
-        onRegionChangeComplete?.(data.region);
       }
-    } catch (e) {
-      console.log('Map message error:', e);
-    }
-  };
+    }, [isReady, showsUserLocation, userLocation]);
 
-  const handleLoad = () => {
-    setIsReady(true);
-    setTimeout(() => {
-      if (webViewRef.current) {
-        webViewRef.current.injectJavaScript(`
+    const handleMessage = (event) => {
+      try {
+        const data = JSON.parse(event.nativeEvent.data);
+        if (data.type === "mapPress" && onPress) {
+          onPress({ nativeEvent: { coordinate: data.coordinate } });
+        } else if (data.type === "regionChange") {
+          onRegionChange?.(data.region);
+          onRegionChangeComplete?.(data.region);
+        }
+      } catch (e) {
+        console.log("Map message error:", e);
+      }
+    };
+
+    const handleLoad = () => {
+      setIsReady(true);
+      setTimeout(() => {
+        if (webViewRef.current) {
+          webViewRef.current.injectJavaScript(`
           initMap(${currentRegion.latitude}, ${currentRegion.longitude}, ${getZoomFromDelta(currentRegion.latitudeDelta)});
           true;
         `);
-      }
-    }, 100);
-  };
+        }
+      }, 100);
+    };
 
-  return (
-    <View style={[styles.container, style]}>
-      <WebView
-        ref={webViewRef}
-        source={{ html: LEAFLET_HTML }}
-        style={styles.webview}
-        onLoad={handleLoad}
-        onMessage={handleMessage}
-        scrollEnabled={scrollEnabled}
-        javaScriptEnabled={true}
-        domStorageEnabled={true}
-        startInLoadingState={true}
-        userAgent="NearMe-App/1.0"
-        renderLoading={() => (
-          <View style={styles.loading}>
-            <ActivityIndicator size="large" color="#06C168" />
-          </View>
-        )}
-        originWhitelist={['*']}
-      />
-    </View>
-  );
-});
+    return (
+      <View style={[styles.container, style]}>
+        <WebView
+          ref={webViewRef}
+          source={{ html: LEAFLET_HTML }}
+          style={styles.webview}
+          onLoad={handleLoad}
+          onMessage={handleMessage}
+          scrollEnabled={scrollEnabled}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          startInLoadingState={true}
+          userAgent="NearMe-App/1.0"
+          renderLoading={() => (
+            <View style={styles.loading}>
+              <ActivityIndicator size="large" color="#06C168" />
+            </View>
+          )}
+          originWhitelist={["*"]}
+        />
+      </View>
+    );
+  },
+);
 
 OSMMapView.displayName = "OSMMapView";
 
@@ -462,7 +503,14 @@ OSMMapView.displayName = "OSMMapView";
 // ============================================================================
 
 // Add marker helper - call this from parent to add markers
-export const createMarker = (id, coordinate, type = 'customer', title = '', emoji = '', customHtml = null) => ({
+export const createMarker = (
+  id,
+  coordinate,
+  type = "customer",
+  title = "",
+  emoji = "",
+  customHtml = null,
+) => ({
   id,
   coordinate,
   type,
@@ -472,7 +520,12 @@ export const createMarker = (id, coordinate, type = 'customer', title = '', emoj
 });
 
 // Add polyline helper
-export const createPolyline = (id, coordinates, strokeColor = '#3B82F6', strokeWidth = 4) => ({
+export const createPolyline = (
+  id,
+  coordinates,
+  strokeColor = "#3B82F6",
+  strokeWidth = 4,
+) => ({
   id,
   coordinates,
   strokeColor,
@@ -484,20 +537,20 @@ export default OSMMapView;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   webview: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: "#f0f0f0",
   },
   loading: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f9fafb',
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f9fafb",
   },
 });

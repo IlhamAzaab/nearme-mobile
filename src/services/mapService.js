@@ -7,6 +7,8 @@
  * - Haversine distance calculation
  */
 
+import { calculateDeliveryFee as calculateDeliveryFeeFromConfig } from "../lib/feeConfig";
+
 // ============================================================================
 // OSRM ROUTE FETCHING (Same as Website)
 // ============================================================================
@@ -248,17 +250,7 @@ export const DEFAULT_TILE_CONFIG = {
  * Same logic as website
  */
 export function calculateDeliveryFee(distanceKm) {
-  if (distanceKm === null || distanceKm === undefined) return null;
-  
-  if (distanceKm <= 1) return 50;
-  if (distanceKm <= 2) return 80;
-  if (distanceKm <= 2.5) return 87;
-  
-  // After 2.5km: Rs.2.30 per 100m
-  const extraMeters = (distanceKm - 2.5) * 1000;
-  const extra100mUnits = Math.ceil(extraMeters / 100);
-  
-  return 87 + extra100mUnits * 2.3;
+  return calculateDeliveryFeeFromConfig(distanceKm);
 }
 
 /**

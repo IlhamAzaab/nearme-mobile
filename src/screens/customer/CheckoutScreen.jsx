@@ -1,5 +1,11 @@
 import { useFocusEffect } from "@react-navigation/native";
-import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  useCallback,
+} from "react";
 import {
   View,
   Text,
@@ -11,6 +17,8 @@ import {
   TextInput,
   Modal,
   Dimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { Ionicons, Feather, MaterialIcons } from "@expo/vector-icons";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
@@ -19,11 +27,24 @@ import OSMMapView from "../../components/maps/OSMMapView";
 import * as Location from "expo-location";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
+import {
+  calculateDeliveryFee as calculateDeliveryFeeFromConfig,
+  calculateServiceFee as calculateServiceFeeFromConfig,
+  fetchPublicFeeConfig,
+  resolveMinimumSubtotal,
+} from "../../lib/feeConfig";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const BIKE_SPEED_KMPH = 24;
+const NIGHT_START_HOUR = 20;
+const NIGHT_END_HOUR = 6;
 const CHECKOUT_ADDRESS_PIN_HTML =
   "<div style='width:44px;height:44px;display:flex;align-items:center;justify-content:center;'>" +
-  "<svg width='30' height='30' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' aria-label='delivery pin'>" +
+  "<svg width='44' height='44' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' aria-label='delivery pin'>" +
   "<path d='M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z' fill='#E11D48'/>" +
   "<circle cx='12' cy='9' r='3' fill='#FFFFFF'/>" +
   "</svg>" +
@@ -52,7 +73,44 @@ async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
   }
 }
 
+const ORDER_TOTAL_CACHE_KEY = "@order_display_totals";
+
+async function cacheOrderDisplayTotal(orderId, totalAmount) {
+  if (!orderId) return;
+
+  const total = Number(totalAmount);
+  if (!Number.isFinite(total)) return;
+
+  try {
+    const raw = await AsyncStorage.getItem(ORDER_TOTAL_CACHE_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    map[String(orderId)] = total;
+    await AsyncStorage.setItem(ORDER_TOTAL_CACHE_KEY, JSON.stringify(map));
+  } catch (e) {
+    // no-op
+  }
+}
+
+function resolveOrderDisplayTotal(orderLike, fallback = 0) {
+  const candidates = [
+    orderLike?.grand_total,
+    orderLike?.final_total,
+    orderLike?.payable_amount,
+    orderLike?.total_amount,
+    orderLike?.total,
+    fallback,
+  ];
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const n = Number(candidates[i]);
+    if (Number.isFinite(n)) return n;
+  }
+
+  return 0;
+}
+
 export default function CheckoutScreen({ route, navigation }) {
+  const insets = useSafeAreaInsets();
   const { cartId } = route.params || {};
   const mapRef = useRef(null);
 
@@ -84,6 +142,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const [routeInfo, setRouteInfo] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false);
+  const [feeConfig, setFeeConfig] = useState(null);
 
   // Payment
   const [paymentMethod] = useState("cash");
@@ -94,22 +153,18 @@ export default function CheckoutScreen({ route, navigation }) {
   const MINIMUM_SUBTOTAL = 300;
   const PRIORITY_FEE = 49;
 
+  useEffect(() => {
+    fetchPublicFeeConfig()
+      .then((data) => setFeeConfig(data || null))
+      .catch((err) => console.error("Failed to load fee config:", err));
+  }, []);
+
   const calculateServiceFee = (subtotal) => {
-    if (subtotal < 300) return 0;
-    if (subtotal < 1000) return 31;
-    if (subtotal < 1500) return 42;
-    if (subtotal < 2500) return 56;
-    return 62;
+    return calculateServiceFeeFromConfig(subtotal, feeConfig || undefined);
   };
 
   const calculateDeliveryFee = (distanceKm) => {
-    if (distanceKm === null || distanceKm === undefined) return null;
-    if (distanceKm <= 1) return 50;
-    if (distanceKm <= 2) return 80;
-    if (distanceKm <= 2.5) return 87;
-    const extraMeters = (distanceKm - 2.5) * 1000;
-    const extra100mUnits = Math.ceil(extraMeters / 100);
-    return 87 + extra100mUnits * 2.3;
+    return calculateDeliveryFeeFromConfig(distanceKm, feeConfig || undefined);
   };
 
   const formatPrice = (p) => {
@@ -136,11 +191,10 @@ export default function CheckoutScreen({ route, navigation }) {
           if (savedStr) {
             const saved = JSON.parse(savedStr);
             if (saved.latitude && saved.longitude) {
-              setPosition({ latitude: saved.latitude, longitude: saved.longitude });
-              if (saved.label) {
-                setAddress(saved.label);
-                setCity(saved.city || "");
-              }
+              setPosition({
+                latitude: saved.latitude,
+                longitude: saved.longitude,
+              });
               // Animate map to new saved pin location
               if (mapRef.current?.animateToRegion) {
                 mapRef.current.animateToRegion({
@@ -158,9 +212,9 @@ export default function CheckoutScreen({ route, navigation }) {
           console.error("Error reading saved address on checkout:", error);
         }
       };
-      
+
       checkSavedAddress();
-    }, [])
+    }, []),
   );
 
   // ============================================================================
@@ -317,13 +371,13 @@ export default function CheckoutScreen({ route, navigation }) {
 
       if (profileData.customer) {
         setPhone(profileData.customer.phone || "");
-        
+
         // Prefer AsyncStorage saved address if user updated it
         const savedAddressStr = await AsyncStorage.getItem("@saved_address");
         if (savedAddressStr) {
           const saved = JSON.parse(savedAddressStr);
-          setAddress(saved.label || profileData.customer.address || "");
-          setCity(saved.city || profileData.customer.city || "");
+          setAddress(profileData.customer.address || "");
+          setCity(profileData.customer.city || "");
           if (saved.latitude && saved.longitude) {
             setPosition({
               latitude: saved.latitude,
@@ -395,7 +449,8 @@ export default function CheckoutScreen({ route, navigation }) {
         longitude: position.longitude,
       });
 
-      const geocodeCity = geocode?.city || geocode?.subregion || geocode?.region || "";
+      const geocodeCity =
+        geocode?.city || geocode?.subregion || geocode?.region || "";
       if (geocodeCity) return geocodeCity;
     } catch (error) {
       console.log("Resolve city failed:", error);
@@ -417,10 +472,15 @@ export default function CheckoutScreen({ route, navigation }) {
       if (!cart) throw new Error("Cart missing");
 
       const subtotal = Number(cart.cart_total) || 0;
-      if (subtotal < MINIMUM_SUBTOTAL)
-        throw new Error(`Minimum order amount is Rs. ${MINIMUM_SUBTOTAL}`);
       if (!routeInfo)
         throw new Error("Please wait for delivery fee calculation");
+
+      const requiredMinSubtotal = resolveMinimumSubtotal(
+        routeInfo.distance,
+        feeConfig || undefined,
+      );
+      if (subtotal < requiredMinSubtotal)
+        throw new Error(`Minimum order amount is Rs. ${requiredMinSubtotal}`);
 
       setPlacing(true);
       setError("");
@@ -442,7 +502,9 @@ export default function CheckoutScreen({ route, navigation }) {
           delivery_city: deliveryCity,
           payment_method: paymentMethod,
           distance_km: routeInfo.distance,
-          estimated_duration_min: routeInfo.duration,
+          estimated_duration_min:
+            estimatedDeliveryWindow?.midpoint ||
+            Math.ceil(routeInfo.duration || 0),
         }),
       });
 
@@ -452,6 +514,9 @@ export default function CheckoutScreen({ route, navigation }) {
       // Navigate to Order Tracking — reset stack so user can't go back to checkout
       const order = data.order;
       if (order?.id) {
+        const displayTotal = resolveOrderDisplayTotal(order, finalTotal);
+        await cacheOrderDisplayTotal(order.id, displayTotal);
+
         // Get restaurant logo from cart data to pass to tracking screen
         const restaurantLogoUrl =
           cart?.restaurant?.logo_url ||
@@ -467,15 +532,16 @@ export default function CheckoutScreen({ route, navigation }) {
           routes: [
             { name: "MainTabs" },
             {
-              name: "OrderTracking",
+              name: "PlacingOrder",
               params: {
                 orderId: order.id,
                 status: "placed",
                 order: order,
-                totalAmount: finalTotal,
+                totalAmount: displayTotal,
                 restaurantName:
                   cart?.restaurant?.restaurant_name || order.restaurant_name,
                 restaurantLogoUrl,
+                statusScreenMode: true,
               },
             },
           ],
@@ -492,13 +558,47 @@ export default function CheckoutScreen({ route, navigation }) {
     () => (cart ? Number(cart.cart_total) || 0 : 0),
     [cart],
   );
-  const serviceFee = useMemo(() => calculateServiceFee(subtotal), [subtotal]);
+  const serviceFee = useMemo(
+    () => calculateServiceFee(subtotal),
+    [subtotal, feeConfig],
+  );
   const deliveryFee = useMemo(
     () => (routeInfo ? calculateDeliveryFee(routeInfo.distance) : null),
-    [routeInfo],
+    [routeInfo, feeConfig],
   );
 
-  const isSubtotalValid = subtotal >= MINIMUM_SUBTOTAL;
+  const estimatedDeliveryWindow = useMemo(() => {
+    if (!routeInfo?.distance) return null;
+
+    const distanceKm = Number(routeInfo.distance);
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0) return null;
+
+    const bikeMinutes = (distanceKm / BIKE_SPEED_KMPH) * 60;
+    const hour = new Date().getHours();
+    const isNight = hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR;
+
+    const prepMin = isNight ? 20 : 15;
+    const prepMax = isNight ? 25 : 20;
+
+    const min = Math.max(1, Math.ceil(bikeMinutes + prepMin));
+    const max = Math.max(min, Math.ceil(bikeMinutes + prepMax));
+
+    return {
+      min,
+      max,
+      midpoint: Math.round((min + max) / 2),
+    };
+  }, [routeInfo]);
+
+  const requiredMinSubtotal = useMemo(
+    () =>
+      routeInfo
+        ? resolveMinimumSubtotal(routeInfo.distance, feeConfig || undefined)
+        : MINIMUM_SUBTOTAL,
+    [routeInfo, feeConfig],
+  );
+
+  const isSubtotalValid = subtotal >= requiredMinSubtotal;
 
   const totalAmount = useMemo(() => {
     if (!isSubtotalValid || deliveryFee === null) return null;
@@ -517,31 +617,56 @@ export default function CheckoutScreen({ route, navigation }) {
       <View style={styles.page}>
         <ScrollView contentContainerStyle={{ padding: 12 }}>
           {/* Map Skeleton */}
-          <SkeletonBlock width="100%" height={200} borderRadius={18} style={{ marginBottom: 12 }} />
-          
+          <SkeletonBlock
+            width="100%"
+            height={200}
+            borderRadius={18}
+            style={{ marginBottom: 12 }}
+          />
+
           {/* Address Card Skeleton */}
           <View style={[styles.card, { marginTop: 0 }]}>
-             <SkeletonBlock width="40%" height={20} style={{ marginBottom: 8 }} />
-             <SkeletonBlock width="70%" height={16} style={{ marginBottom: 4 }} />
-             <SkeletonBlock width="50%" height={14} />
+            <SkeletonBlock
+              width="40%"
+              height={20}
+              style={{ marginBottom: 8 }}
+            />
+            <SkeletonBlock
+              width="70%"
+              height={16}
+              style={{ marginBottom: 4 }}
+            />
+            <SkeletonBlock width="50%" height={14} />
           </View>
 
           {/* Phone Skeleton */}
           <View style={styles.card}>
-             <SkeletonBlock width="30%" height={20} style={{ marginBottom: 8 }} />
-             <SkeletonBlock width="60%" height={16} />
+            <SkeletonBlock
+              width="30%"
+              height={20}
+              style={{ marginBottom: 8 }}
+            />
+            <SkeletonBlock width="60%" height={16} />
           </View>
 
           {/* Estimated Skeleton */}
           <View style={styles.card}>
-             <SkeletonBlock width="40%" height={20} style={{ marginBottom: 8 }} />
-             <SkeletonBlock width="35%" height={16} />
+            <SkeletonBlock
+              width="40%"
+              height={20}
+              style={{ marginBottom: 8 }}
+            />
+            <SkeletonBlock width="35%" height={16} />
           </View>
-          
+
           {/* Summary Skeleton */}
           <View style={styles.card}>
-             <SkeletonBlock width="45%" height={20} style={{ marginBottom: 12 }} />
-             <SkeletonBlock width="100%" height={60} borderRadius={12} />
+            <SkeletonBlock
+              width="45%"
+              height={20}
+              style={{ marginBottom: 12 }}
+            />
+            <SkeletonBlock width="100%" height={60} borderRadius={12} />
           </View>
         </ScrollView>
       </View>
@@ -564,8 +689,12 @@ export default function CheckoutScreen({ route, navigation }) {
   }
 
   return (
-    <View style={styles.page}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
+    <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingBottom: 110 + Math.max(0, insets.bottom),
+        }}
+      >
         {/* ✅ Map */}
         <View style={[styles.mapWrap, { height: 200 }]}>
           <OSMMapView
@@ -577,8 +706,8 @@ export default function CheckoutScreen({ route, navigation }) {
               latitudeDelta: 0.01,
               longitudeDelta: 0.01,
             }}
-            scrollEnabled={false}
-            zoomEnabled={false}
+            scrollEnabled={true}
+            zoomEnabled={true}
             markers={[
               {
                 id: "delivery",
@@ -588,6 +717,8 @@ export default function CheckoutScreen({ route, navigation }) {
                 emoji: "",
                 customHtml: CHECKOUT_ADDRESS_PIN_HTML,
                 iconOnly: true,
+                iconSize: [44, 44],
+                iconAnchor: [22, 44],
               },
             ]}
           />
@@ -597,7 +728,7 @@ export default function CheckoutScreen({ route, navigation }) {
             onPress={() => navigation.navigate("AddressPicker")}
             style={styles.mapBtn}
           >
-            <Text style={styles.mapBtnText}>Change Map Pin</Text>
+            <Text style={styles.mapBtnText}>Edit Pin</Text>
           </Pressable>
         </View>
 
@@ -605,11 +736,13 @@ export default function CheckoutScreen({ route, navigation }) {
         <View style={styles.card}>
           <View style={styles.rowBetween}>
             <View style={styles.iconContainer}>
-               <Feather name="map-pin" size={20} color="#06C168" />
+              <Feather name="map-pin" size={20} color="#06C168" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Delivery Address</Text>
-              <Text style={styles.value}>{address || "Add delivery address"}</Text>
+              <Text style={styles.value}>
+                {address || "Add delivery address"}
+              </Text>
             </View>
 
             <Pressable
@@ -641,108 +774,171 @@ export default function CheckoutScreen({ route, navigation }) {
         {/* ✅ Estimated */}
         <View style={styles.card}>
           <View style={styles.rowInfo}>
-             <View style={styles.iconContainer}>
-               <Feather name="clock" size={20} color="#06C168" />
-             </View>
-             <View style={{ flex: 1 }}>
-               <Text style={styles.label}>Estimated Delivery</Text>
-               <Text style={styles.value}>
-                 {routeLoading ? "Calculating..." : routeInfo ? `~${Math.ceil(routeInfo.duration) + 15} mins` : "—"}
-               </Text>
-             </View>
+            <View style={styles.iconContainer}>
+              <Feather name="clock" size={20} color="#06C168" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Estimated Delivery</Text>
+              <Text style={styles.value}>
+                {routeLoading
+                  ? "Calculating..."
+                  : estimatedDeliveryWindow
+                    ? `${estimatedDeliveryWindow.min}-${estimatedDeliveryWindow.max} mins`
+                    : "—"}
+              </Text>
+            </View>
           </View>
         </View>
 
         {/* ✅ Order Summary */}
         <View style={styles.card}>
-           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={styles.sectionTitleNoMargin}>Order Summary</Text>
-           </View>
-           
-           <View style={styles.summaryBox}>
-             <View style={{ flex: 1 }}>
-               <Text style={styles.value}>{cart?.restaurant?.restaurant_name || "Restaurant"}</Text>
-               <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                  <Feather name="map-pin" size={12} color="#06C168" />
-                  <Text style={[styles.muted, { fontSize: 12, marginLeft: 4, color: "#06C168" }]}>
-                     {routeInfo ? `${routeInfo.distance.toFixed(1)} km away` : "Calculating..."}
-                  </Text>
-               </View>
-               <Text style={[styles.muted, { fontSize: 13, marginTop: 4 }]}>
-                 {cart?.items?.length || 0} item{cart?.items?.length !== 1 ? 's' : ''} • {formatPrice(subtotal)}
-               </Text>
-             </View>
-             <Pressable
-               onPress={() => setIsOrderSummaryExpanded((prev) => !prev)}
-               style={styles.summaryToggleBtn}
-             >
-               <Feather
-                 name={isOrderSummaryExpanded ? "chevron-up" : "chevron-down"}
-                 size={18}
-                 color="#6b7280"
-               />
-             </Pressable>
-           </View>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginBottom: 12,
+            }}
+          >
+            <Text style={styles.sectionTitleNoMargin}>Order Summary</Text>
+          </View>
 
-           {isOrderSummaryExpanded && (
-             <View style={styles.orderItemsWrap}>
-               {(cart?.items || []).length > 0 ? (
-                 (cart?.items || []).map((item, idx) => {
-                   const itemName = item?.food_name || item?.name || `Item ${idx + 1}`;
-                   const qty = Number(item?.quantity) || 1;
-                   const unitPrice = Number(item?.unit_price ?? item?.price ?? 0);
+          <View style={styles.summaryBox}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.value}>
+                {cart?.restaurant?.restaurant_name || "Restaurant"}
+              </Text>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginTop: 2,
+                }}
+              >
+                <Feather name="map-pin" size={12} color="#06C168" />
+                <Text
+                  style={[
+                    styles.muted,
+                    { fontSize: 12, marginLeft: 4, color: "#06C168" },
+                  ]}
+                >
+                  {routeInfo
+                    ? `${routeInfo.distance.toFixed(1)} km away`
+                    : "Calculating..."}
+                </Text>
+              </View>
+              <Text style={[styles.muted, { fontSize: 13, marginTop: 4 }]}>
+                {cart?.items?.length || 0} item
+                {cart?.items?.length !== 1 ? "s" : ""} • {formatPrice(subtotal)}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setIsOrderSummaryExpanded((prev) => !prev)}
+              style={styles.summaryToggleBtn}
+            >
+              <Feather
+                name={isOrderSummaryExpanded ? "chevron-up" : "chevron-down"}
+                size={18}
+                color="#6b7280"
+              />
+            </Pressable>
+          </View>
 
-                   return (
-                     <View
-                       key={item?.id || `${itemName}-${idx}`}
-                       style={[
-                         styles.orderItemRow,
-                         idx === (cart?.items || []).length - 1 && styles.orderItemLastRow,
-                       ]}
-                     >
-                       <View style={styles.orderItemInfo}>
-                         <Text numberOfLines={1} style={styles.orderItemName}>{itemName}</Text>
-                         <Text style={styles.orderItemMeta}>{qty} x {formatPrice(unitPrice)}</Text>
-                       </View>
-                       <Text style={styles.orderItemTotal}>{formatPrice(unitPrice * qty)}</Text>
-                     </View>
-                   );
-                 })
-               ) : (
-                 <Text style={styles.orderItemEmpty}>No items found in this cart.</Text>
-               )}
-             </View>
-           )}
+          {isOrderSummaryExpanded && (
+            <View style={styles.orderItemsWrap}>
+              {(cart?.items || []).length > 0 ? (
+                (cart?.items || []).map((item, idx) => {
+                  const itemName =
+                    item?.food_name || item?.name || `Item ${idx + 1}`;
+                  const qty = Number(item?.quantity) || 1;
+                  const unitPrice = Number(
+                    item?.unit_price ?? item?.price ?? 0,
+                  );
+
+                  return (
+                    <View
+                      key={item?.id || `${itemName}-${idx}`}
+                      style={[
+                        styles.orderItemRow,
+                        idx === (cart?.items || []).length - 1 &&
+                          styles.orderItemLastRow,
+                      ]}
+                    >
+                      <View style={styles.orderItemInfo}>
+                        <Text numberOfLines={1} style={styles.orderItemName}>
+                          {itemName}
+                        </Text>
+                        <Text style={styles.orderItemMeta}>
+                          {qty} x {formatPrice(unitPrice)}
+                        </Text>
+                      </View>
+                      <Text style={styles.orderItemTotal}>
+                        {formatPrice(unitPrice * qty)}
+                      </Text>
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={styles.orderItemEmpty}>
+                  No items found in this cart.
+                </Text>
+              )}
+            </View>
+          )}
         </View>
 
         {/* ✅ Payment Method */}
         <View style={styles.card}>
-           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={styles.sectionTitleNoMargin}>Payment Method</Text>
-           </View>
-           
-           <View style={styles.summaryBox}>
-              <View style={styles.iconContainer}>
-                 <Ionicons name="cash-outline" size={24} color="#06C168" />
-              </View>
-              <View style={{ flex: 1 }}>
-                 <Text style={styles.value}>Cash on Delivery</Text>
-                 <Text style={[styles.muted, { fontSize: 12 }]}>Pay when your order arrives</Text>
-              </View>
-           </View>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginBottom: 12,
+            }}
+          >
+            <Text style={styles.sectionTitleNoMargin}>Payment Method</Text>
+          </View>
+
+          <View style={styles.summaryBox}>
+            <View style={styles.iconContainer}>
+              <Ionicons name="cash-outline" size={24} color="#06C168" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.value}>Cash on Delivery</Text>
+              <Text style={[styles.muted, { fontSize: 12 }]}>
+                Pay when your order arrives
+              </Text>
+            </View>
+          </View>
         </View>
 
         {/* ✅ Price summary */}
         <View style={styles.card}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-              <MaterialIcons name="receipt-long" size={20} color="#06C168" style={{ marginRight: 8 }} />
-              <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginBottom: 12,
+            }}
+          >
+            <MaterialIcons
+              name="receipt-long"
+              size={20}
+              color="#06C168"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
           </View>
 
           <Row label="Subtotal" value={formatPrice(subtotal)} />
           <Row
             label="Delivery fee"
-            value={routeLoading ? "..." : deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
+            value={
+              routeLoading
+                ? "..."
+                : deliveryFee !== null
+                  ? formatPrice(deliveryFee)
+                  : "--"
+            }
           />
           <Row label="Service fee" value={formatPrice(serviceFee)} />
 
@@ -757,8 +953,8 @@ export default function CheckoutScreen({ route, navigation }) {
         {!isSubtotalValid && (
           <View style={styles.warn}>
             <Text style={styles.warnText}>
-              Minimum order: Rs. {MINIMUM_SUBTOTAL}. Add Rs.{" "}
-              {(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more.
+              Minimum order: Rs. {requiredMinSubtotal}. Add Rs.{" "}
+              {(requiredMinSubtotal - subtotal).toFixed(0)} more.
             </Text>
           </View>
         )}
@@ -771,7 +967,12 @@ export default function CheckoutScreen({ route, navigation }) {
       </ScrollView>
 
       {/* ✅ Sticky CTA */}
-      <View style={styles.bottomBar}>
+      <View
+        style={[
+          styles.bottomBar,
+          { bottom: 0, paddingBottom: 14 + Math.max(0, insets.bottom) },
+        ]}
+      >
         <Pressable
           onPress={handlePlaceOrder}
           disabled={
@@ -809,84 +1010,99 @@ export default function CheckoutScreen({ route, navigation }) {
               : routeLoading
                 ? "Calculating..."
                 : !isSubtotalValid
-                  ? `Add Rs. ${(MINIMUM_SUBTOTAL - subtotal).toFixed(0)} more`
+                  ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
                   : finalTotal !== null
                     ? `Place Order • ${formatPrice(finalTotal)}`
                     : "Place Order"}
           </Text>
         </Pressable>
-
-        <Text style={styles.tiny}>
-          By placing this order, you agree to our terms.
-        </Text>
       </View>
 
       {/* ✅ Address Modal */}
       <Modal transparent visible={showAddressModal} animationType="slide">
-        <View style={styles.modalWrap}>
+        <KeyboardAvoidingView
+          style={styles.modalWrap}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
+        >
           <Pressable
             style={styles.modalBackdrop}
             onPress={() => setShowAddressModal(false)}
           />
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Edit Delivery Address</Text>
+          <ScrollView
+            style={styles.modalSheet}
+            contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Edit Delivery Address</Text>
 
-            <Text style={styles.inputLabel}>Street Address</Text>
-            <TextInput
-              value={editAddress}
-              onChangeText={setEditAddress}
-              placeholder="Enter full address"
-              multiline
-              style={[styles.input, { height: 90, textAlignVertical: "top" }]}
-            />
+              <Text style={styles.inputLabel}>Street Address</Text>
+              <TextInput
+                value={editAddress}
+                onChangeText={setEditAddress}
+                placeholder="Enter full address"
+                multiline
+                style={[styles.input, { height: 90, textAlignVertical: "top" }]}
+              />
 
-            <Text style={styles.inputLabel}>City</Text>
-            <TextInput
-              value={editCity}
-              onChangeText={setEditCity}
-              placeholder="Enter city"
-              style={styles.input}
-            />
+              <Text style={styles.inputLabel}>City</Text>
+              <TextInput
+                value={editCity}
+                onChangeText={setEditCity}
+                placeholder="Enter city"
+                style={styles.input}
+              />
 
-            <Pressable
-              disabled={savingAddress}
-              onPress={async () => {
-                if (!editAddress.trim()) {
-                  setError("Address is required");
-                  return;
-                }
-                await saveAddressAndLocation({
-                  newAddress: editAddress,
-                  newCity: editCity,
-                  newPosition: position,
-                });
-                setShowAddressModal(false);
-              }}
-              style={[styles.primaryBtn, savingAddress && { opacity: 0.7 }]}
-            >
-              <Text style={styles.primaryText}>
-                {savingAddress ? "Saving..." : "Save"}
-              </Text>
-            </Pressable>
+              <Pressable
+                disabled={savingAddress}
+                onPress={async () => {
+                  if (!editAddress.trim()) {
+                    setError("Address is required");
+                    return;
+                  }
+                  await saveAddressAndLocation({
+                    newAddress: editAddress,
+                    newCity: editCity,
+                    newPosition: position,
+                  });
+                  setShowAddressModal(false);
+                }}
+                style={[styles.primaryBtn, savingAddress && { opacity: 0.7 }]}
+              >
+                <Text style={styles.primaryText}>
+                  {savingAddress ? "Saving..." : "Save"}
+                </Text>
+              </Pressable>
 
-            <Pressable
-              onPress={() => setShowAddressModal(false)}
-              style={styles.outlineBtn}
-            >
-              <Text style={styles.outlineText}>Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
+              <Pressable
+                onPress={() => setShowAddressModal(false)}
+                style={styles.outlineBtn}
+              >
+                <Text style={styles.outlineText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 function Row({ label, value, isBold }) {
   return (
     <View style={[styles.rowBetween, { marginBottom: 8 }]}>
-      <Text style={[styles.rowLabel, isBold && { fontWeight: "900", color: TEXT }]}>{label}</Text>
-      <Text style={[styles.rowValue, isBold && { fontWeight: "900", color: TEXT }]}>{value}</Text>
+      <Text
+        style={[styles.rowLabel, isBold && { fontWeight: "900", color: TEXT }]}
+      >
+        {label}
+      </Text>
+      <Text
+        style={[styles.rowValue, isBold && { fontWeight: "900", color: TEXT }]}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
@@ -961,12 +1177,22 @@ const styles = StyleSheet.create({
   },
 
   label: { fontSize: 12, color: MUTED },
-  value: { marginTop: 2, fontSize: 15, fontWeight: "800", color: TEXT },
+  value: { marginTop: 2, fontSize: 15, fontWeight: "700", color: TEXT },
 
-  sectionTitle: { fontSize: 16, fontWeight: "900", color: TEXT, marginBottom: 10 },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: TEXT,
+    marginBottom: 10,
+  },
   sectionTitleNoMargin: { fontSize: 16, fontWeight: "900", color: TEXT },
 
-  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  rowBetween: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
   rowInfo: { flexDirection: "row", alignItems: "center", gap: 10 },
   rowLabel: { color: MUTED, fontSize: 14 },
   rowValue: { color: TEXT, fontWeight: "700", fontSize: 14 },
@@ -981,19 +1207,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  
+
   iconContainer: {
     width: 36,
     height: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 4,
   },
 
   summaryBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f9fafb', // soft gray bg
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f9fafb", // soft gray bg
     padding: 12,
     borderRadius: 12,
     marginTop: 4,
@@ -1064,9 +1290,9 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#fff",
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 14,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
@@ -1074,11 +1300,11 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 1,
   },
-  
+
   restaurantIcon: {
     width: 30,
     height: 30,
-    resizeMode: 'contain',
+    resizeMode: "contain",
   },
 
   warn: {
@@ -1163,6 +1389,8 @@ const styles = StyleSheet.create({
   successTitle: { fontSize: 20, fontWeight: "900", color: TEXT, marginTop: 10 },
 
   modalWrap: { flex: 1, justifyContent: "flex-end" },
+  modalSheet: { maxHeight: "85%" },
+  modalScrollContent: { paddingBottom: 16 },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.45)",

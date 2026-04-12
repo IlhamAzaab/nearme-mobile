@@ -8,7 +8,6 @@ import {
   DeviceEventEmitter,
   Dimensions,
   FlatList,
-  Image,
   Keyboard,
   Pressable,
   StyleSheet,
@@ -17,11 +16,15 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
+import StaggeredFadeInUp from "../../components/common/StaggeredFadeInUp";
 import { API_BASE_URL } from "../../constants/api";
 import { useLocationContext } from "../../context/LocationContext";
 import useDebounce from "../../hooks/useDebounce";
 import { getAccessToken } from "../../lib/authStorage";
+import { prefetchImageUrls } from "../../lib/imageCache";
+import { fetchJsonWithCache } from "../../lib/publicDataCache";
 import { formatDistance } from "../../services/restaurantDistanceService";
 import { calculateDistance } from "../../utils/locationUtils";
 
@@ -31,7 +34,6 @@ const CARD_PADDING = 16;
 const CARD_WIDTH = (SCREEN_WIDTH - CARD_PADDING * 2 - CARD_GAP) / 2;
 const GREEN = "#06C168";
 const SEARCH_DEBOUNCE_MS = 300;
-const SUGGESTION_LIMIT = 6;
 
 /** Convert "14:00" or "14:00:00" to "2:00 PM" */
 const formatTime = (t) => {
@@ -45,6 +47,14 @@ const formatTime = (t) => {
 
 const formatPrice = (price) =>
   price ? `Rs. ${parseFloat(price).toFixed(2)}` : "N/A";
+
+function normalizeFoodsPayload(payload) {
+  if (Array.isArray(payload?.foods)) return payload.foods;
+  if (Array.isArray(payload?.data?.foods)) return payload.data.foods;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.menu)) return payload.menu;
+  return [];
+}
 
 function foodMatchesQuery(food, normalizedQuery) {
   if (!normalizedQuery) return true;
@@ -64,6 +74,8 @@ function foodMatchesQuery(food, normalizedQuery) {
 
 export default function RestaurantFoodsScreen({ route, navigation }) {
   const { restaurantId } = route.params;
+  const restaurantCacheKey = `public:restaurant:${restaurantId}`;
+  const foodsCacheKey = `public:restaurant:${restaurantId}:foods`;
 
   // Restaurant & foods
   const [restaurant, setRestaurant] = useState(null);
@@ -75,7 +87,6 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
   const [error, setError] = useState(null);
   const [foodsError, setFoodsError] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [suggestions, setSuggestions] = useState([]);
 
   const debouncedSearchQuery = useDebounce(searchQuery, SEARCH_DEBOUNCE_MS);
   const searchAbortRef = useRef(null);
@@ -105,12 +116,25 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
     try {
       setRestaurantLoading(true);
       setError(null);
-      const res = await fetch(
-        `${API_BASE_URL}/public/restaurants/${restaurantId}`,
+      const data = await fetchJsonWithCache(
+        restaurantCacheKey,
+        async () => {
+          const res = await fetch(
+            `${API_BASE_URL}/public/restaurants/${restaurantId}`,
+          );
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(payload.message || "Restaurant not found");
+          }
+          return payload;
+        },
+        { ttlMs: 180000 },
       );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "Restaurant not found");
       setRestaurant(data.restaurant);
+      prefetchImageUrls([
+        data?.restaurant?.cover_image_url,
+        data?.restaurant?.logo_url,
+      ]);
     } catch (err) {
       console.error("Error fetching restaurant:", err);
       setError(err.message);
@@ -120,26 +144,60 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
   };
 
   // ─── Fetch foods from API (supports abort) ───
-  const fetchFoodsFromApi = useCallback(async (search = "", options = {}) => {
-    const { signal } = options;
+  const fetchFoodsFromApi = useCallback(
+    async (search = "", options = {}) => {
+      const { signal } = options;
 
-    try {
-      setFoodsError(null);
-      let url = `${API_BASE_URL}/public/restaurants/${restaurantId}/foods`;
-      if (search) url += `?search=${encodeURIComponent(search)}`;
-      const res = await fetch(url, { signal });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "Failed to fetch foods");
-      return data.foods || [];
-    } catch (err) {
-      if (err?.name === "AbortError") {
+      try {
+        setFoodsError(null);
+        let url = `${API_BASE_URL}/public/restaurants/${restaurantId}/foods`;
+        if (search) url += `?search=${encodeURIComponent(search)}`;
+        const data = await fetchJsonWithCache(
+          search
+            ? `${foodsCacheKey}:search:${search.toLowerCase()}`
+            : foodsCacheKey,
+          async () => {
+            const res = await fetch(url, { signal });
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              throw new Error(payload.message || "Failed to fetch foods");
+            }
+            return payload;
+          },
+          { ttlMs: search ? 60000 : 180000 },
+        );
+
+        let parsedFoods = normalizeFoodsPayload(data);
+
+        // Avoid stale empty cache on restaurant menu open: re-validate once from network.
+        if (!search && parsedFoods.length === 0) {
+          const freshData = await fetchJsonWithCache(
+            foodsCacheKey,
+            async () => {
+              const res = await fetch(url, { signal });
+              const payload = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                throw new Error(payload.message || "Failed to fetch foods");
+              }
+              return payload;
+            },
+            { ttlMs: 0, forceRefresh: true },
+          );
+          parsedFoods = normalizeFoodsPayload(freshData);
+        }
+
+        return parsedFoods;
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          throw err;
+        }
+        console.error("Error fetching foods:", err);
+        setFoodsError(err.message);
         throw err;
       }
-      console.error("Error fetching foods:", err);
-      setFoodsError(err.message);
-      throw err;
-    }
-  }, [restaurantId]);
+    },
+    [restaurantId],
+  );
 
   // Initial foods load for this restaurant
   useEffect(() => {
@@ -157,6 +215,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
         if (!isMounted) return;
         setAllFoodsCache(fetchedFoods);
         setFoods(fetchedFoods);
+        prefetchImageUrls(fetchedFoods.map((item) => item?.image_url));
       } catch (err) {
         if (err?.name !== "AbortError") {
           setAllFoodsCache([]);
@@ -188,23 +247,16 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
     );
   }, [allFoodsCache, normalizedSearchQuery]);
 
-  const localSuggestions = useMemo(
-    () => localFilteredFoods.slice(0, SUGGESTION_LIMIT),
-    [localFilteredFoods],
-  );
-
   // Instant local update on every keystroke
   useEffect(() => {
     if (!normalizedSearchQuery) {
       setFoods(allFoodsCache);
-      setSuggestions([]);
       setFoodsError(null);
       return;
     }
 
     setFoods(localFilteredFoods);
-    setSuggestions(localSuggestions);
-  }, [allFoodsCache, localFilteredFoods, localSuggestions, normalizedSearchQuery]);
+  }, [allFoodsCache, localFilteredFoods, normalizedSearchQuery]);
 
   // Debounced API sync with request cancellation
   useEffect(() => {
@@ -233,7 +285,6 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
       .then((fetchedFoods) => {
         if (requestId !== searchRequestIdRef.current) return;
         setFoods(fetchedFoods);
-        setSuggestions(fetchedFoods.slice(0, SUGGESTION_LIMIT));
       })
       .catch((err) => {
         if (err?.name !== "AbortError") {
@@ -261,7 +312,6 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
     searchRequestIdRef.current += 1;
 
     setSearchQuery("");
-    setSuggestions([]);
     setFoods(allFoodsCache);
     setSearchLoading(false);
     setFoodsError(null);
@@ -356,114 +406,119 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
 
   // ─── Food card renderer ───
   const renderFoodCard = useCallback(
-    ({ item }) => (
-      <Pressable
-        onPress={() => handleFoodPress(item)}
-        style={({ pressed }) => [styles.foodCard, pressed && { opacity: 0.94 }]}
-      >
-        {/* Image */}
-        <View style={styles.foodImageWrap}>
-          {item.image_url ? (
-            <Image source={{ uri: item.image_url }} style={styles.foodImage} />
-          ) : (
-            <LinearGradient
-              colors={[GREEN, "#06C168"]}
-              style={[styles.foodImage, styles.foodImagePlaceholder]}
-            >
-              <Ionicons
-                name="restaurant-outline"
-                size={32}
-                color="rgba(255,255,255,0.6)"
+    ({ item, index }) => (
+      <StaggeredFadeInUp delay={index * 14}>
+        <Pressable
+          onPressIn={() => {
+            navigation.preload?.("FoodDetail", {
+              restaurantId,
+              foodId: item.id,
+            });
+          }}
+          onPress={() => handleFoodPress(item)}
+          style={({ pressed }) => [
+            styles.foodCard,
+            pressed && { opacity: 0.94 },
+          ]}
+        >
+          {/* Image */}
+          <View style={styles.foodImageWrap}>
+            {item.image_url ? (
+              <OptimizedImage
+                uri={item.image_url}
+                style={styles.foodImage}
+                transition={110}
               />
-            </LinearGradient>
-          )}
+            ) : (
+              <LinearGradient
+                colors={[GREEN, "#06C168"]}
+                style={[styles.foodImage, styles.foodImagePlaceholder]}
+              >
+                <Ionicons
+                  name="restaurant-outline"
+                  size={32}
+                  color="rgba(255,255,255,0.6)"
+                />
+              </LinearGradient>
+            )}
 
-          {/* Rating badge */}
-          {item.stars > 0 && (
-            <View style={styles.ratingBadge}>
-              <Ionicons name="star" size={11} color="#FBBF24" />
-              <Text style={styles.ratingText}>{item.stars}</Text>
-            </View>
-          )}
-
-          {/* Unavailable overlay */}
-          {!item.is_available && item.is_available !== undefined && (
-            <View style={styles.unavailableOverlay}>
-              <View style={styles.unavailablePill}>
-                <Text style={styles.unavailableText}>Unavailable</Text>
+            {/* Rating badge */}
+            {item.stars > 0 && (
+              <View style={styles.ratingBadge}>
+                <Ionicons name="star" size={11} color="#FBBF24" />
+                <Text style={styles.ratingText}>{item.stars}</Text>
               </View>
-            </View>
-          )}
+            )}
 
-          {/* Quick add button */}
-          {item.is_available !== false && (
-            <Pressable
-              onPress={(e) => {
-                e.stopPropagation?.();
-                quickAddToCart(item);
-              }}
-              disabled={addingToCart === item.id}
-              style={({ pressed }) => [
-                styles.addBtn,
-                pressed && { transform: [{ scale: 0.9 }] },
-              ]}
-            >
-              {addingToCart === item.id ? (
-                <ActivityIndicator size={14} color="#fff" />
-              ) : (
-                <Ionicons name="add" size={20} color="#fff" />
-              )}
-            </Pressable>
-          )}
-        </View>
+            {/* Unavailable overlay */}
+            {!item.is_available && item.is_available !== undefined && (
+              <View style={styles.unavailableOverlay}>
+                <View style={styles.unavailablePill}>
+                  <Text style={styles.unavailableText}>Unavailable</Text>
+                </View>
+              </View>
+            )}
 
-        {/* Info */}
-        <View style={styles.foodInfo}>
-          <Text style={styles.foodName} numberOfLines={1}>
-            {item.name}
-          </Text>
-          {item.description ? (
-            <Text style={styles.foodDesc} numberOfLines={2}>
-              {item.description}
+            {/* Quick add button */}
+            {item.is_available !== false && (
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  quickAddToCart(item);
+                }}
+                disabled={addingToCart === item.id}
+                style={({ pressed }) => [
+                  styles.addBtn,
+                  pressed && { transform: [{ scale: 0.9 }] },
+                ]}
+              >
+                {addingToCart === item.id ? (
+                  <ActivityIndicator size={14} color="#fff" />
+                ) : (
+                  <Ionicons name="add" size={20} color="#fff" />
+                )}
+              </Pressable>
+            )}
+          </View>
+
+          {/* Info */}
+          <View style={styles.foodInfo}>
+            <Text style={styles.foodName} numberOfLines={1}>
+              {item.name}
             </Text>
-          ) : null}
+            {item.description ? (
+              <Text style={styles.foodDesc} numberOfLines={2}>
+                {item.description}
+              </Text>
+            ) : null}
 
-          {/* Available time tags */}
-          {item.available_time?.length > 0 && (
-            <View style={styles.tagsRow}>
-              {item.available_time.map((time) => (
-                <View style={styles.tag} key={time}>
-                  <Text style={styles.tagText}>
-                    {time.charAt(0).toUpperCase() + time.slice(1)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Price + View Details */}
-          <View style={styles.priceRow}>
-            <View>
-              {item.offer_price ? (
-                <View style={styles.priceGroup}>
+            {/* Price + prep time (same treatment as Home food cards) */}
+            <View style={styles.priceRow}>
+              <View>
+                {item.offer_price ? (
+                  <View style={styles.priceGroup}>
+                    <Text style={styles.foodPrice}>
+                      {formatPrice(item.offer_price)}
+                    </Text>
+                    <Text style={styles.oldPrice}>
+                      {formatPrice(item.regular_price)}
+                    </Text>
+                  </View>
+                ) : (
                   <Text style={styles.foodPrice}>
-                    {formatPrice(item.offer_price)}
+                    {formatPrice(item.regular_price || item.price)}
                   </Text>
-                  <Text style={styles.oldPrice}>
-                    {formatPrice(item.regular_price)}
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.foodPrice}>
-                  {formatPrice(item.regular_price || item.price)}
-                </Text>
-              )}
+                )}
+              </View>
+              <Text style={styles.foodTime}>
+                {item.prep_time ? `Prep ${item.prep_time}` : ""}
+              </Text>
             </View>
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      </StaggeredFadeInUp>
     ),
-    [restaurantId, addingToCart],
+    [restaurantId, addingToCart, navigation],
   );
 
   // ─── Loading / Error states ───
@@ -544,14 +599,35 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
         </Pressable>
 
         <View style={styles.headerCenter}>
-          <Text style={styles.topBarTitle} numberOfLines={1}>
-            {restaurant?.restaurant_name || "Restaurant"}
-          </Text>
-          {restaurant?.city ? (
-            <Text style={styles.topBarSub} numberOfLines={1}>
-              {restaurant.city}
-            </Text>
-          ) : null}
+          <View style={styles.headerSearchWrap}>
+            <Ionicons
+              name="search-outline"
+              size={17}
+              color="#9CA3AF"
+              style={styles.headerSearchIcon}
+            />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search menu items..."
+              placeholderTextColor="#9CA3AF"
+              style={styles.headerSearchInput}
+            />
+            <View style={styles.headerSearchRightSlot}>
+              {searchLoading && (
+                <ActivityIndicator
+                  size="small"
+                  color={GREEN}
+                  style={{ marginRight: 4 }}
+                />
+              )}
+              {searchQuery.length > 0 && (
+                <Pressable onPress={handleClearSearch} style={styles.clearBtn}>
+                  <Ionicons name="close-circle" size={18} color="#9CA3AF" />
+                </Pressable>
+              )}
+            </View>
+          </View>
         </View>
 
         {/* Cart icon */}
@@ -579,6 +655,10 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
         data={foodsLoading ? [] : foods}
         keyExtractor={(item) => String(item.id)}
         numColumns={2}
+        initialNumToRender={12}
+        maxToRenderPerBatch={16}
+        updateCellsBatchingPeriod={20}
+        windowSize={7}
         columnWrapperStyle={styles.columnWrapper}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
@@ -588,11 +668,10 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
             {/* ── Cover Image ── */}
             <View style={styles.coverWrap}>
               {restaurant?.cover_image_url || restaurant?.logo_url ? (
-                <Image
-                  source={{
-                    uri: restaurant.cover_image_url || restaurant.logo_url,
-                  }}
+                <OptimizedImage
+                  uri={restaurant.cover_image_url || restaurant.logo_url}
                   style={styles.coverImage}
+                  transition={120}
                 />
               ) : (
                 <LinearGradient
@@ -612,9 +691,10 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
                 {/* Logo */}
                 <View style={styles.logoOuter}>
                   {restaurant?.logo_url ? (
-                    <Image
-                      source={{ uri: restaurant.logo_url }}
+                    <OptimizedImage
+                      uri={restaurant.logo_url}
                       style={styles.restaurantLogo}
+                      transition={100}
                     />
                   ) : (
                     <LinearGradient
@@ -714,82 +794,6 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
                 </View>
               )}
             </View>
-
-            {/* ── Search Bar ── */}
-            <View style={styles.searchContainer}>
-              <Ionicons
-                name="search-outline"
-                size={18}
-                color="#9CA3AF"
-                style={styles.searchIconLeft}
-              />
-              <TextInput
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search menu items..."
-                placeholderTextColor="#9CA3AF"
-                style={styles.searchInput}
-              />
-              <View style={styles.searchRightSlot}>
-                {searchLoading && (
-                  <ActivityIndicator
-                    size="small"
-                    color={GREEN}
-                    style={styles.searchLoader}
-                  />
-                )}
-                {searchQuery.length > 0 && (
-                  <Pressable
-                    onPress={handleClearSearch}
-                    style={styles.clearBtn}
-                  >
-                    <Ionicons name="close-circle" size={18} color="#9CA3AF" />
-                  </Pressable>
-                )}
-              </View>
-            </View>
-
-            {searchQuery.trim().length > 0 && (
-              <View style={styles.suggestionsWrap}>
-                {suggestions.length > 0 ? (
-                  suggestions.map((item, index) => (
-                    <Pressable
-                      key={String(item.id || `${item.name}-${index}`)}
-                      onPress={() => setSearchQuery(item.name || "")}
-                      style={({ pressed }) => [
-                        styles.suggestionRow,
-                        pressed && { backgroundColor: "#F3F4F6" },
-                        index === suggestions.length - 1 && {
-                          borderBottomWidth: 0,
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        name="search-outline"
-                        size={14}
-                        color="#9CA3AF"
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.suggestionTitle} numberOfLines={1}>
-                          {item.name}
-                        </Text>
-                        {item?.description ? (
-                          <Text style={styles.suggestionSubtitle} numberOfLines={1}>
-                            {item.description}
-                          </Text>
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  ))
-                ) : !searchLoading ? (
-                  <View style={styles.suggestionEmptyRow}>
-                    <Text style={styles.suggestionEmptyText}>
-                      No suggestions found
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            )}
 
             {/* ── Menu heading ── */}
             <View style={styles.menuRow}>
@@ -960,15 +964,35 @@ const styles = StyleSheet.create({
     flex: 1,
     marginHorizontal: 12,
   },
-  topBarTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#111827",
+  headerSearchWrap: {
+    position: "relative",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+    borderRadius: 999,
+    paddingLeft: 34,
+    paddingRight: 10,
+    height: 40,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
-  topBarSub: {
-    fontSize: 12,
-    color: "#6B7280",
-    marginTop: 1,
+  headerSearchIcon: {
+    position: "absolute",
+    left: 12,
+    top: 11,
+  },
+  headerSearchInput: {
+    width: "100%",
+    color: "#111827",
+    fontSize: 13,
+    paddingRight: 56,
+  },
+  headerSearchRightSlot: {
+    position: "absolute",
+    right: 8,
+    top: 0,
+    bottom: 0,
+    flexDirection: "row",
+    alignItems: "center",
   },
   cartBtn: {
     width: 42,
@@ -1133,84 +1157,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
-  /* ── Search ── */
-  searchContainer: {
-    position: "relative",
-    justifyContent: "center",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    paddingLeft: 38,
-    paddingRight: 14,
-    height: 46,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    shadowColor: "#000",
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-  searchIconLeft: {
-    position: "absolute",
-    left: 12,
-    top: 13,
-  },
-  searchInput: {
-    width: "100%",
-    color: "#111827",
-    fontSize: 14,
-    paddingRight: 64,
-  },
-  searchRightSlot: {
-    position: "absolute",
-    right: 10,
-    top: 0,
-    bottom: 0,
-    flexDirection: "row",
-    alignItems: "center",
-  },
   clearBtn: {
     padding: 4,
-  },
-  searchLoader: {
-    marginRight: 4,
-  },
-  suggestionsWrap: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    marginTop: -6,
-    marginBottom: 12,
-    overflow: "hidden",
-  },
-  suggestionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-  },
-  suggestionTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  suggestionSubtitle: {
-    fontSize: 11,
-    color: "#6B7280",
-    marginTop: 1,
-  },
-  suggestionEmptyRow: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  suggestionEmptyText: {
-    fontSize: 12,
-    color: "#9CA3AF",
   },
 
   /* ── Menu heading ── */
@@ -1396,13 +1344,14 @@ const styles = StyleSheet.create({
   },
   oldPrice: {
     fontSize: 11,
-    color: "#9CA3AF",
+    color: "#DC2626",
     textDecorationLine: "line-through",
+    textDecorationColor: "#DC2626",
   },
-  viewDetails: {
-    fontSize: 10,
-    color: GREEN,
-    fontWeight: "700",
+  foodTime: {
+    color: "#94A3B8",
+    fontSize: 11,
+    fontWeight: "600",
   },
 
   /* ── Empty ── */

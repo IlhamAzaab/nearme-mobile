@@ -58,6 +58,25 @@ export const getOrderStatus = (order) => {
   return typeof raw === "string" ? raw.toLowerCase() : "placed";
 };
 
+function getOrderIdentityKey(order) {
+  if (!order) return "";
+
+  const candidates = [
+    order.id,
+    order.order_id,
+    order.orderId,
+    order.order_number,
+    order.orderNumber,
+  ];
+
+  for (const value of candidates) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+
+  return "";
+}
+
 function extractOrdersFromResponse(data) {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.orders)) return data.orders;
@@ -65,6 +84,27 @@ function extractOrdersFromResponse(data) {
   if (Array.isArray(data?.data?.orders)) return data.data.orders;
   if (Array.isArray(data?.results)) return data.results;
   return [];
+}
+
+function dedupeOrdersById(list = []) {
+  const byId = new Map();
+
+  for (const order of list) {
+    if (!order) continue;
+    const key = getOrderIdentityKey(order);
+    if (!key) continue;
+
+    // Keep the latest shape while preserving earlier fields.
+    const prev = byId.get(key);
+    byId.set(
+      key,
+      prev
+        ? { ...prev, ...order, id: order.id ?? prev.id, _identityKey: key }
+        : { ...order, _identityKey: key },
+    );
+  }
+
+  return Array.from(byId.values());
 }
 
 export function OrderProvider({ children }) {
@@ -83,17 +123,24 @@ export function OrderProvider({ children }) {
       if (mode === "refresh") setRefreshing(true);
       else if (mode === "initial") setLoading(true);
 
-      const token = (await getAccessToken()) || (await AsyncStorage.getItem("token"));
+      const token =
+        (await getAccessToken()) || (await AsyncStorage.getItem("token"));
       if (!token || token === "null") return false;
 
       // Fetch active + past explicitly so heavy active traffic does not hide history.
       const [activeRes, pastRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/orders/my-orders?status=active&limit=200&offset=0`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API_BASE_URL}/orders/my-orders?status=past&limit=200&offset=0`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
+        fetch(
+          `${API_BASE_URL}/orders/my-orders?status=active&limit=200&offset=0`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        ),
+        fetch(
+          `${API_BASE_URL}/orders/my-orders?status=past&limit=200&offset=0`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        ),
       ]);
 
       const [activeData, pastData] = await Promise.all([
@@ -101,17 +148,12 @@ export function OrderProvider({ children }) {
         pastRes.json().catch(() => ({})),
       ]);
 
-        // Do not fan out N extra delivery-status calls; /orders/my-orders already carries delivery/effective status.
+      const activeOrders = extractOrdersFromResponse(activeData);
+      const pastOrders = extractOrdersFromResponse(pastData);
+      const orderList = dedupeOrdersById([...activeOrders, ...pastOrders]);
 
-        setOrders(orderList);
-
-        // Update badge count (active orders)
-        const activeCount = orderList.filter((o) =>
-          ACTIVE_STATUSES.includes(getOrderStatus(o)),
-        ).length;
-        setOrdersBadgeCount(activeCount);
-
-        return true;
+      if (orderList.length === 0 && !activeRes.ok && !pastRes.ok) {
+        return false;
       }
 
       // For active orders, also fetch /delivery-status to get effective_status
@@ -124,14 +166,23 @@ export function OrderProvider({ children }) {
         const results = await Promise.allSettled(
           activeIds.map(async (id) => {
             try {
-              const r = await fetch(`${API_BASE_URL}/orders/${id}/delivery-status`, {
-                headers: { Authorization: `Bearer ${token}` },
-              });
+              const r = await fetch(
+                `${API_BASE_URL}/orders/${id}/delivery-status`,
+                {
+                  headers: { Authorization: `Bearer ${token}` },
+                },
+              );
               if (!r.ok) return null;
               const d = await r.json().catch(() => null);
               if (!d) return null;
-              return { id, effective_status: d.effective_status || d.delivery_status || d.status || null };
-            } catch { return null; }
+              return {
+                id,
+                effective_status:
+                  d.effective_status || d.delivery_status || d.status || null,
+              };
+            } catch {
+              return null;
+            }
           }),
         );
         // Merge effective_status back into the order objects
@@ -153,10 +204,12 @@ export function OrderProvider({ children }) {
         return bTime - aTime;
       });
 
-      setOrders(orderList);
+      setOrders(dedupeOrdersById(orderList));
 
       // Update badge count (active orders)
-      const activeCount = orderList.filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))).length;
+      const activeCount = orderList.filter((o) =>
+        ACTIVE_STATUSES.includes(getOrderStatus(o)),
+      ).length;
       setOrdersBadgeCount(activeCount);
 
       return true;
@@ -171,16 +224,19 @@ export function OrderProvider({ children }) {
 
   // ── Add a freshly placed order (called from CheckoutScreen) ──────────────
   const addNewOrder = useCallback((order) => {
-    if (!order?.id) return;
+    const incomingKey = getOrderIdentityKey(order);
+    if (!incomingKey) return;
 
     setOrders((prev) => {
-      // Prevent duplicates
-      if (prev.some((o) => o.id === order.id)) return prev;
-      return [order, ...prev];
+      const merged = dedupeOrdersById([
+        { ...order, _identityKey: incomingKey },
+        ...prev,
+      ]);
+      return merged;
     });
 
     // Mark as new for badge + animation
-    setNewOrderIds((prev) => new Set(prev).add(order.id));
+    setNewOrderIds((prev) => new Set(prev).add(incomingKey));
     setHasNewOrder(true);
 
     // Update badge
@@ -209,8 +265,10 @@ export function OrderProvider({ children }) {
           { event: "UPDATE", schema: "public", table: "orders" },
           (payload) => {
             setOrders((prev) =>
-              prev.map((o) =>
-                o.id === payload.new.id ? { ...o, ...payload.new } : o,
+              dedupeOrdersById(
+                prev.map((o) =>
+                  o.id === payload.new.id ? { ...o, ...payload.new } : o,
+                ),
               ),
             );
             // Re-fetch to get effective_status from delivery-status endpoint

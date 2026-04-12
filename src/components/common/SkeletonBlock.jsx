@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Animated } from "react-native";
+import { Animated, Easing } from "react-native";
 
 /**
  * Reusable skeleton shimmer block.
@@ -14,25 +14,30 @@ export default function SkeletonBlock({
   const shimmer = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.loop(
+    const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(shimmer, {
           toValue: 1,
-          duration: 900,
+          duration: 560,
+          easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(shimmer, {
           toValue: 0,
-          duration: 900,
+          duration: 560,
+          easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
       ]),
-    ).start();
+    );
+
+    animation.start();
+    return () => animation.stop();
   }, []);
 
   const opacity = shimmer.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.25, 0.55],
+    outputRange: [0.32, 0.92],
   });
 
   return (

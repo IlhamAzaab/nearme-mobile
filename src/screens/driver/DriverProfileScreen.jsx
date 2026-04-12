@@ -464,7 +464,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f0fdf4",
   },
   setupContainer: { flex: 1, backgroundColor: "#06C168" },
-  setupScroll: { flexGrow: 1, paddingHorizontal: 18, paddingVertical: 24 },
+  setupScroll: { flexGrow: 1, paddingHorizontal: 18, paddingVertical: 16 },
   setupLogoWrap: { alignItems: "center", marginBottom: 14 },
   setupCard: {
     backgroundColor: "#fff",

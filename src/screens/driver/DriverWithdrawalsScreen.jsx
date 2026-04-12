@@ -15,7 +15,6 @@ import {
 } from "react-native";
 import {
   SafeAreaView,
-  useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import DriverScreenSection from "../../components/driver/DriverScreenSection";
@@ -83,7 +82,6 @@ async function authFetchJson(url) {
 }
 
 export default function DriverWithdrawalsScreen({ navigation, route }) {
-  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [proofViewer, setProofViewer] = useState({
@@ -158,20 +156,6 @@ export default function DriverWithdrawalsScreen({ navigation, route }) {
       Number(summary.today_earnings || 0),
   );
 
-  const openTab = (tabName) => {
-    if (tabName === "Payment") {
-      navigation.navigate("DriverTabs", { screen: "Payment" });
-      return;
-    }
-
-    if (tabName === "Active") {
-      navigation.navigate("DriverMap");
-      return;
-    }
-
-    navigation.navigate("DriverTabs", { screen: tabName });
-  };
-
   const formatDate = (dateStr) => {
     const localDate = parseStoredLocalDate(dateStr);
     if (!localDate) return "-";
@@ -214,14 +198,20 @@ export default function DriverWithdrawalsScreen({ navigation, route }) {
 
   if (loading) {
     return (
-      <SafeAreaView style={s.container} edges={["left", "right", "bottom"]}>
+      <SafeAreaView
+        style={s.container}
+        edges={["left", "right", "top"]}
+      >
         <DriverDashboardLoadingSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={s.container} edges={["left", "right", "bottom"]}>
+    <SafeAreaView
+      style={s.container}
+      edges={["left", "right", "top"]}
+    >
       <View style={{ flex: 1 }}>
         <DriverScreenSection screenKey="DriverWithdrawals" sectionIndex={0}>
           <DriverScreenHeader
@@ -344,40 +334,6 @@ export default function DriverWithdrawalsScreen({ navigation, route }) {
             )}
           </ScrollView>
         </DriverScreenSection>
-      </View>
-
-      <View
-        style={[
-          s.bottomNav,
-          { paddingBottom: insets.bottom, height: 70 + insets.bottom },
-        ]}
-      >
-        <TouchableOpacity
-          style={s.navItem}
-          onPress={() => openTab("Dashboard")}
-        >
-          <Ionicons name="home" size={22} color="#9ca3af" />
-          <Text style={s.navLabel}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={s.navItem}
-          onPress={() => openTab("Available")}
-        >
-          <Ionicons name="list" size={22} color="#9ca3af" />
-          <Text style={s.navLabel}>Available</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={s.navItem} onPress={() => openTab("Active")}>
-          <Ionicons name="location" size={22} color="#9ca3af" />
-          <Text style={s.navLabel}>Active</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={s.navItem} onPress={() => openTab("Earnings")}>
-          <Ionicons name="wallet" size={22} color="#9ca3af" />
-          <Text style={s.navLabel}>Earnings</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={s.navItem} onPress={() => openTab("Payment")}>
-          <Ionicons name="card" size={22} color="#9ca3af" />
-          <Text style={s.navLabel}>Payment</Text>
-        </TouchableOpacity>
       </View>
 
       <Modal
@@ -580,7 +536,7 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f3f4f6" },
   loader: { marginTop: 32 },
   scrollView: { flex: 1 },
-  scroll: { padding: 14, paddingBottom: 120, gap: 12 },
+  scroll: { padding: 14, paddingBottom: 24, gap: 12 },
   errorCard: {
     backgroundColor: "#fef2f2",
     borderWidth: 1,

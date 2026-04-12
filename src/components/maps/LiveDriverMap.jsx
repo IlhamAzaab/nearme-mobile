@@ -2,12 +2,11 @@
  * LiveDriverMap — Live tracking map for on_the_way status
  *
  * Shows:
- *   - Driver marker (🛵) moving in real-time
- *   - Customer destination marker (🏠)
- *   - Route polyline from driver to customer
+ *   - Driver marker moving in real-time (route-aligned heading)
+ *   - Customer destination marker (pin tip anchored to coordinate)
+ *   - Shortest black route polyline (OSRM driving profile)
  *
- * Receives driver location via Supabase realtime on driver_locations table
- * AND from parent's polling (whichever fires first).
+ * Receives driver location from parent polling updates.
  * Marker moves smoothly using ease-in-out animation.
  */
 
@@ -19,13 +18,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import {
-  ActivityIndicator,
-  StyleSheet,
-  View,
-} from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
-import supabase from "../../services/supabaseClient";
 
 // ─── Generate Leaflet HTML with customer location ─────────────────────────────
 const generateLeafletHTML = (customerLat, customerLng) => `
@@ -40,29 +34,44 @@ const generateLeafletHTML = (customerLat, customerLng) => `
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body, #map { width: 100%; height: 100%; }
     .leaflet-control-attribution { display: none !important; }
+    .leaflet-control-zoom { display: none !important; }
 
-    /* Icon-only driver marker */
-    .driver-marker {
+    .driver-marker-wrap {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 30px;
-      height: 30px;
-    }
-    .driver-marker-icon svg {
-      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+      width: 40px;
+      height: 40px;
     }
 
-    /* Icon-only home marker */
-    .home-marker {
+    .driver-marker-rotator {
+      width: 34px;
+      height: 34px;
+      transform-origin: 50% 50%;
+      transition: transform 300ms ease-out;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
-      height: 28px;
     }
-    .home-marker-icon svg {
-      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+
+    .driver-marker-rotator svg {
+      width: 34px;
+      height: 34px;
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+    }
+
+    .customer-pin-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 38px;
+    }
+
+    .customer-pin-wrap svg {
+      width: 24px;
+      height: 38px;
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
     }
   </style>
 </head>
@@ -73,7 +82,7 @@ const generateLeafletHTML = (customerLat, customerLng) => `
     const customerLat = ${customerLat || 0};
     const customerLng = ${customerLng || 0};
 
-    // Initialise map with cleaner style
+    // Initialise map
     const map = L.map('map', {
       zoomControl: false,
       attributionControl: false,
@@ -85,52 +94,162 @@ const generateLeafletHTML = (customerLat, customerLng) => `
       keyboard: false,
     }).setView([customerLat, customerLng], 15);
 
-    // Use CartoDB Positron for cleaner map style
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    // Previously used map tile provider
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      subdomains: 'abcd',
+      subdomains: 'abc',
     }).addTo(map);
 
-    // Driver icon only (no pin background)
-    const driverIcon = L.divIcon({
-      html: \`
-        <div class="driver-marker">
-          <div class="driver-marker-icon">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M19 17C19 18.1046 18.1046 19 17 19C15.8954 19 15 18.1046 15 17C15 15.8954 15.8954 15 17 15C18.1046 15 19 15.8954 19 17Z" stroke="#06C168" stroke-width="2"/>
-              <path d="M9 17C9 18.1046 8.10457 19 7 19C5.89543 19 5 18.1046 5 17C5 15.8954 5.89543 15 7 15C8.10457 15 9 15.8954 9 17Z" stroke="#06C168" stroke-width="2"/>
-              <path d="M15 17H9M7 17H5C3.89543 17 3 16.1046 3 15V11C3 9.89543 3.89543 9 5 9H12L15 13H17C18.1046 13 19 13.8954 19 15V17H17" stroke="#06C168" stroke-width="2" stroke-linecap="round"/>
-              <path d="M12 9V5C12 4.44772 12.4477 4 13 4H16" stroke="#06C168" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </div>
-        </div>
-      \`,
-      iconSize: [30, 30],
-      iconAnchor: [15, 15],
-      className: '',
-    });
+    function getDriverIcon(rotationDeg) {
+      return L.divIcon({
+        html: \`
+          <div class="driver-marker-wrap">
+            <div class="driver-marker-rotator" style="transform: rotate(\${rotationDeg}deg);">
+              <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-label="driver location">
+                <g transform="translate(6 4)">
+                  <rect x="20" y="0" width="12" height="6" rx="2.5" fill="#1A1A1A"/>
+                  <path d="M18 6H34L37 12H15L18 6Z" fill="#C5122A"/>
 
-    // Home icon only (no pin background)
+                  <path d="M14 12H38L41 20L35 54H17L11 20L14 12Z" fill="#E1253A"/>
+                  <path d="M22 12H30V54H22V12Z" fill="#B90F24"/>
+                  <path d="M19 54H33L35 60H17L19 54Z" fill="#C5122A"/>
+
+                  <path d="M9 21L14 17H17L14 34H10L7 28L9 21Z" fill="#E1253A"/>
+                  <path d="M43 21L38 17H35L38 34H42L45 28L43 21Z" fill="#E1253A"/>
+
+                  <ellipse cx="26" cy="29" rx="9.2" ry="11.2" fill="#20A35E"/>
+                  <rect x="22" y="35" width="8" height="12" rx="3" fill="#20A35E"/>
+                  <circle cx="26" cy="22" r="4.6" fill="#121212"/>
+
+                  <rect x="23" y="56" width="6" height="5" rx="1.2" fill="#3A3A3A"/>
+                </g>
+              </svg>
+            </div>
+          </div>
+        \`,
+        iconSize: [40, 40],
+        iconAnchor: [20, 20],
+        className: '',
+      });
+    }
+
+    // Customer icon: red map pin, bottom tip anchored to coordinate
     const customerIcon = L.divIcon({
       html: \`
-        <div class="home-marker">
-          <div class="home-marker-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M3 10.5L12 3L21 10.5V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V10.5Z" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M9 22V12H15V22" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
+        <div class="customer-pin-wrap">
+          <svg viewBox="0 0 128 200" xmlns="http://www.w3.org/2000/svg" aria-label="customer location">
+            <path d="M64 6C31 6 6 31 6 64c0 34 22 65 50 121a9 9 0 0 0 16 0c28-56 50-87 50-121 0-33-25-58-58-58z" fill="#d9043d"/>
+            <ellipse cx="64" cy="69" rx="24" ry="24" fill="#ffffff"/>
+          </svg>
         </div>
       \`,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
+      iconSize: [24, 38],
+      iconAnchor: [12, 38],
       className: '',
     });
 
     let driverMarker = null;
     let customerMarker = null;
     let routeLine = null;
-    let routeGlow = null;
+    let lastDriverPoint = null;
+    let hasDoneInitialFit = false;
+    let lastRouteRequestedAt = 0;
+    let lastRouteStart = null;
+
+    const ROUTE_REFRESH_MS = 2500;
+    const ROUTE_REFRESH_DISTANCE_M = 8;
+
+    function toRad(deg) {
+      return (deg * Math.PI) / 180;
+    }
+
+    function distanceMeters(aLat, aLng, bLat, bLng) {
+      const R = 6371000;
+      const dLat = toRad(bLat - aLat);
+      const dLng = toRad(bLng - aLng);
+      const aa =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(aLat)) *
+          Math.cos(toRad(bLat)) *
+          Math.sin(dLng / 2) *
+          Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+      return R * c;
+    }
+
+    function bearingDeg(fromLat, fromLng, toLat, toLng) {
+      const p1 = toRad(fromLat);
+      const p2 = toRad(toLat);
+      const dl = toRad(toLng - fromLng);
+      const y = Math.sin(dl) * Math.cos(p2);
+      const x =
+        Math.cos(p1) * Math.sin(p2) -
+        Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+      const brng = (Math.atan2(y, x) * 180) / Math.PI;
+      return (brng + 360) % 360;
+    }
+
+    function headingForTopFacingIcon(bearing) {
+      // This icon is drawn facing up (north) by default.
+      // Bearing 0 means north, so no offset is required.
+      return bearing;
+    }
+
+    async function fetchDrivingRoute(driverLat, driverLng) {
+      if (!customerLat || !customerLng) return null;
+
+      const url =
+        'https://router.project-osrm.org/route/v1/driving/' +
+        driverLng + ',' + driverLat + ';' + customerLng + ',' + customerLat +
+        '?overview=full&geometries=geojson&steps=false';
+
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data?.code !== 'Ok' || !data?.routes?.[0]?.geometry?.coordinates) {
+          return null;
+        }
+
+        const coords = data.routes[0].geometry.coordinates.map(function(c) {
+          return [c[1], c[0]];
+        });
+
+        return coords.length > 1 ? coords : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function shouldRefreshRoute(driverLat, driverLng) {
+      const now = Date.now();
+      if (!lastRouteStart) return true;
+
+      const moved = distanceMeters(
+        lastRouteStart.lat,
+        lastRouteStart.lng,
+        driverLat,
+        driverLng,
+      );
+
+      return moved >= ROUTE_REFRESH_DISTANCE_M || now - lastRouteRequestedAt >= ROUTE_REFRESH_MS;
+    }
+
+    function ensureRouteLine(pathCoords) {
+      if (!pathCoords || pathCoords.length < 2) return;
+
+      if (routeLine) {
+        routeLine.setLatLngs(pathCoords);
+      } else {
+        routeLine = L.polyline(pathCoords, {
+          color: '#111111',
+          weight: 5,
+          opacity: 0.95,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }).addTo(map);
+      }
+    }
 
     // Add customer marker if we have valid coordinates
     if (customerLat && customerLng) {
@@ -154,79 +273,6 @@ const generateLeafletHTML = (customerLat, customerLng) => `
       requestAnimationFrame(tick);
     }
 
-    // Generate smooth curved path between two points (Bezier curve arc)
-    function getCurvedPath(startLat, startLng, endLat, endLng, numPoints = 50) {
-      const points = [];
-
-      // Calculate midpoint
-      const midLat = (startLat + endLat) / 2;
-      const midLng = (startLng + endLng) / 2;
-
-      // Calculate distance for curve height
-      const latDiff = Math.abs(endLat - startLat);
-      const lngDiff = Math.abs(endLng - startLng);
-      const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff);
-
-      // Control point offset (creates the arc) - curve upward
-      const curveHeight = distance * 0.35;
-
-      // Perpendicular direction for curve (always curve upward/north)
-      const angle = Math.atan2(endLng - startLng, endLat - startLat);
-      const perpAngle = angle - Math.PI / 2;
-
-      // Control point (offset perpendicular to the line, creating top arc)
-      const ctrlLat = midLat + Math.cos(perpAngle) * curveHeight;
-      const ctrlLng = midLng + Math.sin(perpAngle) * curveHeight;
-
-      // Generate Quadratic Bezier curve points
-      for (let i = 0; i <= numPoints; i++) {
-        const t = i / numPoints;
-        const oneMinusT = 1 - t;
-
-        // Quadratic Bezier formula: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
-        const lat = oneMinusT * oneMinusT * startLat +
-                    2 * oneMinusT * t * ctrlLat +
-                    t * t * endLat;
-        const lng = oneMinusT * oneMinusT * startLng +
-                    2 * oneMinusT * t * ctrlLng +
-                    t * t * endLng;
-
-        points.push([lat, lng]);
-      }
-
-      return points;
-    }
-
-    // Update route line from driver to customer with smooth curve
-    function updateRoute(driverLat, driverLng) {
-      if (!customerLat || !customerLng) return;
-
-      const curvedPoints = getCurvedPath(driverLat, driverLng, customerLat, customerLng);
-
-      if (routeLine) {
-        routeLine.setLatLngs(curvedPoints);
-        routeGlow.setLatLngs(curvedPoints);
-      } else {
-        // Glow effect layer (behind main line)
-        routeGlow = L.polyline(curvedPoints, {
-          color: '#06C168',
-          weight: 10,
-          opacity: 0.2,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }).addTo(map);
-
-        // Main route line with gradient-like appearance
-        routeLine = L.polyline(curvedPoints, {
-          color: '#06C168',
-          weight: 4,
-          opacity: 0.9,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }).addTo(map);
-      }
-    }
-
     // Fit map bounds to show both markers
     function fitBounds(driverLat, driverLng) {
       if (!customerLat || !customerLng) {
@@ -241,26 +287,63 @@ const generateLeafletHTML = (customerLat, customerLng) => `
       map.fitBounds(bounds, { padding: [80, 80], maxZoom: 17 });
     }
 
-    let firstUpdate = true;
+    async function updateDriver(lat, lng, incomingHeading) {
+      let routeBearing = null;
+
+      if (shouldRefreshRoute(lat, lng)) {
+        const routeCoords = await fetchDrivingRoute(lat, lng);
+        if (routeCoords && routeCoords.length > 1) {
+          ensureRouteLine(routeCoords);
+
+          const first = routeCoords[0];
+          const second = routeCoords[1];
+          routeBearing = bearingDeg(first[0], first[1], second[0], second[1]);
+        }
+
+        lastRouteStart = { lat: lat, lng: lng };
+        lastRouteRequestedAt = Date.now();
+      }
+
+      if (!routeBearing) {
+        if (lastDriverPoint) {
+          routeBearing = bearingDeg(lastDriverPoint.lat, lastDriverPoint.lng, lat, lng);
+        } else if (customerLat && customerLng) {
+          routeBearing = bearingDeg(lat, lng, customerLat, customerLng);
+        }
+      }
+
+      const heading = Number.isFinite(Number(routeBearing))
+        ? Number(routeBearing)
+        : Number.isFinite(Number(incomingHeading))
+          ? Number(incomingHeading)
+          : 0;
+
+      const iconRotation = headingForTopFacingIcon(heading);
+
+      if (!driverMarker) {
+        driverMarker = L.marker([lat, lng], { icon: getDriverIcon(iconRotation) }).addTo(map);
+      } else {
+        moveSmooth(driverMarker, lat, lng, 900);
+        driverMarker.setIcon(getDriverIcon(iconRotation));
+      }
+
+      if (!hasDoneInitialFit) {
+        fitBounds(lat, lng);
+        hasDoneInitialFit = true;
+      }
+
+      lastDriverPoint = { lat: lat, lng: lng };
+    }
 
     // Listen for messages from React Native
-    window.addEventListener('message', function(event) {
+    window.addEventListener('message', async function(event) {
       try {
         var data = JSON.parse(event.data);
         if (data.type === 'UPDATE_DRIVER') {
           var lat = data.lat, lng = data.lng;
-          if (!driverMarker) {
-            driverMarker = L.marker([lat, lng], { icon: driverIcon }).addTo(map);
-            updateRoute(lat, lng);
-            fitBounds(lat, lng);
-          } else {
-            moveSmooth(driverMarker, lat, lng, 1000);
-            updateRoute(lat, lng);
-            // Only fit bounds on first few updates to avoid jarring movements
-            if (firstUpdate) {
-              fitBounds(lat, lng);
-              firstUpdate = false;
-            }
+          var heading = Number.isFinite(Number(data.heading)) ? Number(data.heading) : null;
+          if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
+            await updateDriver(Number(lat), Number(lng), heading);
           }
         }
       } catch(e) {}
@@ -283,21 +366,28 @@ const LiveDriverMap = forwardRef(
     // Generate HTML with customer location
     const leafletHTML = generateLeafletHTML(
       deliveryLocation?.lat,
-      deliveryLocation?.lng
+      deliveryLocation?.lng,
     );
 
     // ── Send location to the Leaflet WebView ──
     const sendLocation = useCallback(
-      (lat, lng) => {
+      (lat, lng, heading) => {
         if (!mapReady || !webViewRef.current) return;
         const now = Date.now();
-        const key = `${lat.toFixed(6)},${lng.toFixed(6)}`;
-        if (lastSentRef.current?.key === key && now - lastSentRef.current.ts < 200) return;
+        const headingValue = Number.isFinite(Number(heading))
+          ? Number(heading)
+          : null;
+        const key = `${lat.toFixed(6)},${lng.toFixed(6)},${headingValue ?? "na"}`;
+        if (
+          lastSentRef.current?.key === key &&
+          now - lastSentRef.current.ts < 200
+        )
+          return;
         lastSentRef.current = { key, ts: now };
 
         webViewRef.current.injectJavaScript(`
           window.dispatchEvent(new MessageEvent('message', {
-            data: JSON.stringify({ type: 'UPDATE_DRIVER', lat: ${lat}, lng: ${lng} })
+            data: JSON.stringify({ type: 'UPDATE_DRIVER', lat: ${lat}, lng: ${lng}, heading: ${headingValue == null ? "null" : headingValue} })
           }));
           true;
         `);
@@ -308,59 +398,18 @@ const LiveDriverMap = forwardRef(
     // ── Forward parent-provided driverLocation (from polling) ──
     useEffect(() => {
       if (driverLocation?.lat && driverLocation?.lng) {
-        sendLocation(driverLocation.lat, driverLocation.lng);
+        sendLocation(
+          Number(driverLocation.lat),
+          Number(driverLocation.lng),
+          Number(driverLocation.heading),
+        );
       }
     }, [driverLocation, sendLocation]);
 
-    // ── Supabase realtime subscription on driver_locations ──
-    useEffect(() => {
-      if (!mapReady || !orderId) return;
-
-      // 1) Fetch current driver position once
-      const fetchInitial = async () => {
-        try {
-          const { data } = await supabase
-            .from("driver_locations")
-            .select("lat, lng")
-            .eq("order_id", orderId)
-            .maybeSingle();
-          if (data?.lat && data?.lng) {
-            sendLocation(data.lat, data.lng);
-          }
-        } catch (e) {
-          console.log("LiveDriverMap initial fetch error:", e);
-        }
-      };
-      fetchInitial();
-
-      // 2) Realtime channel
-      const channel = supabase
-        .channel(`live-driver-${orderId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "driver_locations",
-            filter: `order_id=eq.${orderId}`,
-          },
-          (payload) => {
-            const row = payload.new;
-            if (row?.lat && row?.lng) {
-              sendLocation(Number(row.lat), Number(row.lng));
-            }
-          },
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }, [mapReady, orderId, sendLocation]);
-
     // ── Imperative API (so parent can push location too) ──
     useImperativeHandle(ref, () => ({
-      updateDriverLocation: (lat, lng) => sendLocation(lat, lng),
+      updateDriverLocation: (lat, lng, heading) =>
+        sendLocation(lat, lng, heading),
     }));
 
     // ── WebView message handler ──

@@ -1,3 +1,5 @@
+import Constants from "expo-constants";
+
 // Environment Configuration
 const RENDER_API_URL = "https://meezo-backend-d3gw.onrender.com";
 const DEV_API_URL = process.env.EXPO_PUBLIC_API_URL || RENDER_API_URL;
@@ -33,7 +35,7 @@ function parseBoolean(value, fallback) {
 }
 
 function getExpoExtra() {
-  return Constants?.expoConfig?.extra || {};
+  return Constants?.expoConfig?.extra || Constants?.manifest?.extra || {};
 }
 
 const getEnvVars = () => {

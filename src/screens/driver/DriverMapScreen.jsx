@@ -15,6 +15,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -43,6 +44,7 @@ import FreeMapView from "../../components/maps/FreeMapView";
 import StatusTransitionOverlay from "../../components/driver/StatusTransitionOverlay";
 import SwipeToDeliver from "../../components/driver/SwipeToDeliver";
 import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 import {
   approximateDistanceMeters,
   fetchOSRMRoute as fetchResilientOSRMRoute,
@@ -157,6 +159,7 @@ function MetricBadge({ type, value, unit }) {
 // ============================================================================
 
 export default function DriverMapScreen({ route, navigation }) {
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const params = route.params || {};
   const deliveryId = params.deliveryId;
@@ -214,6 +217,22 @@ export default function DriverMapScreen({ route, navigation }) {
   }, []);
 
   const hydrateFromCacheAndStart = async () => {
+    if (!deliveryId) {
+      const dashboardSnapshot = queryClient.getQueryData([
+        "driver",
+        "dashboard",
+        "snapshot",
+      ]);
+      const cachedActive = Array.isArray(dashboardSnapshot?.activeDeliveries)
+        ? dashboardSnapshot.activeDeliveries
+        : [];
+
+      if (cachedActive.length === 0) {
+        navigation.replace("DriverTabs", { screen: "Dashboard" });
+        return;
+      }
+    }
+
     const cached = await loadDriverMapCache();
     if (cached) {
       if (cached.driverLocation) {
@@ -328,9 +347,8 @@ export default function DriverMapScreen({ route, navigation }) {
     isFetchingRef.current = true;
 
     try {
-      let token = await AsyncStorage.getItem("token");
+      let token = await getAccessToken();
       if (!token) {
-        await logout();
         return;
       }
 
@@ -629,7 +647,7 @@ export default function DriverMapScreen({ route, navigation }) {
     if (now - lastBackendUpdateRef.current < 5000) return;
     lastBackendUpdateRef.current = now;
     try {
-      let token = await AsyncStorage.getItem("token");
+      let token = await getAccessToken();
       const locationDeliveryId = currentTarget?.delivery_id || deliveryId;
       if (!token || !locationDeliveryId) return;
       await fetch(
@@ -664,7 +682,13 @@ export default function DriverMapScreen({ route, navigation }) {
     setUpdating(true);
 
     try {
-      let token = await AsyncStorage.getItem("token");
+      let token = await getAccessToken();
+      if (!token) {
+        setOverlayErrorMsg("Authentication session is unavailable");
+        setOverlayStatus("error");
+        overlayCallbackRef.current = () => setUpdating(false);
+        return;
+      }
       let res = await fetch(
         API_BASE_URL +
           "/driver/deliveries/" +
@@ -717,7 +741,13 @@ export default function DriverMapScreen({ route, navigation }) {
     setUpdating(true);
 
     try {
-      let token = await AsyncStorage.getItem("token");
+      let token = await getAccessToken();
+      if (!token) {
+        setOverlayErrorMsg("Authentication session is unavailable");
+        setOverlayStatus("error");
+        overlayCallbackRef.current = () => setUpdating(false);
+        return;
+      }
       let statusUrl =
         API_BASE_URL +
         "/driver/deliveries/" +
@@ -937,12 +967,7 @@ export default function DriverMapScreen({ route, navigation }) {
 
   useEffect(() => {
     if (loading || currentTarget) return;
-
-    const timer = setTimeout(() => {
-      navigation.replace("DriverTabs");
-    }, 1200);
-
-    return () => clearTimeout(timer);
+    navigation.replace("DriverTabs", { screen: "Dashboard" });
   }, [loading, currentTarget, navigation]);
 
   if (loading) {

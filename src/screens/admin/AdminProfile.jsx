@@ -16,6 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
 
@@ -213,7 +214,7 @@ export default function AdminProfile() {
   });
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       {/* Animated background elements */}
       <View style={styles.backgroundContainer}>
         <Animated.View
@@ -380,7 +381,7 @@ export default function AdminProfile() {
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
+    </SafeAreaView>
   );
 }
 

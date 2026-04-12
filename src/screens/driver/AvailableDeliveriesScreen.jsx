@@ -26,6 +26,7 @@ import {
   Animated,
   Dimensions,
   FlatList,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -151,9 +152,10 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   const queryClient = useQueryClient();
   const { on, off, isConnected } = useSocket();
   const isFocusedRef = useRef(true);
+  const [listViewportHeight, setListViewportHeight] = useState(0);
   const viewportHeight = useMemo(
-    () => Math.max(320, SCREEN_HEIGHT - insets.top),
-    [insets.top],
+    () => Math.max(320, Math.round(listViewportHeight || SCREEN_HEIGHT)),
+    [listViewportHeight],
   );
   const mapViewportHeight = useMemo(
     () => Math.round(viewportHeight * 0.46),
@@ -196,7 +198,6 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   const [showNewDeliveryBanner, setShowNewDeliveryBanner] = useState(false);
   const [isLoadingAfterAccept, setIsLoadingAfterAccept] = useState(false);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
-  const [isMapInteracting, setIsMapInteracting] = useState(false);
   const [currentVisibleIndex, setCurrentVisibleIndex] = useState(0);
   const deliveryMetaRef = useRef(new Map());
   const arrivalSeqRef = useRef(0);
@@ -1012,8 +1013,6 @@ export default function AvailableDeliveriesScreen({ navigation }) {
         viewportHeight={viewportHeight}
         mapViewportHeight={mapViewportHeight}
         tabBarHeight={tabBarHeight}
-        onMapInteractionStart={() => setIsMapInteracting(true)}
-        onMapInteractionEnd={() => setIsMapInteracting(false)}
         accepting={accepting === item.delivery_id}
         isSyncing={isDeliveriesSyncing || isLoadingAfterAccept}
         onAccept={handleAcceptDelivery}
@@ -1169,12 +1168,20 @@ export default function AvailableDeliveriesScreen({ navigation }) {
                 },
               ],
             }}
+            onLayout={(event) => {
+              const measuredHeight = Math.round(
+                event?.nativeEvent?.layout?.height || 0,
+              );
+              if (measuredHeight > 0 && measuredHeight !== listViewportHeight) {
+                setListViewportHeight(measuredHeight);
+              }
+            }}
           >
             <FlatList
               ref={flatListRef}
               data={sortedDeliveries}
               renderItem={renderDeliveryCard}
-              scrollEnabled={!isMapInteracting}
+              scrollEnabled={true}
               keyExtractor={(item) => item.delivery_id.toString()}
               showsVerticalScrollIndicator={false}
               pagingEnabled={true}
@@ -1185,10 +1192,21 @@ export default function AvailableDeliveriesScreen({ navigation }) {
               bounces={false}
               directionalLockEnabled
               scrollEventThrottle={32}
+              onMomentumScrollEnd={(event) => {
+                const y = event?.nativeEvent?.contentOffset?.y || 0;
+                const targetIndex = Math.round(y / viewportHeight);
+                const targetOffset = targetIndex * viewportHeight;
+                if (Math.abs(y - targetOffset) > 1) {
+                  flatListRef.current?.scrollToOffset({
+                    offset: targetOffset,
+                    animated: false,
+                  });
+                }
+              }}
               initialNumToRender={1}
               maxToRenderPerBatch={1}
               windowSize={2}
-              removeClippedSubviews={true}
+              removeClippedSubviews={Platform.OS === "android"}
               onViewableItemsChanged={onViewableItemsChangedRef.current}
               viewabilityConfig={viewabilityConfigRef.current}
               getItemLayout={(_, index) => ({
@@ -1223,8 +1241,6 @@ function DeliveryCard({
   viewportHeight,
   mapViewportHeight,
   tabBarHeight = 0,
-  onMapInteractionStart,
-  onMapInteractionEnd,
   accepting,
   isSyncing = false,
   onAccept,
@@ -1268,10 +1284,10 @@ function DeliveryCard({
 
   const mapRef = useRef(null);
   const hasInitialFitRef = useRef(false);
-  const cardHeight = viewportHeight || SCREEN_HEIGHT;
+  const cardHeight = Math.round(viewportHeight || SCREEN_HEIGHT);
   const mapHeight = mapViewportHeight || Math.round(cardHeight * 0.41);
   const overlayHeight = Math.max(370, cardHeight - mapHeight);
-  const contentBottomInset = Math.max(16, Math.round(tabBarHeight * 0.18));
+  const contentBottomInset = Math.max(18, Math.round(tabBarHeight + 10));
   const totalItems = order_items.reduce(
     (sum, item) => sum + (item.quantity || 0),
     0,
@@ -1496,7 +1512,7 @@ function DeliveryCard({
     <View
       style={[
         styles.card,
-        { height: cardHeight },
+        { height: cardHeight, maxHeight: cardHeight },
         isDeclined && styles.cardDeclined,
         !can_accept && styles.cardDisabled,
       ]}
@@ -1514,8 +1530,6 @@ function DeliveryCard({
             }}
             scrollEnabled={true}
             zoomEnabled={true}
-            onInteractionStart={onMapInteractionStart}
-            onInteractionEnd={onMapInteractionEnd}
             markers={[
               ...(driverLocation
                 ? [
@@ -2557,7 +2571,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     marginTop: 8,
-    marginBottom: 2,
+    marginBottom: 8,
     zIndex: 2,
   },
   // Accept Button

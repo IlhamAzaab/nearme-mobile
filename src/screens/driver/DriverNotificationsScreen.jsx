@@ -342,7 +342,10 @@ export default function DriverNotificationsScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={["left", "right", "bottom"]}>
+    <SafeAreaView
+      style={styles.container}
+      edges={["left", "right", "top", "bottom"]}
+    >
       <View style={{ flex: 1 }}>
         <DriverScreenSection screenKey="DriverNotifications" sectionIndex={0}>
           <DriverScreenHeader

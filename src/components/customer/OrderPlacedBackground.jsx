@@ -95,10 +95,9 @@ export default function OrderPlacedBackground() {
       <View style={styles.bgGradient3} />
 
       {/* Layer 1 — large transparent Meezo watermark */}
-      <WatermarkLogo />
+    
 
       {/* Layer 2 — confetti dots falling */}
-      <ConfettiDots />
 
       {/* Layer 3 — floating food emojis rising */}
       <FloatingEmojis />
@@ -110,7 +109,6 @@ export default function OrderPlacedBackground() {
       <DancingLetters />
 
       {/* Layer 6 — status icon */}
-      <StatusCheckIcon />
     </View>
   );
 }
@@ -588,7 +586,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
+    gap: 0,
   },
 
   /* ── floating emojis ── */

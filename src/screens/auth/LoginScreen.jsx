@@ -5,6 +5,7 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,6 +15,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { G, Path, Rect } from "react-native-svg";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
@@ -21,6 +23,7 @@ import pushNotificationService from "../../services/pushNotificationService";
 import { persistAuthSession } from "../../lib/authStorage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
 const WEB_CARD_MAX_WIDTH = 560;
 const WEB_LOGO_SIZE = 220;
@@ -63,7 +66,7 @@ const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
 );
 
 export default function LoginScreen({ navigation }) {
-  const { refreshAuthState } = useAuth();
+  const { refreshAuthState, preparePostLoginTransition } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -74,6 +77,9 @@ export default function LoginScreen({ navigation }) {
 
   // shake animation
   const shakeX = useRef(new Animated.Value(0)).current;
+  const transitionTranslateY = useRef(
+    new Animated.Value(SCREEN_HEIGHT),
+  ).current;
 
   const triggerShake = () => {
     shakeX.setValue(0);
@@ -106,6 +112,67 @@ export default function LoginScreen({ navigation }) {
     ]).start();
   };
 
+  const getProfessionalLoginFailure = (statusCode) => {
+    if (statusCode === 401) {
+      return {
+        title: "Sign-in failed",
+        message:
+          "The email or password you entered is incorrect. Please try again.",
+      };
+    }
+
+    if (statusCode === 429) {
+      return {
+        title: "Too many attempts",
+        message:
+          "You have made too many sign-in attempts. Please wait a moment and try again.",
+      };
+    }
+
+    if (statusCode >= 500) {
+      return {
+        title: "Service unavailable",
+        message:
+          "We are unable to sign you in right now due to a server issue. Please try again shortly.",
+      };
+    }
+
+    return {
+      title: "Unable to sign in",
+      message: "We could not complete sign-in. Please try again.",
+    };
+  };
+
+  const getProfessionalNetworkFailure = (error) => {
+    const msg = String(error?.message || "").toLowerCase();
+
+    if (error?.name === "AbortError") {
+      return {
+        title: "Request timed out",
+        message:
+          "Sign-in is taking longer than expected. Please check your connection and try again.",
+      };
+    }
+
+    if (
+      msg.includes("network request failed") ||
+      msg.includes("failed to fetch") ||
+      msg.includes("network")
+    ) {
+      return {
+        title: "No internet connection",
+        message:
+          "Please check your internet connection and try signing in again.",
+      };
+    }
+
+    return {
+      title: "Sign-in error",
+      message:
+        "Something went wrong while signing in. Please try again in a moment.",
+    };
+  };
+
   async function handleLogin() {
     if (!email.trim() || !password.trim()) {
       triggerShake();
@@ -115,9 +182,10 @@ export default function LoginScreen({ navigation }) {
 
     setIsLoading(true);
 
+    let timeoutId;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      timeoutId = setTimeout(() => controller.abort(), 15000);
 
       const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
@@ -157,7 +225,8 @@ export default function LoginScreen({ navigation }) {
       if (!res.ok) {
         setIsLoading(false);
         triggerShake();
-        Alert.alert("Login failed", data?.message || "Invalid credentials");
+        const professional = getProfessionalLoginFailure(res.status);
+        Alert.alert(professional.title, data?.message || professional.message);
         return;
       }
 
@@ -178,8 +247,8 @@ export default function LoginScreen({ navigation }) {
           token: accessToken,
         },
         {
-        userEmail: email,
-        profileCompleted: !!data?.profileCompleted,
+          userEmail: email,
+          profileCompleted: !!data?.profileCompleted,
         },
       );
 
@@ -192,233 +261,249 @@ export default function LoginScreen({ navigation }) {
       }
 
       setIsLoading(false);
+      preparePostLoginTransition();
+      transitionTranslateY.setValue(SCREEN_HEIGHT);
       setIsTransitioning(true);
 
-      setTimeout(async () => {
-        // Refresh auth state - RootNavigator will automatically show correct screen
+      Animated.timing(transitionTranslateY, {
+        toValue: 0,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(async ({ finished }) => {
+        if (!finished) return;
+        // Refresh auth state after the transition so splash starts immediately next.
         await refreshAuthState();
-      }, 1200);
+      });
     } catch (error) {
       console.error("Login error:", error);
       setIsLoading(false);
       triggerShake();
-      Alert.alert(
-        "Network error",
-        "Backend connect aagala. Same Wi-Fi + IP correct ah check pannunga.",
-      );
+      const professional = getProfessionalNetworkFailure(error);
+      Alert.alert(professional.title, professional.message);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 
   const WAVE_HEIGHT = 50;
 
   return (
-    <View style={styles.pageContainer}>
-      <KeyboardAvoidingView
-        style={styles.pageContainer}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
-        {/* Success overlay */}
-        {isTransitioning && (
-          <View style={styles.transitionOverlay}>
-            <View style={styles.successCircle}>
-              <Text style={styles.successTick}>✓</Text>
-            </View>
-            <Text style={styles.successTitle}>Login Successful!</Text>
-            <Text style={styles.successSub}>Redirecting...</Text>
-          </View>
-        )}
-
-        <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            IS_WEB && styles.scrollContentWeb,
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          bounces={false}
+    <View style={styles.rootContainer}>
+      <SafeAreaView style={styles.pageContainer} edges={["top", "bottom"]}>
+        <KeyboardAvoidingView
+          style={styles.pageContainer}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
-          <Animated.View
-            style={[
-              styles.loginShell,
-              IS_WEB && styles.loginShellWeb,
-              { transform: [{ translateX: shakeX }] },
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              IS_WEB && styles.scrollContentWeb,
             ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
           >
-            {/* ═══ GREEN TOP SECTION ═══ */}
-            <LinearGradient
-              colors={["#04753E", "#059B52", "#06C168"]}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-              style={[styles.greenSection, IS_WEB && styles.greenSectionWeb]}
+            <Animated.View
+              style={[
+                styles.loginShell,
+                IS_WEB && styles.loginShellWeb,
+                { transform: [{ translateX: shakeX }] },
+              ]}
             >
-              {/* Decorative circles */}
-              <View style={styles.bgCircle1} />
-              <View style={styles.bgCircle2} />
-
-              {/* Meezo SVG Logo */}
-              <View style={styles.logoWrap}>
-                <Svg
-                  width={IS_WEB ? WEB_LOGO_SIZE : 280}
-                  height={IS_WEB ? WEB_LOGO_SIZE : 280}
-                  viewBox="0 0 1080 1080"
-                >
-                  <Rect
-                    x="0"
-                    y="0"
-                    width="1080"
-                    height="1080"
-                    fill="transparent"
-                  />
-                  <G>
-                    {/* Z letter — black */}
-                    <Path
-                      d="m796.84,470.43c2.16-2.3,1.79-4.86-.71-4.86h-101.74c-2.52,0-5.62,2.05-6.9,4.57l-17.16,33.68c-1.29,2.53-.29,4.58,2.24,4.58h27.48c2.5,0,2.88,2.56.72,4.85l-89.65,95.15c-2.16,2.29-1.78,4.85.72,4.85h112.31c2.52,0,5.62-2.04,6.9-4.57l10.68-33.68c1.29-2.53.28-4.57-2.25-4.57h-31.76c-2.5,0-2.87-2.57-.71-4.86l89.83-95.14Z"
-                      fill="#000"
-                    />
-                    {/* First E letter — black */}
-                    <Path
-                      d="m564.84,465.48h-89.17c-2.14,0-4.76,1.74-5.85,3.88l-71.86,141.03c-1.09,2.14-.24,3.88,1.9,3.88h91.3c2.14,0,4.75-1.74,5.84-3.88l18.04-35.4c1.09-2.14.24-3.87-1.9-3.87h-36.89c-2.14,0-2.99-1.73-1.9-3.87l3.1-6.07c1.09-2.14,3.7-3.87,5.84-3.87h31.36c2.14,0,4.76-1.74,5.85-3.88l14.57-28.6c1.09-2.14.24-3.87-1.9-3.87h-31.36c-2.14,0-2.99-1.73-1.9-3.87l2.34-4.58c1.09-2.14,3.7-3.88,5.84-3.88h34.77c2.13,0,4.75-1.73,5.84-3.87l18.04-35.4c1.09-2.14.24-3.88-1.9-3.88Z"
-                      fill="#000"
-                    />
-                    {/* Second E letter — black */}
-                    <Path
-                      d="m674.3,465.48h-89.17c-2.14,0-4.76,1.74-5.85,3.88l-71.86,141.03c-1.09,2.14-.24,3.88,1.9,3.88h91.3c2.14,0,4.75-1.74,5.84-3.88l18.04-35.4c1.09-2.14.24-3.87-1.9-3.87h-36.89c-2.13,0-2.99-1.73-1.9-3.87l3.1-6.07c1.09-2.14,3.7-3.87,5.84-3.87h31.37c2.13,0,4.75-1.74,5.84-3.88l14.57-28.6c1.09-2.14.24-3.87-1.9-3.87h-31.36c-2.14,0-2.99-1.73-1.9-3.87l2.34-4.58c1.09-2.14,3.71-3.88,5.84-3.88h34.77c2.14,0,4.75-1.73,5.84-3.87l18.04-35.4c1.09-2.14.24-3.88-1.9-3.88Z"
-                      fill="#000"
-                    />
-                    {/* M letter — black */}
-                    <Path
-                      d="m455.98,475.4l-23.01,44.91c-1.96,3.83-5.1,6.86-9.03,8.71-30.64,14.45-56.96,26.84-66.45,31.3-2.31,1.09-5.25.69-7.61-1.03l-14.61-10.6-16.76-12.16-1.95-1.41c-4.49-3.26-10.24-2.47-12.57,1.71l-30.61,56.84c-7.03,13.06-20.71,20.85-36.62,20.85h-40.32c-3.86,0-6.8-4.34-5.11-7.51l41.38-76.8,21.66-40.22,3-5.57c11.39-21.13,40.35-25.25,62.84-8.93l12.1,8.78c9.65,7,19.3,14,28.95,21,3.09,2.25,6.19,4.5,9.28,6.74l82.97-39.09c1.44-.68,3.19,1.08,2.47,2.48Z"
-                      fill="#000"
-                    />
-                    {/* O letter — white */}
-                    <G>
-                      <Path
-                        d="m883.66,586.15h-68.56s.09-.07.13-.12c-1.92-.44-3.34-2.16-3.34-4.2,0-1.19.48-2.28,1.26-3.06.79-.79,1.87-1.27,3.06-1.27h60.25c1.19,0,2.27-.48,3.05-1.26.79-.78,1.27-1.86,1.27-3.06,0-2.38-1.94-4.32-4.32-4.32h-42.37s.09-.08.14-.12c-1.91-.45-3.32-2.16-3.32-4.2,0-1.19.48-2.27,1.26-3.05.79-.79,1.87-1.27,3.06-1.27h32.57c1.2,0,2.28-.48,3.06-1.26.78-.78,1.26-1.86,1.26-3.06,0-2.38-1.93-4.32-4.32-4.32h-14.84c4.43-4.21,8.72-8.5,12.77-12.92,20.38-22.25,24.31-49.41,10.74-63.1-14.41-14.57-43.15-12.8-69.81,4.29-26.28,16.84-43.27,43.87-40.63,65.46,1.87,15.19,4.5,30.02,6.94,44.95.82,5.09,1.72,10.15,2.67,15.37.6,3.31,3.07,5.55,5.92,6.22.6.15,1.21.22,1.83.22h65.52c1.19,0,2.27-.49,3.06-1.27.78-.78,1.26-1.86,1.26-3.05,0-2.39-1.93-4.32-4.32-4.32h-52.95l.02-.02c-2.2-.2-3.92-2.06-3.92-4.3,0-1.19.48-2.27,1.26-3.06.78-.78,1.86-1.26,3.06-1.26h87.28c1.2,0,2.28-.49,3.06-1.27.78-.78,1.26-1.86,1.26-3.05,0-2.39-1.93-4.32-4.32-4.32Zm-78.14-67.05c5-10.73,17.74-19.42,28.47-19.42s15.36,8.69,10.35,19.42c-4.99,10.71-17.74,19.41-28.46,19.41s-15.36-8.7-10.36-19.41Z"
-                        fill="#fff"
-                      />
-                      <Path
-                        d="m783.39,612.07h-.5c-.46,0-.91-.07-1.33-.22.6.15,1.21.22,1.83.22Z"
-                        fill="#fff"
-                      />
-                    </G>
-                  </G>
-                </Svg>
-                <Text style={styles.appSubtitle}>
-                  Your favorite food, fast.
-                </Text>
-              </View>
-            </LinearGradient>
-
-            {/* ═══ WAVE SEPARATOR ═══ */}
-            <View style={styles.waveContainer}>
-              <Svg
-                width={SCREEN_WIDTH}
-                height={WAVE_HEIGHT}
-                viewBox={`0 0 ${SCREEN_WIDTH} ${WAVE_HEIGHT}`}
-                style={styles.waveSvg}
+              {/* ═══ GREEN TOP SECTION ═══ */}
+              <LinearGradient
+                colors={["#04753E", "#059B52", "#06C168"]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={[styles.greenSection, IS_WEB && styles.greenSectionWeb]}
               >
-                <Path
-                  d={`M0,0 L0,${WAVE_HEIGHT * 0.4} Q${SCREEN_WIDTH * 0.25},${WAVE_HEIGHT * 1.1} ${SCREEN_WIDTH * 0.5},${WAVE_HEIGHT * 0.4} Q${SCREEN_WIDTH * 0.75},${WAVE_HEIGHT * -0.3} ${SCREEN_WIDTH},${WAVE_HEIGHT * 0.4} L${SCREEN_WIDTH},0 Z`}
-                  fill="#06C168"
-                />
-              </Svg>
-            </View>
+                {/* Decorative circles */}
+                <View style={styles.bgCircle1} />
+                <View style={styles.bgCircle2} />
 
-            {/* ═══ WHITE BOTTOM SECTION ═══ */}
-            <View style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}>
-              {/* Form content */}
-              <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
-                <Text style={styles.cardTitle}>Welcome Back!</Text>
-                <Text style={styles.cardSub}>Please sign in to continue</Text>
-
-                {/* Username */}
-                <View style={styles.inputWrap}>
-                  <View style={styles.inputIconWrap}>
-                    <UserIcon size={20} color="#9CA3AF" />
-                  </View>
-                  <TextInput
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="Username"
-                    placeholderTextColor="#B0B8C4"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    style={styles.input}
-                  />
-                </View>
-
-                {/* Password */}
-                <View style={[styles.inputWrap, { marginTop: 14 }]}>
-                  <View style={styles.inputIconWrap}>
-                    <LockIcon size={20} color="#9CA3AF" />
-                  </View>
-                  <TextInput
-                    value={password}
-                    onChangeText={setPassword}
-                    placeholder="Password"
-                    placeholderTextColor="#B0B8C4"
-                    secureTextEntry={!showPassword}
-                    style={[styles.input, { paddingRight: 52 }]}
-                  />
-                  <Pressable
-                    onPress={() => setShowPassword((v) => !v)}
-                    style={styles.eyeBtn}
-                    hitSlop={10}
+                {/* Meezo SVG Logo */}
+                <View style={styles.logoWrap}>
+                  <Svg
+                    width={IS_WEB ? WEB_LOGO_SIZE : 280}
+                    height={IS_WEB ? WEB_LOGO_SIZE : 280}
+                    viewBox="0 0 1080 1080"
                   >
-                    {showPassword ? (
-                      <EyeOffIcon size={22} color="#9CA3AF" />
-                    ) : (
-                      <EyeIcon size={22} color="#9CA3AF" />
-                    )}
-                  </Pressable>
+                    <Rect
+                      x="0"
+                      y="0"
+                      width="1080"
+                      height="1080"
+                      fill="transparent"
+                    />
+                    <G>
+                      {/* Z letter — black */}
+                      <Path
+                        d="m796.84,470.43c2.16-2.3,1.79-4.86-.71-4.86h-101.74c-2.52,0-5.62,2.05-6.9,4.57l-17.16,33.68c-1.29,2.53-.29,4.58,2.24,4.58h27.48c2.5,0,2.88,2.56.72,4.85l-89.65,95.15c-2.16,2.29-1.78,4.85.72,4.85h112.31c2.52,0,5.62-2.04,6.9-4.57l10.68-33.68c1.29-2.53.28-4.57-2.25-4.57h-31.76c-2.5,0-2.87-2.57-.71-4.86l89.83-95.14Z"
+                        fill="#000"
+                      />
+                      {/* First E letter — black */}
+                      <Path
+                        d="m564.84,465.48h-89.17c-2.14,0-4.76,1.74-5.85,3.88l-71.86,141.03c-1.09,2.14-.24,3.88,1.9,3.88h91.3c2.14,0,4.75-1.74,5.84-3.88l18.04-35.4c1.09-2.14.24-3.87-1.9-3.87h-36.89c-2.14,0-2.99-1.73-1.9-3.87l3.1-6.07c1.09-2.14,3.7-3.87,5.84-3.87h31.36c2.14,0,4.76-1.74,5.85-3.88l14.57-28.6c1.09-2.14.24-3.87-1.9-3.87h-31.36c-2.14,0-2.99-1.73-1.9-3.87l2.34-4.58c1.09-2.14,3.7-3.88,5.84-3.88h34.77c2.13,0,4.75-1.73,5.84-3.87l18.04-35.4c1.09-2.14.24-3.88-1.9-3.88Z"
+                        fill="#000"
+                      />
+                      {/* Second E letter — black */}
+                      <Path
+                        d="m674.3,465.48h-89.17c-2.14,0-4.76,1.74-5.85,3.88l-71.86,141.03c-1.09,2.14-.24,3.88,1.9,3.88h91.3c2.14,0,4.75-1.74,5.84-3.88l18.04-35.4c1.09-2.14.24-3.87-1.9-3.87h-36.89c-2.13,0-2.99-1.73-1.9-3.87l3.1-6.07c1.09-2.14,3.7-3.87,5.84-3.87h31.37c2.13,0,4.75-1.74,5.84-3.88l14.57-28.6c1.09-2.14.24-3.87-1.9-3.87h-31.36c-2.14,0-2.99-1.73-1.9-3.87l2.34-4.58c1.09-2.14,3.71-3.88,5.84-3.88h34.77c2.14,0,4.75-1.73,5.84-3.87l18.04-35.4c1.09-2.14.24-3.88-1.9-3.88Z"
+                        fill="#000"
+                      />
+                      {/* M letter — black */}
+                      <Path
+                        d="m455.98,475.4l-23.01,44.91c-1.96,3.83-5.1,6.86-9.03,8.71-30.64,14.45-56.96,26.84-66.45,31.3-2.31,1.09-5.25.69-7.61-1.03l-14.61-10.6-16.76-12.16-1.95-1.41c-4.49-3.26-10.24-2.47-12.57,1.71l-30.61,56.84c-7.03,13.06-20.71,20.85-36.62,20.85h-40.32c-3.86,0-6.8-4.34-5.11-7.51l41.38-76.8,21.66-40.22,3-5.57c11.39-21.13,40.35-25.25,62.84-8.93l12.1,8.78c9.65,7,19.3,14,28.95,21,3.09,2.25,6.19,4.5,9.28,6.74l82.97-39.09c1.44-.68,3.19,1.08,2.47,2.48Z"
+                        fill="#000"
+                      />
+                      {/* O letter — white */}
+                      <G>
+                        <Path
+                          d="m883.66,586.15h-68.56s.09-.07.13-.12c-1.92-.44-3.34-2.16-3.34-4.2,0-1.19.48-2.28,1.26-3.06.79-.79,1.87-1.27,3.06-1.27h60.25c1.19,0,2.27-.48,3.05-1.26.79-.78,1.27-1.86,1.27-3.06,0-2.38-1.94-4.32-4.32-4.32h-42.37s.09-.08.14-.12c-1.91-.45-3.32-2.16-3.32-4.2,0-1.19.48-2.27,1.26-3.05.79-.79,1.87-1.27,3.06-1.27h32.57c1.2,0,2.28-.48,3.06-1.26.78-.78,1.26-1.86,1.26-3.06,0-2.38-1.93-4.32-4.32-4.32h-14.84c4.43-4.21,8.72-8.5,12.77-12.92,20.38-22.25,24.31-49.41,10.74-63.1-14.41-14.57-43.15-12.8-69.81,4.29-26.28,16.84-43.27,43.87-40.63,65.46,1.87,15.19,4.5,30.02,6.94,44.95.82,5.09,1.72,10.15,2.67,15.37.6,3.31,3.07,5.55,5.92,6.22.6.15,1.21.22,1.83.22h65.52c1.19,0,2.27-.49,3.06-1.27.78-.78,1.26-1.86,1.26-3.05,0-2.39-1.93-4.32-4.32-4.32h-52.95l.02-.02c-2.2-.2-3.92-2.06-3.92-4.3,0-1.19.48-2.27,1.26-3.06.78-.78,1.86-1.26,3.06-1.26h87.28c1.2,0,2.28-.49,3.06-1.27.78-.78,1.26-1.86,1.26-3.05,0-2.39-1.93-4.32-4.32-4.32Zm-78.14-67.05c5-10.73,17.74-19.42,28.47-19.42s15.36,8.69,10.35,19.42c-4.99,10.71-17.74,19.41-28.46,19.41s-15.36-8.7-10.36-19.41Z"
+                          fill="#fff"
+                        />
+                        <Path
+                          d="m783.39,612.07h-.5c-.46,0-.91-.07-1.33-.22.6.15,1.21.22,1.83.22Z"
+                          fill="#fff"
+                        />
+                      </G>
+                    </G>
+                  </Svg>
+                  <Text style={styles.appSubtitle}>
+                    Your favorite food, fast.
+                  </Text>
                 </View>
+              </LinearGradient>
 
-                {/* Login Button */}
-                <Pressable
-                  onPress={handleLogin}
-                  disabled={isLoading}
-                  style={({ pressed }) => [
-                    styles.loginBtn,
-                    (pressed || isLoading) && {
-                      opacity: 0.88,
-                      transform: [{ scale: 0.985 }],
-                    },
-                  ]}
+              {/* ═══ WAVE SEPARATOR ═══ */}
+              <View style={styles.waveContainer}>
+                <Svg
+                  width={SCREEN_WIDTH}
+                  height={WAVE_HEIGHT}
+                  viewBox={`0 0 ${SCREEN_WIDTH} ${WAVE_HEIGHT}`}
+                  style={styles.waveSvg}
                 >
-                  <LinearGradient
-                    colors={["#06C168", "#059B52", "#04753E"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.loginBtnGradient}
-                  >
-                    {isLoading ? (
-                      <View style={styles.loadingRow}>
-                        <ActivityIndicator color="#fff" />
-                        <Text style={styles.loginBtnText}>Signing in...</Text>
-                      </View>
-                    ) : (
-                      <Text style={styles.loginBtnText}>Log In</Text>
-                    )}
-                  </LinearGradient>
-                </Pressable>
+                  <Path
+                    d={`M0,0 L0,${WAVE_HEIGHT * 0.4} Q${SCREEN_WIDTH * 0.25},${WAVE_HEIGHT * 1.1} ${SCREEN_WIDTH * 0.5},${WAVE_HEIGHT * 0.4} Q${SCREEN_WIDTH * 0.75},${WAVE_HEIGHT * -0.3} ${SCREEN_WIDTH},${WAVE_HEIGHT * 0.4} L${SCREEN_WIDTH},0 Z`}
+                    fill="#06C168"
+                  />
+                </Svg>
+              </View>
 
-                {/* Signup link */}
-                <View style={styles.footerRow}>
-                  <Text style={styles.footerText}>Do not have an account? </Text>
-                  <Pressable onPress={() => navigation.navigate("Signup")}>
-                    <Text style={styles.footerLink}>Sign up here</Text>
+              {/* ═══ WHITE BOTTOM SECTION ═══ */}
+              <View
+                style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}
+              >
+                {/* Form content */}
+                <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
+                  <Text style={styles.cardTitle}>Welcome Back!</Text>
+                  <Text style={styles.cardSub}>Please sign in to continue</Text>
+
+                  {/* Username */}
+                  <View style={styles.inputWrap}>
+                    <View style={styles.inputIconWrap}>
+                      <UserIcon size={20} color="#9CA3AF" />
+                    </View>
+                    <TextInput
+                      value={email}
+                      onChangeText={setEmail}
+                      placeholder="Username"
+                      placeholderTextColor="#B0B8C4"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      style={styles.input}
+                    />
+                  </View>
+
+                  {/* Password */}
+                  <View style={[styles.inputWrap, { marginTop: 14 }]}>
+                    <View style={styles.inputIconWrap}>
+                      <LockIcon size={20} color="#9CA3AF" />
+                    </View>
+                    <TextInput
+                      value={password}
+                      onChangeText={setPassword}
+                      placeholder="Password"
+                      placeholderTextColor="#B0B8C4"
+                      secureTextEntry={!showPassword}
+                      style={[styles.input, { paddingRight: 52 }]}
+                    />
+                    <Pressable
+                      onPress={() => setShowPassword((v) => !v)}
+                      style={styles.eyeBtn}
+                      hitSlop={10}
+                    >
+                      {showPassword ? (
+                        <EyeOffIcon size={22} color="#9CA3AF" />
+                      ) : (
+                        <EyeIcon size={22} color="#9CA3AF" />
+                      )}
+                    </Pressable>
+                  </View>
+
+                  {/* Login Button */}
+                  <Pressable
+                    onPress={handleLogin}
+                    disabled={isLoading}
+                    style={({ pressed }) => [
+                      styles.loginBtn,
+                      (pressed || isLoading) && {
+                        opacity: 0.88,
+                        transform: [{ scale: 0.985 }],
+                      },
+                    ]}
+                  >
+                    <LinearGradient
+                      colors={["#06C168", "#059B52", "#04753E"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.loginBtnGradient}
+                    >
+                      {isLoading ? (
+                        <View style={styles.loadingRow}>
+                          <ActivityIndicator color="#fff" />
+                          <Text style={styles.loginBtnText}>Signing in...</Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.loginBtnText}>Log In</Text>
+                      )}
+                    </LinearGradient>
                   </Pressable>
+
+                  {/* Signup link */}
+                  <View style={styles.footerRow}>
+                    <Text style={styles.footerText}>
+                      Do not have an account?{" "}
+                    </Text>
+                    <Pressable onPress={() => navigation.navigate("Signup")}>
+                      <Text style={styles.footerLink}>Sign up here</Text>
+                    </Pressable>
+                  </View>
                 </View>
               </View>
-            </View>
-          </Animated.View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+            </Animated.View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+
+      {isTransitioning && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.transitionOverlay,
+            { transform: [{ translateY: transitionTranslateY }] },
+          ]}
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  rootContainer: {
+    flex: 1,
+  },
   pageContainer: {
     flex: 1,
     backgroundColor: "#EEF4EF",
@@ -618,23 +703,7 @@ const styles = StyleSheet.create({
   /* Transition overlay */
   transitionOverlay: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 50,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.55)",
-    padding: 24,
+    zIndex: 100,
+    backgroundColor: "#06C168",
   },
-  successCircle: {
-    width: 110,
-    height: 110,
-    borderRadius: 999,
-    borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.25)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  successTick: { fontSize: 56, color: "#fff", fontWeight: "900" },
-  successTitle: { color: "#fff", fontSize: 28, fontWeight: "900" },
-  successSub: { color: "rgba(255,255,255,0.85)", marginTop: 6 },
 });

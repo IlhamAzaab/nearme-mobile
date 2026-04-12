@@ -318,16 +318,26 @@ export default function DriverEarningsScreen({ navigation }) {
 
   if (loading) {
     return (
-      <SafeAreaView style={s.container} edges={["left", "right", "bottom"]}>
+      <SafeAreaView
+        style={s.container}
+        edges={["left", "right", "top"]}
+      >
         <DriverDashboardLoadingSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={s.container} edges={["left", "right", "bottom"]}>
+    <SafeAreaView
+      style={s.container}
+      edges={["left", "right", "top"]}
+    >
       <View style={{ flex: 1 }}>
-        <DriverScreenSection screenKey="DriverEarnings" sectionIndex={0}>
+        <DriverScreenSection
+          screenKey="DriverEarnings"
+          sectionIndex={0}
+          style={s.headerSection}
+        >
           <DriverScreenHeader
             title="Earnings"
             onBackPress={() => navigation.goBack()}
@@ -586,6 +596,13 @@ export default function DriverEarningsScreen({ navigation }) {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f9fafb" },
+  headerSection: {
+    zIndex: 20,
+    elevation: 6,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
   loader: { marginTop: 40 },
   scroll: { padding: 16, paddingBottom: 110 },
   errorCard: {
@@ -624,20 +641,20 @@ const s = StyleSheet.create({
   },
   earningsLabel: {
     color: "rgba(255,255,255,0.85)",
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "700",
     textTransform: "uppercase",
   },
   earningsAmount: {
     marginTop: 4,
     color: "#fff",
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: "800",
   },
   earningsDeliveries: {
     marginTop: 6,
     color: "rgba(255,255,255,0.9)",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "600",
   },
   periodGrid: {
@@ -653,7 +670,7 @@ const s = StyleSheet.create({
     paddingVertical: 7,
   },
   periodChipActive: { backgroundColor: "#ffffff" },
-  periodChipText: { color: "#ffffff", fontSize: 11, fontWeight: "700" },
+  periodChipText: { color: "#ffffff", fontSize: 12, fontWeight: "700" },
   periodChipTextActive: { color: "#0f172a" },
   withdrawalsCard: {
     backgroundColor: "#fff",
@@ -668,8 +685,8 @@ const s = StyleSheet.create({
   },
   withdrawalsContent: { flexDirection: "row", alignItems: "center", flex: 1 },
   withdrawalsTextWrap: { marginLeft: 10, flex: 1 },
-  withdrawalsTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  withdrawalsSubtitle: { marginTop: 2, fontSize: 11, color: "#6b7280" },
+  withdrawalsTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
+  withdrawalsSubtitle: { marginTop: 2, fontSize: 12, color: "#6b7280" },
   todayCard: {
     backgroundColor: "#fff",
     borderRadius: 14,
@@ -683,7 +700,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  sectionTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
+  sectionTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
   sectionDate: { fontSize: 11, color: "#059669", fontWeight: "700" },
   todayGrid: { marginTop: 12, flexDirection: "row", gap: 10 },
   todayMetric: {
@@ -702,7 +719,7 @@ const s = StyleSheet.create({
   },
   todayMetricValue: {
     marginTop: 6,
-    fontSize: 18,
+    fontSize: 20,
     color: "#111827",
     fontWeight: "800",
   },
@@ -715,8 +732,8 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  avgLabel: { fontSize: 12, color: "#6b7280", fontWeight: "600" },
-  avgValue: { fontSize: 13, color: "#111827", fontWeight: "700" },
+  avgLabel: { fontSize: 13, color: "#6b7280", fontWeight: "600" },
+  avgValue: { fontSize: 15, color: "#111827", fontWeight: "700" },
   statsGrid: { flexDirection: "row", gap: 10, marginBottom: 14 },
   statCard: {
     flex: 1,
@@ -735,7 +752,7 @@ const s = StyleSheet.create({
   },
   statValue: {
     marginTop: 8,
-    fontSize: 14,
+    fontSize: 16,
     color: "#111827",
     fontWeight: "800",
   },

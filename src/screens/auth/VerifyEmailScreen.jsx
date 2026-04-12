@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
 
@@ -247,89 +248,92 @@ export default function VerifyEmailScreen({ navigation, route }) {
   };
 
   return (
-    <LinearGradient
-      colors={["#123321", "#1db95b", "#0a1f14"]}
-      style={styles.container}
-    >
-      {showLoginSuccess ? (
-        <View style={styles.successOverlay}>
-          <View style={styles.successCircle}>
-            <Text style={styles.successTick}>✓</Text>
+    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+      <LinearGradient
+        colors={["#123321", "#1db95b", "#0a1f14"]}
+        style={styles.container}
+      >
+        {showLoginSuccess ? (
+          <View style={styles.successOverlay}>
+            <View style={styles.successCircle}>
+              <Text style={styles.successTick}>✓</Text>
+            </View>
+            <Text style={styles.successTitle}>Login Successful!</Text>
+            <Text style={styles.successSub}>
+              Open your app and start ordering.
+            </Text>
           </View>
-          <Text style={styles.successTitle}>Login Successful!</Text>
-          <Text style={styles.successSub}>
-            Open your app and start ordering.
-          </Text>
-        </View>
-      ) : null}
-
-      <View style={styles.card}>
-        <Text style={styles.title}>
-          {mode === "verifying"
-            ? "Verifying email"
-            : mode === "success"
-              ? "Verified"
-              : mode === "error"
-                ? "Verification failed"
-                : "Check your email"}
-        </Text>
-
-        <Text style={styles.text}>{message}</Text>
-
-        {mode === "pending" ? (
-          <Text style={styles.textMuted}>
-            Verification link sent to {pendingEmail || "your email"}.
-          </Text>
         ) : null}
 
-        {mode === "pending" ? (
-          <>
+        <View style={styles.card}>
+          <Text style={styles.title}>
+            {mode === "verifying"
+              ? "Verifying email"
+              : mode === "success"
+                ? "Verified"
+                : mode === "error"
+                  ? "Verification failed"
+                  : "Check your email"}
+          </Text>
+
+          <Text style={styles.text}>{message}</Text>
+
+          {mode === "pending" ? (
+            <Text style={styles.textMuted}>
+              Verification link sent to {pendingEmail || "your email"}.
+            </Text>
+          ) : null}
+
+          {mode === "pending" ? (
+            <>
+              <Pressable
+                onPress={() => Linking.openURL("mailto:")}
+                style={({ pressed }) => [
+                  styles.primaryBtn,
+                  pressed && { opacity: 0.9 },
+                ]}
+              >
+                <Text style={styles.primaryBtnText}>Open Mail App</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleResend}
+                disabled={busy || !pendingEmail}
+                style={({ pressed }) => [
+                  styles.secondaryBtn,
+                  (pressed || busy) && { opacity: 0.8 },
+                ]}
+              >
+                {busy ? (
+                  <ActivityIndicator />
+                ) : (
+                  <Text style={styles.secondaryBtnText}>
+                    Resend verification email
+                  </Text>
+                )}
+              </Pressable>
+            </>
+          ) : null}
+
+          {mode === "error" ? (
             <Pressable
-              onPress={() => Linking.openURL("mailto:")}
+              onPress={() => navigation.navigate("Signup")}
               style={({ pressed }) => [
-                styles.primaryBtn,
+                styles.secondaryBtn,
                 pressed && { opacity: 0.9 },
               ]}
             >
-              <Text style={styles.primaryBtnText}>Open Mail App</Text>
+              <Text style={styles.secondaryBtnText}>Back to signup</Text>
             </Pressable>
-
-            <Pressable
-              onPress={handleResend}
-              disabled={busy || !pendingEmail}
-              style={({ pressed }) => [
-                styles.secondaryBtn,
-                (pressed || busy) && { opacity: 0.8 },
-              ]}
-            >
-              {busy ? (
-                <ActivityIndicator />
-              ) : (
-                <Text style={styles.secondaryBtnText}>
-                  Resend verification email
-                </Text>
-              )}
-            </Pressable>
-          </>
-        ) : null}
-
-        {mode === "error" ? (
-          <Pressable
-            onPress={() => navigation.navigate("Signup")}
-            style={({ pressed }) => [
-              styles.secondaryBtn,
-              pressed && { opacity: 0.9 },
-            ]}
-          >
-            <Text style={styles.secondaryBtnText}>Back to signup</Text>
-          </Pressable>
-        ) : null}
-      </View>
-    </LinearGradient>
+          ) : null}
+        </View>
+      </LinearGradient>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: "#123321" },
   container: { flex: 1, justifyContent: "center", padding: 18 },
   successOverlay: {
     ...StyleSheet.absoluteFillObject,

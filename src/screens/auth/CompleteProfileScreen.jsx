@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { getAccessToken } from "../../lib/authStorage";
 import MeezoLogo from "../../components/common/MeezoLogo";
 import Svg, { Path } from "react-native-svg";
@@ -158,7 +159,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
   };
 
   return (
-    <View style={styles.pageContainer}>
+    <SafeAreaView style={styles.pageContainer} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
         style={styles.pageContainer}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -297,7 +298,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
+    </SafeAreaView>
   );
 }
 

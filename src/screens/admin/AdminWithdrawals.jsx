@@ -13,7 +13,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
 
@@ -192,10 +195,7 @@ export default function AdminWithdrawals() {
       imageUrl = imageUrl.replace("/raw/upload/", "/image/upload/");
     }
     if (imageUrl.includes("/upload/")) {
-      imageUrl = imageUrl.replace(
-        "/upload/",
-        "/upload/f_jpg,pg_1,q_auto/",
-      );
+      imageUrl = imageUrl.replace("/upload/", "/upload/f_jpg,pg_1,q_auto/");
     }
 
     // Keep PDF source extension so Cloudinary can render page-1 as image.
@@ -697,16 +697,25 @@ export default function AdminWithdrawals() {
             <View style={styles.previewHeader}>
               <Text style={styles.previewTitle}>Receipt Preview</Text>
               <View style={styles.previewHeaderActions}>
-                <TouchableOpacity onPress={handleZoomOut} style={styles.previewZoomBtn}>
+                <TouchableOpacity
+                  onPress={handleZoomOut}
+                  style={styles.previewZoomBtn}
+                >
                   <Feather name="minus" size={16} color="#6b7280" />
                 </TouchableOpacity>
                 <Text style={styles.previewZoomValue}>
                   {Math.round(receiptZoom * 100)}%
                 </Text>
-                <TouchableOpacity onPress={handleZoomIn} style={styles.previewZoomBtn}>
+                <TouchableOpacity
+                  onPress={handleZoomIn}
+                  style={styles.previewZoomBtn}
+                >
                   <Feather name="plus" size={16} color="#6b7280" />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={closeReceiptViewer} style={styles.previewCloseBtn}>
+                <TouchableOpacity
+                  onPress={closeReceiptViewer}
+                  style={styles.previewCloseBtn}
+                >
                   <Feather name="x" size={18} color="#6b7280" />
                 </TouchableOpacity>
               </View>
@@ -720,7 +729,10 @@ export default function AdminWithdrawals() {
             >
               <Image
                 source={{ uri: receiptViewer.url }}
-                style={[styles.previewImage, { transform: [{ scale: receiptZoom }] }]}
+                style={[
+                  styles.previewImage,
+                  { transform: [{ scale: receiptZoom }] },
+                ]}
                 resizeMode="contain"
               />
             </ScrollView>

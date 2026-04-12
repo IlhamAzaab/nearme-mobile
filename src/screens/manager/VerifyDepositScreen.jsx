@@ -207,7 +207,7 @@ const VerifyDepositScreen = ({ navigation, route }) => {
   // Loading state
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#13ECB9" />
           <Text style={styles.loadingText}>Loading deposit...</Text>
@@ -219,7 +219,7 @@ const VerifyDepositScreen = ({ navigation, route }) => {
   // Error state
   if (error || !deposit) {
     return (
-      <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={64} color="#EF4444" />
           <Text style={styles.errorText}>{error || "Deposit not found"}</Text>
@@ -238,7 +238,7 @@ const VerifyDepositScreen = ({ navigation, route }) => {
     approvedAmount && parseFloat(approvedAmount) !== parseFloat(deposit.amount);
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Receipt Preview */}
         <View style={styles.section}>

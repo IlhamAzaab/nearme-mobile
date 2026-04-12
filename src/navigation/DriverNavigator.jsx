@@ -47,7 +47,7 @@ function TabIcon({ label, focused }) {
     <View style={styles.tabIconContainer}>
       <Ionicons
         name={getIconName()}
-        size={24}
+        size={25}
         color={focused ? "#06C168" : "#9ca3af"}
         style={styles.tabIcon}
       />
@@ -61,6 +61,13 @@ function TabIcon({ label, focused }) {
 function DriverTabs() {
   const insets = useSafeAreaInsets();
 
+  const tabBarStyle = {
+    ...styles.tabBar,
+    height: 62 + Math.max(insets.bottom, 8),
+    paddingTop: 8,
+    paddingBottom: Math.max(insets.bottom, 8),
+  };
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -68,13 +75,7 @@ function DriverTabs() {
         tabBarShowLabel: false,
         tabBarActiveTintColor: "#06C168",
         tabBarInactiveTintColor: "#9ca3af",
-        tabBarStyle: {
-          ...styles.tabBar,
-          height: 70 + insets.bottom,
-          paddingBottom: insets.bottom,
-          paddingTop: 8,
-          paddingHorizontal: 0,
-        },
+        tabBarStyle,
       }}
     >
       <Tab.Screen
@@ -202,7 +203,10 @@ export default function DriverNavigator() {
 
 const styles = StyleSheet.create({
   tabBar: {
+    height: 70,
     paddingTop: 8,
+    paddingBottom: 8,
+    paddingHorizontal: 0,
     borderTopWidth: 1,
     borderTopColor: "#f3f4f6",
     backgroundColor: "#fff",
@@ -222,7 +226,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   tabLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: "#9ca3af",
     fontWeight: "600",
   },

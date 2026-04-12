@@ -1,6 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   Dimensions,
@@ -14,6 +20,7 @@ import {
   Text,
   View,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
 import {
@@ -34,29 +41,122 @@ const TEXT_MUTED = "#64748B";
 const TEXT_GRAY = "#6B7280";
 const BORDER = "#F1F5F9";
 const BG = "#FFFFFF";
+const ORDER_TOTAL_CACHE_KEY = "@order_display_totals";
+
+const getCachedOrderDisplayTotal = async (orderId) => {
+  if (!orderId) return NaN;
+
+  try {
+    const raw = await AsyncStorage.getItem(ORDER_TOTAL_CACHE_KEY);
+    if (!raw) return NaN;
+    const map = JSON.parse(raw);
+    const n = Number(map?.[String(orderId)]);
+    return Number.isFinite(n) ? n : NaN;
+  } catch {
+    return NaN;
+  }
+};
+
+const resolveOrderDisplayTotal = (orderLike, fallback = 0) => {
+  const candidates = [
+    orderLike?.grand_total,
+    orderLike?.final_total,
+    orderLike?.payable_amount,
+    orderLike?.total_amount,
+    orderLike?.total,
+    fallback,
+  ];
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const n = Number(candidates[i]);
+    if (Number.isFinite(n)) return n;
+  }
+
+  return 0;
+};
 
 const STATUS_CONFIG = {
   placed: { bg: "rgba(217,119,6,0.1)", color: "#D97706", label: "PLACED" },
   pending: { bg: "rgba(234,88,12,0.1)", color: "#EA580C", label: "PENDING" },
-  accepted: { bg: "rgba(37,99,235,0.1)", color: "#2563EB", label: "DRIVER ASSIGNED" },
-  driver_accepted: { bg: "rgba(37,99,235,0.1)", color: "#2563EB", label: "DRIVER ASSIGNED" },
-  driver_assigned: { bg: "rgba(37,99,235,0.1)", color: "#2563EB", label: "DRIVER ASSIGNED" },
-  received: { bg: "rgba(147,51,234,0.1)", color: "#9333EA", label: "PREPARING" },
-  preparing: { bg: "rgba(147,51,234,0.1)", color: "#9333EA", label: "PREPARING" },
+  accepted: {
+    bg: "rgba(37,99,235,0.1)",
+    color: "#2563EB",
+    label: "DRIVER ASSIGNED",
+  },
+  driver_accepted: {
+    bg: "rgba(37,99,235,0.1)",
+    color: "#2563EB",
+    label: "DRIVER ASSIGNED",
+  },
+  driver_assigned: {
+    bg: "rgba(37,99,235,0.1)",
+    color: "#2563EB",
+    label: "DRIVER ASSIGNED",
+  },
+  received: {
+    bg: "rgba(147,51,234,0.1)",
+    color: "#9333EA",
+    label: "PREPARING",
+  },
+  preparing: {
+    bg: "rgba(147,51,234,0.1)",
+    color: "#9333EA",
+    label: "PREPARING",
+  },
   ready: { bg: "rgba(79,70,229,0.1)", color: "#4F46E5", label: "READY" },
-  picked_up: { bg: "rgba(8,145,178,0.1)", color: "#0891B2", label: "PICKED UP" },
-  on_the_way: { bg: "rgba(5,150,105,0.1)", color: "#06C168", label: "ON THE WAY" },
-  delivered: { bg: "rgba(5,150,105,0.1)", color: "#06C168", label: "DELIVERED" },
-  cancelled: { bg: "rgba(220,38,38,0.1)", color: "#DC2626", label: "CANCELLED" },
+  picked_up: {
+    bg: "rgba(8,145,178,0.1)",
+    color: "#0891B2",
+    label: "PICKED UP",
+  },
+  on_the_way: {
+    bg: "rgba(5,150,105,0.1)",
+    color: "#06C168",
+    label: "ON THE WAY",
+  },
+  delivered: {
+    bg: "rgba(5,150,105,0.1)",
+    color: "#06C168",
+    label: "DELIVERED",
+  },
+  cancelled: {
+    bg: "rgba(220,38,38,0.1)",
+    color: "#DC2626",
+    label: "CANCELLED",
+  },
   rejected: { bg: "rgba(220,38,38,0.1)", color: "#DC2626", label: "REJECTED" },
   // Uppercase variants
   PLACED: { bg: "rgba(217,119,6,0.1)", color: "#D97706", label: "PLACED" },
-  DRIVER_ACCEPTED: { bg: "rgba(37,99,235,0.1)", color: "#2563EB", label: "DRIVER ASSIGNED" },
-  RECEIVED: { bg: "rgba(147,51,234,0.1)", color: "#9333EA", label: "PREPARING" },
-  PICKED_UP: { bg: "rgba(8,145,178,0.1)", color: "#0891B2", label: "PICKED UP" },
-  ON_THE_WAY: { bg: "rgba(5,150,105,0.1)", color: "#06C168", label: "ON THE WAY" },
-  DELIVERED: { bg: "rgba(5,150,105,0.1)", color: "#06C168", label: "DELIVERED" },
-  CANCELLED: { bg: "rgba(220,38,38,0.1)", color: "#DC2626", label: "CANCELLED" },
+  DRIVER_ACCEPTED: {
+    bg: "rgba(37,99,235,0.1)",
+    color: "#2563EB",
+    label: "DRIVER ASSIGNED",
+  },
+  RECEIVED: {
+    bg: "rgba(147,51,234,0.1)",
+    color: "#9333EA",
+    label: "PREPARING",
+  },
+  PICKED_UP: {
+    bg: "rgba(8,145,178,0.1)",
+    color: "#0891B2",
+    label: "PICKED UP",
+  },
+  ON_THE_WAY: {
+    bg: "rgba(5,150,105,0.1)",
+    color: "#06C168",
+    label: "ON THE WAY",
+  },
+  DELIVERED: {
+    bg: "rgba(5,150,105,0.1)",
+    color: "#06C168",
+    label: "DELIVERED",
+  },
+  CANCELLED: {
+    bg: "rgba(220,38,38,0.1)",
+    color: "#DC2626",
+    label: "CANCELLED",
+  },
   REJECTED: { bg: "rgba(220,38,38,0.1)", color: "#DC2626", label: "REJECTED" },
 };
 
@@ -108,35 +208,50 @@ const ORDER_STEPS = [
 
 const getStepIndex = (status) => {
   switch (status) {
-    case "placed": return 0;
+    case "placed":
+      return 0;
     case "pending":
     case "received":
     case "preparing":
-    case "ready": return 1;
+    case "ready":
+      return 1;
     case "accepted":
     case "driver_accepted":
-    case "driver_assigned": return 2;
-    case "picked_up": return 3;
-    case "on_the_way": return 4;
-    case "delivered": return 5;
-    default: return 0;
+    case "driver_assigned":
+      return 2;
+    case "picked_up":
+      return 3;
+    case "on_the_way":
+      return 4;
+    case "delivered":
+      return 5;
+    default:
+      return 0;
   }
 };
 
 const getProgressLabel = (status) => {
   switch (status) {
-    case "placed": return "Order placed";
+    case "placed":
+      return "Order placed";
     case "pending":
     case "received":
-    case "preparing": return "Preparing your order";
-    case "ready": return "Ready for pickup";
+    case "preparing":
+      return "Preparing your order";
+    case "ready":
+      return "Ready for pickup";
     case "accepted":
     case "driver_accepted":
-    case "driver_assigned": return "Driver assigned";
-    case "picked_up": return "Order picked up";
-    case "on_the_way": return "On the way to you";
-    case "delivered": return "Delivered";
-    default: return "Order placed";
+    case "driver_assigned":
+      return "Driver assigned";
+    case "picked_up":
+      return "Order picked up";
+    case "on_the_way":
+      return "On the way to you";
+    case "delivered":
+      return "Delivered";
+    default:
+      return "Order placed";
   }
 };
 
@@ -210,7 +325,9 @@ function SegmentedProgress({ currentStatus }) {
 
   return (
     <View style={styles.segmentContainer}>
-      <Text style={styles.progressLabel}>{getProgressLabel(currentStatus)}</Text>
+      <Text style={styles.progressLabel}>
+        {getProgressLabel(currentStatus)}
+      </Text>
       <View style={styles.segmentRow}>
         {ORDER_STEPS.map((step, i) => (
           <AnimatedSeg
@@ -227,7 +344,16 @@ function SegmentedProgress({ currentStatus }) {
 // ─── ETA Helper ──────────────────────────────────────────────────────────────
 const getEstimatedTime = (status, order) => {
   // Only show ETA after driver accepts
-  const showEtaStatuses = ["accepted", "driver_accepted", "driver_assigned", "received", "preparing", "ready", "picked_up", "on_the_way"];
+  const showEtaStatuses = [
+    "accepted",
+    "driver_accepted",
+    "driver_assigned",
+    "received",
+    "preparing",
+    "ready",
+    "picked_up",
+    "on_the_way",
+  ];
   if (!showEtaStatuses.includes(status)) return "";
 
   const baseMins = order?.estimated_duration_min;
@@ -236,13 +362,22 @@ const getEstimatedTime = (status, order) => {
     switch (status) {
       case "accepted":
       case "driver_accepted":
-      case "driver_assigned": factor = 0.65; break;
+      case "driver_assigned":
+        factor = 0.65;
+        break;
       case "received":
       case "preparing":
-      case "ready": factor = 0.5; break;
-      case "picked_up": factor = 0.45; break;
-      case "on_the_way": factor = 0.35; break;
-      default: return "";
+      case "ready":
+        factor = 0.5;
+        break;
+      case "picked_up":
+        factor = 0.45;
+        break;
+      case "on_the_way":
+        factor = 0.35;
+        break;
+      default:
+        return "";
     }
     const low = Math.max(1, Math.round(baseMins * factor));
     const high = Math.max(low + 5, Math.round(baseMins * factor * 1.3));
@@ -264,6 +399,62 @@ const getEstimatedTime = (status, order) => {
   if (!range) return "";
   const isOnTheWay = status === "on_the_way";
   return formatETAClockTime(range[0], range[1], { isOnTheWay });
+};
+
+const getOrderIdentityKey = (order) => {
+  if (!order) return "";
+
+  const candidates = [
+    order.id,
+    order.order_id,
+    order.orderId,
+    order._identityKey,
+    order.order_number,
+    order.orderNumber,
+  ];
+
+  for (const value of candidates) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+
+  return "";
+};
+
+const getOrderRenderKey = (order, index = 0) => {
+  const identity = getOrderIdentityKey(order);
+  if (identity) return identity;
+
+  const createdAt = String(order?.created_at || order?.placed_at || "").trim();
+  const restaurant = String(
+    order?.restaurant_id || order?.restaurant_name || "",
+  ).trim();
+  const fallback = `${createdAt}-${restaurant}-${index}`;
+  return fallback || `order-${index}`;
+};
+
+const getStatusScreenName = (status) => {
+  switch (status) {
+    case "placed":
+      return "PlacingOrder";
+    case "pending":
+    case "received":
+    case "preparing":
+    case "ready":
+      return "OrderReceived";
+    case "accepted":
+    case "driver_accepted":
+    case "driver_assigned":
+      return "DriverAccepted";
+    case "picked_up":
+      return "OrderPickedUp";
+    case "on_the_way":
+      return "OrderOnTheWay";
+    case "delivered":
+      return "OrderDelivered";
+    default:
+      return "OrderReceived";
+  }
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -323,34 +514,92 @@ export default function OrdersScreen({ navigation }) {
     });
   };
 
-  const navigateToOrder = (order) => {
+  const formatTime = (ts) => {
+    if (!ts) return "";
+    const d = new Date(ts);
+    return d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const getPastStatus = (order) => {
+    const status = getOrderStatus(order);
+    const rawStatus = String(
+      order?.status || order?.order_status || order?.delivery_status || "",
+    )
+      .trim()
+      .toLowerCase();
+
+    if (
+      status === "cancelled" ||
+      status === "rejected" ||
+      rawStatus.includes("cancel") ||
+      rawStatus.includes("reject")
+    ) {
+      return "cancelled";
+    }
+    return "delivered";
+  };
+
+  const getPastStatusTime = (order, pastStatus) => {
+    if (pastStatus === "cancelled") {
+      return (
+        order?.cancelled_at ||
+        order?.canceled_at ||
+        order?.cancelledAt ||
+        order?.rejected_at ||
+        order?.rejectedAt ||
+        order?.updatedAt ||
+        order?.createdAt ||
+        order?.updated_at ||
+        order?.created_at
+      );
+    }
+
+    return (
+      order?.delivered_at ||
+      order?.deliveredAt ||
+      order?.completed_at ||
+      order?.updated_at ||
+      order?.created_at
+    );
+  };
+
+  const navigateToOrder = async (order) => {
     const resolvedStatus = getOrderStatus(order);
-    const initialPlacedUiStatuses = new Set([
-      "placed",
-      "pending",
-      "received",
-      "preparing",
-      "ready",
-    ]);
+    const orderId =
+      order?.id ||
+      order?.order_id ||
+      order?.orderId ||
+      getOrderIdentityKey(order);
+    const target = getStatusScreenName(resolvedStatus);
+    const cachedTotal = await getCachedOrderDisplayTotal(orderId);
+    const displayTotal = Number.isFinite(cachedTotal)
+      ? cachedTotal
+      : resolveOrderDisplayTotal(order);
 
-    // Match checkout flow: start with placed-style UI for early order stages.
-    const trackingEntryStatus = initialPlacedUiStatuses.has(resolvedStatus)
-      ? "placed"
-      : resolvedStatus;
-
-    navigation.navigate("OrderTracking", { 
-      orderId: order.id,
-      status: trackingEntryStatus,
-      order: order
+    navigation.navigate(target, {
+      orderId,
+      status: resolvedStatus,
+      order: order,
+      totalAmount: displayTotal,
+      restaurantName: order?.restaurant_name,
+      restaurantLogoUrl: order?.restaurant_logo_url || order?.restaurant_logo,
+      driverName: order?.driver_name,
+      statusScreenMode: true,
     });
   };
 
   const activeOrders = useMemo(
-    () => orders.filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))),
+    () =>
+      (orders || []).filter((o) => ACTIVE_STATUSES.includes(getOrderStatus(o))),
     [orders],
   );
   const pastOrders = useMemo(
-    () => orders.filter((o) => PAST_STATUSES.includes(getOrderStatus(o))),
+    () =>
+      (orders || []).filter((o) => PAST_STATUSES.includes(getOrderStatus(o))),
     [orders],
   );
 
@@ -360,7 +609,8 @@ export default function OrdersScreen({ navigation }) {
       const status = getOrderStatus(order);
       if (pastFilter === "all") return true;
       if (pastFilter === "delivered") return status === "delivered";
-      if (pastFilter === "cancelled") return status === "cancelled" || status === "rejected";
+      if (pastFilter === "cancelled")
+        return status === "cancelled" || status === "rejected";
       return true;
     });
   }, [pastOrders, pastFilter]);
@@ -370,11 +620,12 @@ export default function OrdersScreen({ navigation }) {
     const status = getOrderStatus(order);
     const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.placed;
     const itemCount = order.order_items?.length || order.items_count || 0;
-    const isNew = newOrderIds.has(order.id);
+    const isNew = newOrderIds.has(getOrderIdentityKey(order));
     const eta = getEstimatedTime(status, order);
+    const orderKey = order?._renderKey || getOrderRenderKey(order, index);
 
     return (
-      <AnimatedOrderCard key={order.id} isNew={isNew} delay={index * 80}>
+      <AnimatedOrderCard key={orderKey} isNew={isNew} delay={index * 80}>
         <Pressable
           onPress={() => navigateToOrder(order)}
           style={({ pressed }) => [
@@ -385,9 +636,11 @@ export default function OrdersScreen({ navigation }) {
           {/* Top section: Logo + Info */}
           <View style={styles.activeCardTop}>
             {/* Restaurant Logo - Square rounded */}
-            {(order.restaurant_logo_url || order.restaurant_logo) ? (
+            {order.restaurant_logo_url || order.restaurant_logo ? (
               <Image
-                source={{ uri: order.restaurant_logo_url || order.restaurant_logo }}
+                source={{
+                  uri: order.restaurant_logo_url || order.restaurant_logo,
+                }}
                 style={styles.activeLogo}
               />
             ) : (
@@ -409,7 +662,8 @@ export default function OrdersScreen({ navigation }) {
 
               {/* Order number & items */}
               <Text style={styles.orderMeta}>
-                Order #{order.order_number || "N/A"} • {itemCount} item{itemCount !== 1 ? "s" : ""}
+                Order #{order.order_number || "N/A"} • {itemCount} item
+                {itemCount !== 1 ? "s" : ""}
               </Text>
 
               {/* Estimated arrival */}
@@ -444,20 +698,25 @@ export default function OrdersScreen({ navigation }) {
 
   // ─── Past Order Card (matches website design) ──────────────────────────
   const renderPastCard = (order, index) => {
-    const status = getOrderStatus(order);
-    const isDelivered = status === "delivered";
-    const itemCount = order.order_items?.length || order.items_count || 0;
-    const isNew = newOrderIds.has(order.id);
+    const isNew = newOrderIds.has(getOrderIdentityKey(order));
+    const orderKey = order?._renderKey || getOrderRenderKey(order, index);
+    const pastStatus = getPastStatus(order);
+    const orderTime = getPastStatusTime(order, pastStatus);
+    const isCancelled = pastStatus === "cancelled";
+    const displayTotal = resolveOrderDisplayTotal(order, NaN);
+    const hasDisplayTotal = Number.isFinite(displayTotal) && displayTotal > 0;
 
     return (
-      <AnimatedOrderCard key={order.id} isNew={isNew} delay={(index || 0) * 60}>
+      <AnimatedOrderCard key={orderKey} isNew={isNew} delay={(index || 0) * 60}>
         <View style={styles.pastCard}>
           {/* Card content */}
           <View style={styles.pastCardTop}>
             {/* Restaurant Logo - Square */}
-            {(order.restaurant_logo_url || order.restaurant_logo) ? (
+            {order.restaurant_logo_url || order.restaurant_logo ? (
               <Image
-                source={{ uri: order.restaurant_logo_url || order.restaurant_logo }}
+                source={{
+                  uri: order.restaurant_logo_url || order.restaurant_logo,
+                }}
                 style={styles.pastLogo}
               />
             ) : (
@@ -469,7 +728,7 @@ export default function OrdersScreen({ navigation }) {
             )}
 
             <View style={{ flex: 1, minWidth: 0 }}>
-              {/* Name + Delivered/Cancelled badge */}
+              {/* Restaurant name */}
               <View style={styles.cardRow}>
                 <Text style={styles.pastRestaurantName} numberOfLines={1}>
                   {order.restaurant_name || "Restaurant"}
@@ -478,41 +737,56 @@ export default function OrdersScreen({ navigation }) {
                   style={[
                     styles.pastStatusBadge,
                     {
-                      backgroundColor: isDelivered
-                        ? "rgba(5,150,105,0.1)"
-                        : "rgba(220,38,38,0.1)",
+                      backgroundColor: isCancelled
+                        ? "rgba(220,38,38,0.1)"
+                        : "rgba(5,150,105,0.1)",
                     },
                   ]}
                 >
                   <Text
                     style={[
                       styles.pastStatusText,
-                      { color: isDelivered ? "#06C168" : "#DC2626" },
+                      { color: isCancelled ? "#DC2626" : "#06C168" },
                     ]}
                   >
-                    {isDelivered ? "Delivered" : "Cancelled"}
+                    {isCancelled ? "Cancelled" : "Delivered"}
                   </Text>
                 </View>
               </View>
 
-              {/* Date + Price */}
+              {/* Total + date/time */}
               <Text style={styles.pastMeta}>
-                {formatDate(order.delivered_at || order.created_at)}{order.total_amount ? " • " : ""}
-                {order.total_amount ? (
+                <Text style={styles.pastStatusMetaText}>
+                  {isCancelled ? "Cancelled" : "Delivered"}
+                </Text>
+                {" • "}
+                {hasDisplayTotal ? (
                   <Text style={styles.pastPrice}>
-                    {formatPrice(order.total_amount)}
+                    {formatPrice(displayTotal)}
                   </Text>
                 ) : null}
+                {hasDisplayTotal ? " • " : ""}
+                {formatDate(orderTime)}
+                {orderTime ? " • " : ""}
+                {formatTime(orderTime)}
               </Text>
-
-
             </View>
           </View>
 
-          {/* Action buttons */}
+          {/* Action button */}
           <View style={styles.pastActions}>
             <Pressable
-              onPress={() => navigateToOrder(order)}
+              onPress={() =>
+                navigation.navigate("PastOrderDetails", {
+                  orderId:
+                    order?.id ||
+                    order?.order_id ||
+                    order?.orderId ||
+                    getOrderIdentityKey(order),
+                  status: pastStatus,
+                  order,
+                })
+              }
               style={({ pressed }) => [
                 styles.pastActionBtn,
                 styles.viewDetailsBtn,
@@ -520,22 +794,6 @@ export default function OrdersScreen({ navigation }) {
               ]}
             >
               <Text style={styles.viewDetailsText}>View Details</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                if (order.restaurant_id) {
-                  navigation.navigate("RestaurantFoods", {
-                    restaurantId: order.restaurant_id,
-                  });
-                }
-              }}
-              style={({ pressed }) => [
-                styles.pastActionBtn,
-                styles.reorderBtn,
-                pressed && { opacity: 0.85 },
-              ]}
-            >
-              <Text style={styles.reorderBtnText}>Reorder</Text>
             </Pressable>
           </View>
         </View>
@@ -598,7 +856,7 @@ export default function OrdersScreen({ navigation }) {
   // ─── Main Render ─────────────────────────────────────────────────────────
   if (!isLoggedIn) {
     return (
-      <SafeAreaView style={styles.page} edges={["top"]}>
+      <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
         <View style={styles.header}>
           <Pressable
             onPress={() => navigation.goBack()}
@@ -616,9 +874,8 @@ export default function OrdersScreen({ navigation }) {
       </SafeAreaView>
     );
   }
-
   return (
-    <SafeAreaView style={styles.page} edges={["top"]}>
+    <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
       {/* ── Header (matches website) ── */}
       <View style={styles.header}>
         <Pressable
@@ -676,8 +933,6 @@ export default function OrdersScreen({ navigation }) {
         </View>
       </View>
 
-
-
       {/* ── Content ── */}
       {loading ? (
         <View style={{ padding: 16, gap: 14 }}>
@@ -721,7 +976,9 @@ export default function OrdersScreen({ navigation }) {
         <FlatList
           ref={flatListRef}
           data={activeOrders}
-          keyExtractor={(item) => String(item.id)}
+          keyExtractor={(item, index) =>
+            `${getOrderRenderKey(item, index)}-${index}`
+          }
           renderItem={({ item, index }) => renderActiveCard(item, index)}
           contentContainerStyle={[
             styles.listContent,
@@ -742,7 +999,9 @@ export default function OrdersScreen({ navigation }) {
         /* ── Past Orders ── */
         <FlatList
           data={filteredPastOrders}
-          keyExtractor={(item) => String(item.id)}
+          keyExtractor={(item, index) =>
+            `${getOrderRenderKey(item, index)}-${index}`
+          }
           renderItem={({ item, index }) => renderPastCard(item, index)}
           contentContainerStyle={[
             styles.listContent,
@@ -1006,8 +1265,7 @@ const styles = StyleSheet.create({
     color: TEXT_GRAY,
     marginBottom: 8,
   },
-  segmentContainer: {
-  },
+  segmentContainer: {},
   segmentRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1080,6 +1338,9 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0.5,
     textTransform: "uppercase",
+  },
+  pastStatusMetaText: {
+    fontWeight: "700",
   },
   pastMeta: {
     fontSize: 13,

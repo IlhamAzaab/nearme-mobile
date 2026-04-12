@@ -200,7 +200,7 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#13ECB9" />
         </View>
@@ -210,7 +210,7 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
 
   if (!restaurant) {
     return (
-      <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={styles.center}>
           <Ionicons name="storefront-outline" size={64} color="#9CA3AF" />
           <Text style={{ color: "#9CA3AF", marginTop: 8 }}>
@@ -228,7 +228,7 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Restaurant Profile */}
         <View style={styles.profileCard}>

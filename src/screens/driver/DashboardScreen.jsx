@@ -37,6 +37,7 @@ import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import { DriverDashboardLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNotificationContext";
 import { useSocket } from "../../context/SocketContext";
 import { approximateDistanceMeters } from "../../utils/osrmClient";
@@ -63,6 +64,8 @@ const DASHBOARD_CACHE_KEY = ["driver", "dashboard", "snapshot"];
 const AVAILABLE_SYNC_MOVEMENT_THRESHOLD = 200;
 const DRIVER_STATUS_FOCUS_SIGNAL_KEY = "driver_status_focus_signal";
 const DRIVER_STATUS_FOCUS_WINDOW_MS = 120000;
+const DRIVER_PROFILE_CACHE_KEY = "driver_profile_cache";
+const DASHBOARD_UI_CACHE_KEY = ["driver", "dashboard", "ui-state"];
 
 // Full-screen skeleton should only appear on the first visit to this screen.
 let hasVisitedDriverDashboardScreen = false;
@@ -162,7 +165,13 @@ export default function DashboardScreen({ navigation }) {
   const queryClient = useQueryClient();
   const { on, off } = useSocket();
   const { logout } = useAuth();
-  const [isOnline, setIsOnline] = useState(false);
+  const initialUiState = queryClient.getQueryData(DASHBOARD_UI_CACHE_KEY);
+  const [isOnline, setIsOnline] = useState(() => {
+    if (typeof initialUiState?.isOnline === "boolean") {
+      return initialUiState.isOnline;
+    }
+    return false;
+  });
   const [statusInfo, setStatusInfo] = useState(null);
   const [stats, setStats] = useState({
     todayEarnings: 0,
@@ -184,11 +193,19 @@ export default function DashboardScreen({ navigation }) {
   const [activeDeliveries, setActiveDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [driverProfile, setDriverProfile] = useState(null);
+  const [driverProfile, setDriverProfile] = useState(
+    () => initialUiState?.driverProfile || null,
+  );
   const [driverLocation, setDriverLocation] = useState(null);
   const [acceptingOrder, setAcceptingOrder] = useState(null);
-  const [withinWorkingHours, setWithinWorkingHours] = useState(true);
-  const [manualOverrideActive, setManualOverrideActive] = useState(false);
+  const [withinWorkingHours, setWithinWorkingHours] = useState(
+    typeof initialUiState?.withinWorkingHours === "boolean"
+      ? initialUiState.withinWorkingHours
+      : true,
+  );
+  const [manualOverrideActive, setManualOverrideActive] = useState(
+    Boolean(initialUiState?.manualOverrideActive),
+  );
   const [showOverrideModal, setShowOverrideModal] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [togglingStatus, setTogglingStatus] = useState(false);
@@ -209,6 +226,25 @@ export default function DashboardScreen({ navigation }) {
   const nearbyLastSyncLocationRef = useRef(null);
   const hasInitializedRef = useRef(false);
   const nearbySyncInFlightRef = useRef(false);
+
+  const isFullTimeDriver = useMemo(() => {
+    const workingTime = String(
+      driverProfile?.working_time || statusInfo?.working_time || "",
+    )
+      .trim()
+      .toLowerCase();
+    return workingTime === "full_time";
+  }, [driverProfile?.working_time, statusInfo?.working_time]);
+
+  const writeDashboardUiState = useCallback(
+    (patch) => {
+      queryClient.setQueryData(DASHBOARD_UI_CACHE_KEY, (prev) => ({
+        ...(prev || {}),
+        ...(patch || {}),
+      }));
+    },
+    [queryClient],
+  );
 
   const applyDashboardSnapshot = useCallback((snapshot) => {
     if (!snapshot || typeof snapshot !== "object") return;
@@ -302,7 +338,8 @@ export default function DashboardScreen({ navigation }) {
     if (!hasInitializedRef.current) return;
     setDriverOnline(isOnline);
     AsyncStorage.setItem("driver_is_online", JSON.stringify(isOnline));
-  }, [isOnline, setDriverOnline]);
+    writeDashboardUiState({ isOnline });
+  }, [isOnline, setDriverOnline, writeDashboardUiState]);
 
   // ============================================================================
   // RESTORE ONLINE STATUS ON MOUNT
@@ -313,12 +350,30 @@ export default function DashboardScreen({ navigation }) {
   useEffect(() => {
     (async () => {
       try {
+        const cachedProfileRaw = await AsyncStorage.getItem(
+          DRIVER_PROFILE_CACHE_KEY,
+        );
+        if (cachedProfileRaw) {
+          const cachedProfile = JSON.parse(cachedProfileRaw);
+          if (cachedProfile && typeof cachedProfile === "object") {
+            setDriverProfile((prev) => prev || cachedProfile);
+            writeDashboardUiState({
+              driverProfile: cachedProfile,
+              withinWorkingHours:
+                cachedProfile?.working_time === "full_time"
+                  ? true
+                  : withinWorkingHours,
+            });
+          }
+        }
+
         // Step 1: Restore cached status instantly so UI doesn't flash offline
         const savedStatus = await AsyncStorage.getItem("driver_is_online");
         if (savedStatus !== null) {
           const restored = JSON.parse(savedStatus);
           setIsOnline(restored);
           setDriverOnline(restored);
+          writeDashboardUiState({ isOnline: restored });
         }
       } catch (e) {
         console.error("Failed to restore driver status:", e);
@@ -327,7 +382,7 @@ export default function DashboardScreen({ navigation }) {
         hasInitializedRef.current = true;
       }
     })();
-  }, [setDriverOnline]);
+  }, [setDriverOnline, withinWorkingHours, writeDashboardUiState]);
 
   // ============================================================================
   // FETCH STATUS INFO (matches web version)
@@ -336,7 +391,9 @@ export default function DashboardScreen({ navigation }) {
   const fetchStatusInfo = useCallback(async () => {
     try {
       const token = await getAccessToken();
-      if (!token) return;
+      if (!token) {
+        return;
+      }
 
       const res = await rateLimitedFetch(
         `${API_URL}${DRIVER_STATUS_ENDPOINT}`,
@@ -354,25 +411,34 @@ export default function DashboardScreen({ navigation }) {
           .trim()
           .toLowerCase();
 
-        const withinHoursValue =
-          typeof data?.within_working_hours === "boolean"
+        const isFullTime =
+          String(data?.working_time || "")
+            .trim()
+            .toLowerCase() === "full_time";
+
+        const withinHoursValue = isFullTime
+          ? true
+          : typeof data?.within_working_hours === "boolean"
             ? data.within_working_hours
             : typeof data?.shouldBeActive === "boolean"
               ? data.shouldBeActive
               : false;
 
-        const shouldBeActive =
-          typeof data?.shouldBeActive === "boolean"
+        const shouldBeActive = isFullTime
+          ? normalizedStatus === "active"
+          : typeof data?.shouldBeActive === "boolean"
             ? data.shouldBeActive
             : withinHoursValue || Boolean(data?.manual_override);
 
-        const canToggleToActive =
-          typeof data?.canToggleToActive === "boolean"
+        const canToggleToActive = isFullTime
+          ? true
+          : typeof data?.canToggleToActive === "boolean"
             ? data.canToggleToActive
             : shouldBeActive;
 
-        const canToggleToInactive =
-          typeof data?.canToggleToInactive === "boolean"
+        const canToggleToInactive = isFullTime
+          ? true
+          : typeof data?.canToggleToInactive === "boolean"
             ? data.canToggleToInactive
             : true;
 
@@ -393,14 +459,16 @@ export default function DashboardScreen({ navigation }) {
             JSON.stringify(serverOnline),
           );
           setDriverOnline(serverOnline);
+          writeDashboardUiState({ isOnline: serverOnline });
         }
 
         setWithinWorkingHours(withinHoursValue);
+        writeDashboardUiState({ withinWorkingHours: withinHoursValue });
       }
     } catch (error) {
       console.error("Status info fetch error:", error);
     }
-  }, [setDriverOnline]);
+  }, [setDriverOnline, writeDashboardUiState]);
 
   // ============================================================================
   // FETCH DRIVER PROFILE
@@ -410,7 +478,7 @@ export default function DashboardScreen({ navigation }) {
     try {
       const token = await getAccessToken();
       if (!token) {
-        await logout();
+        // Keep current session state during transient storage read issues.
         return;
       }
 
@@ -418,8 +486,13 @@ export default function DashboardScreen({ navigation }) {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (res.status === 401 || res.status === 403 || res.status === 404) {
+      if (res.status === 401 || res.status === 403) {
         await logout();
+        return;
+      }
+
+      if (res.status === 404 || res.status === 429) {
+        console.warn("Driver profile fetch skipped", { status: res.status });
         return;
       }
 
@@ -427,16 +500,38 @@ export default function DashboardScreen({ navigation }) {
         const data = await res.json();
         setDriverProfile(data.driver);
         // Don't set isOnline here anymore - use working-hours-status endpoint
-        setManualOverrideActive(data.driver.manual_status_override || false);
+        const isFullTime = data?.driver?.working_time === "full_time";
+        setManualOverrideActive(
+          isFullTime ? false : data.driver.manual_status_override || false,
+        );
+        setWithinWorkingHours(
+          isFullTime
+            ? true
+            : typeof data?.driver?.within_working_hours === "boolean"
+              ? data.driver.within_working_hours
+              : withinWorkingHours,
+        );
+
+        await AsyncStorage.setItem(
+          DRIVER_PROFILE_CACHE_KEY,
+          JSON.stringify(data.driver),
+        );
+        writeDashboardUiState({
+          driverProfile: data.driver,
+          manualOverrideActive: isFullTime
+            ? false
+            : data.driver.manual_status_override || false,
+          withinWorkingHours: isFullTime
+            ? true
+            : typeof data?.driver?.within_working_hours === "boolean"
+              ? data.driver.within_working_hours
+              : withinWorkingHours,
+        });
       }
     } catch (error) {
       console.error("Profile fetch error:", error);
-      // Only logout on auth errors, not on network/read errors
-      if (error?.message?.includes("401") || error?.message?.includes("403")) {
-        await logout();
-      }
     }
-  }, [logout]);
+  }, [logout, withinWorkingHours, writeDashboardUiState]);
 
   // ============================================================================
   // CHECK WORKING HOURS STATUS
@@ -444,7 +539,14 @@ export default function DashboardScreen({ navigation }) {
 
   const checkWorkingHoursStatus = useCallback(async () => {
     try {
+      if (isFullTimeDriver) {
+        return;
+      }
+
       const token = await getAccessToken();
+      if (!token) {
+        return;
+      }
       const res = await rateLimitedFetch(
         `${API_URL}/driver/working-hours-status`,
         {
@@ -489,10 +591,15 @@ export default function DashboardScreen({ navigation }) {
         }));
 
         setWithinWorkingHours(withinHoursValue);
-        setManualOverrideActive(data.manual_override);
+        setManualOverrideActive(Boolean(data.manual_override));
+        writeDashboardUiState({
+          withinWorkingHours: withinHoursValue,
+          manualOverrideActive: Boolean(data.manual_override),
+        });
 
         if (data.auto_updated) {
           setIsOnline(normalizedStatus === "active");
+          writeDashboardUiState({ isOnline: normalizedStatus === "active" });
           setStatusMessage(
             data.message || "Status changed due to working hours",
           );
@@ -502,7 +609,7 @@ export default function DashboardScreen({ navigation }) {
     } catch (error) {
       console.error("Working hours check error:", error);
     }
-  }, []);
+  }, [isFullTimeDriver, writeDashboardUiState]);
 
   // ============================================================================
   // FETCH DASHBOARD DATA
@@ -656,7 +763,9 @@ export default function DashboardScreen({ navigation }) {
     try {
       const token = await getAccessToken();
       if (!token) {
-        await logout();
+        // Do not force logout on transient token read issues.
+        setLoading(false);
+        setRefreshing(false);
         return;
       }
 
@@ -905,14 +1014,14 @@ export default function DashboardScreen({ navigation }) {
 
   useEffect(() => {
     workingHoursCheckRef.current = setInterval(() => {
-      if (isFocused) checkWorkingHoursStatus();
+      if (isFocused && !isFullTimeDriver) checkWorkingHoursStatus();
     }, 120000); // Every 2 minutes (was 1 minute)
     return () => {
       if (workingHoursCheckRef.current) {
         clearInterval(workingHoursCheckRef.current);
       }
     };
-  }, [checkWorkingHoursStatus]);
+  }, [checkWorkingHoursStatus, isFullTimeDriver, isFocused]);
 
   // ============================================================================
   // TOGGLE ONLINE STATUS (Enhanced to match web version)
@@ -923,9 +1032,11 @@ export default function DashboardScreen({ navigation }) {
 
     // Check if toggle is allowed using status info
     if (statusInfo) {
-      const canToggle = newStatus
-        ? statusInfo.canToggleToActive
-        : statusInfo.canToggleToInactive;
+      const canToggle = isFullTimeDriver
+        ? true
+        : newStatus
+          ? statusInfo.canToggleToActive
+          : statusInfo.canToggleToInactive;
 
       if (!canToggle && !manualOverride) {
         if (newStatus && !statusInfo.shouldBeActive) {
@@ -943,6 +1054,10 @@ export default function DashboardScreen({ navigation }) {
 
     try {
       const token = await getAccessToken();
+      if (!token) {
+        showError("Session unavailable. Please wait and try again.");
+        return;
+      }
 
       const res = await fetch(`${API_URL}/driver/status`, {
         method: "PATCH",
@@ -959,6 +1074,7 @@ export default function DashboardScreen({ navigation }) {
       if (res.ok) {
         const data = await res.json();
         setIsOnline(data.status === "active");
+        writeDashboardUiState({ isOnline: data.status === "active" });
         showSuccess(`Status updated to ${data.status}`);
 
         // Refresh status info and dashboard data
@@ -1453,7 +1569,7 @@ export default function DashboardScreen({ navigation }) {
             </View>
 
             {/* Online/Offline Toggle */}
-            <View style={styles.section}>
+            <View style={[styles.section, styles.statusSection]}>
               <View style={styles.statusCard}>
                 <View style={styles.statusContent}>
                   <View style={styles.statusTextContainer}>
@@ -1490,35 +1606,40 @@ export default function DashboardScreen({ navigation }) {
                 </View>
 
                 {/* Status Messages from status-info */}
-                {statusInfo && !statusInfo.shouldBeActive && (
-                  <View style={styles.statusMessageBanner}>
-                    <Ionicons name="time-outline" size={16} color="#d97706" />
-                    <Text style={styles.statusMessageText}>
-                      ⏰ You are currently outside your working hours. You'll be
-                      able to accept deliveries during your scheduled time.
-                    </Text>
-                  </View>
-                )}
+                {!isFullTimeDriver &&
+                  statusInfo &&
+                  !statusInfo.shouldBeActive && (
+                    <View style={styles.statusMessageBanner}>
+                      <Ionicons name="time-outline" size={16} color="#d97706" />
+                      <Text style={styles.statusMessageText}>
+                        ⏰ You are currently outside your working hours. You'll
+                        be able to accept deliveries during your scheduled time.
+                      </Text>
+                    </View>
+                  )}
 
-                {statusInfo && statusInfo.shouldBeActive && !isOnline && (
-                  <View
-                    style={[
-                      styles.statusMessageBanner,
-                      styles.statusMessageInfo,
-                    ]}
-                  >
-                    <Ionicons name="bulb-outline" size={16} color="#3b82f6" />
-                    <Text
+                {!isFullTimeDriver &&
+                  statusInfo &&
+                  statusInfo.shouldBeActive &&
+                  !isOnline && (
+                    <View
                       style={[
-                        styles.statusMessageText,
-                        styles.statusMessageTextInfo,
+                        styles.statusMessageBanner,
+                        styles.statusMessageInfo,
                       ]}
                     >
-                      💡 You're within your working hours. Activate your status
-                      to start receiving delivery requests.
-                    </Text>
-                  </View>
-                )}
+                      <Ionicons name="bulb-outline" size={16} color="#3b82f6" />
+                      <Text
+                        style={[
+                          styles.statusMessageText,
+                          styles.statusMessageTextInfo,
+                        ]}
+                      >
+                        💡 You're within your working hours. Activate your
+                        status to start receiving delivery requests.
+                      </Text>
+                    </View>
+                  )}
 
                 {statusInfo && statusInfo.isActive && (
                   <View
@@ -2151,6 +2272,9 @@ const styles = StyleSheet.create({
   section: {
     paddingHorizontal: 16,
     marginBottom: 16,
+  },
+  statusSection: {
+    marginTop: 8,
   },
   statusCard: {
     backgroundColor: "#fff",

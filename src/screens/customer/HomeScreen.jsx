@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   Image,
@@ -18,19 +18,151 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { G, Path } from "react-native-svg";
 import { useNotifications } from "../../app/providers/NotificationProvider";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
+import StaggeredFadeInUp from "../../components/common/StaggeredFadeInUp";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
+import { prefetchImageUrls } from "../../lib/imageCache";
+import { fetchJsonWithCache, getCachedJson } from "../../lib/publicDataCache";
 import {
   fuzzySearchFoods,
   fuzzySearchRestaurants,
 } from "../../utils/fuzzySearch";
+
+const RESTAURANT_CARD_ESTIMATED_HEIGHT = 252;
 
 const LAUNCH_PROMO_DEFAULTS = {
   first_km_rate: 1,
   max_km: 5,
   beyond_km_rate: 40,
 };
+
+const RESTAURANTS_CACHE_KEY = "public:restaurants";
+const FOODS_CACHE_KEY = "public:foods";
+
+function getCachedRestaurantsList() {
+  const cached = getCachedJson(RESTAURANTS_CACHE_KEY, 120000);
+  return Array.isArray(cached?.restaurants) ? cached.restaurants : [];
+}
+
+function getCachedFoodsList() {
+  const cached = getCachedJson(FOODS_CACHE_KEY, 120000);
+  return Array.isArray(cached?.foods) ? cached.foods : [];
+}
+
+function extractOrdersFromResponse(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.orders)) return data.orders;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.data?.orders)) return data.data.orders;
+  if (Array.isArray(data?.results)) return data.results;
+  return [];
+}
+
+function normalizeComparableStatus(status) {
+  return String(status || "")
+    .trim()
+    .toLowerCase();
+}
+
+function hashString(input) {
+  let hash = 0;
+  const str = String(input || "");
+  for (let i = 0; i < str.length; i += 1) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function toDeterministicRandomOrder(items, seed, getId) {
+  return [...items].sort((a, b) => {
+    const aKey = hashString(`${seed}:${getId(a)}`);
+    const bKey = hashString(`${seed}:${getId(b)}`);
+    if (aKey !== bKey) return aKey - bKey;
+    return String(getId(a)).localeCompare(String(getId(b)));
+  });
+}
+
+function getOrderRestaurantId(order) {
+  return (
+    order?.restaurant_id ||
+    order?.restaurantId ||
+    order?.restaurant?.id ||
+    order?.restaurant?.restaurant_id ||
+    null
+  );
+}
+
+function getOrderItems(order) {
+  if (Array.isArray(order?.order_items)) return order.order_items;
+  if (Array.isArray(order?.items)) return order.items;
+  if (Array.isArray(order?.orderItems)) return order.orderItems;
+  return [];
+}
+
+function getItemFoodId(item) {
+  return item?.food_id || item?.foodId || item?.id || item?.item_id || null;
+}
+
+function getItemFoodName(item) {
+  return String(item?.food_name || item?.name || "")
+    .trim()
+    .toLowerCase();
+}
+
+function getItemQuantity(item) {
+  const qty = Number(item?.quantity ?? item?.qty ?? item?.count ?? 1);
+  return Number.isFinite(qty) && qty > 0 ? qty : 1;
+}
+
+function buildDeliveredOrderRanking(orders) {
+  const restaurantCounts = {};
+  const foodCounts = {};
+  const foodNameCounts = {};
+  let deliveredOrderCount = 0;
+
+  for (const order of orders) {
+    const status = normalizeComparableStatus(
+      order?.effective_status || order?.delivery_status || order?.status,
+    );
+    if (status !== "delivered") continue;
+    deliveredOrderCount += 1;
+
+    const restaurantId = getOrderRestaurantId(order);
+    if (restaurantId != null) {
+      const key = String(restaurantId);
+      restaurantCounts[key] = (restaurantCounts[key] || 0) + 1;
+    }
+
+    const orderItems = getOrderItems(order);
+    for (const item of orderItems) {
+      const foodId = getItemFoodId(item);
+      const quantity = getItemQuantity(item);
+
+      if (foodId != null) {
+        const key = String(foodId);
+        foodCounts[key] = (foodCounts[key] || 0) + quantity;
+      }
+
+      const foodNameKey = getItemFoodName(item);
+      if (foodNameKey) {
+        foodNameCounts[foodNameKey] =
+          (foodNameCounts[foodNameKey] || 0) + quantity;
+      }
+    }
+  }
+
+  const hasDeliveredOrders = deliveredOrderCount > 0;
+
+  return {
+    hasDeliveredOrders,
+    restaurantCounts,
+    foodCounts,
+    foodNameCounts,
+  };
+}
 
 // Format 24h time string → "11.00a.m" style
 const formatTime = (t) => {
@@ -47,6 +179,10 @@ const formatPrice = (price) => {
   if (Number.isNaN(value)) return "Rs. 0.00";
   return `Rs. ${value.toFixed(2)}`;
 };
+
+function getRestaurantId(item) {
+  return item?.id ?? item?.restaurant_id;
+}
 
 // Verified badge (scalloped seal with checkmark)
 function VerifiedBadge({ size = 17 }) {
@@ -125,15 +261,77 @@ const CategoryIcon = ({ type }) => {
   );
 };
 
+const CategorySection = React.memo(function CategorySection({
+  categories,
+  selectedCategory,
+  onSelectCategory,
+}) {
+  return (
+    <>
+      <View style={styles.sectionRow}>
+        <Text style={styles.sectionTitle}>Category</Text>
+      </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.catRow}
+      >
+        {categories.map((c) => {
+          const active = selectedCategory === c.id;
+          return (
+            <StaggeredFadeInUp key={c.id} delay={16 + c.id * 18}>
+              <Pressable
+                onPress={() => onSelectCategory(c)}
+                style={({ pressed }) => [
+                  styles.catCard,
+                  active && styles.catCardActive,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View
+                  style={[styles.catIconBox, active && styles.catIconBoxActive]}
+                >
+                  <CategoryIcon type={c.type} />
+                </View>
+                <Text style={[styles.catText, active && styles.catTextActive]}>
+                  {c.name}
+                </Text>
+              </Pressable>
+            </StaggeredFadeInUp>
+          );
+        })}
+      </ScrollView>
+    </>
+  );
+});
+
 export default function HomeScreen({ navigation }) {
+  const randomSortSeed = useMemo(() => `${Date.now()}-${Math.random()}`, []);
+
   // Full data from API (not filtered)
-  const [allRestaurants, setAllRestaurants] = useState([]);
-  const [allFoodsData, setAllFoodsData] = useState([]);
+  const [allRestaurants, setAllRestaurants] = useState(() =>
+    getCachedRestaurantsList(),
+  );
+  const [allFoodsData, setAllFoodsData] = useState(() => getCachedFoodsList());
+  const [orderRanking, setOrderRanking] = useState({
+    hasDeliveredOrders: false,
+    restaurantCounts: {},
+    foodCounts: {},
+    foodNameCounts: {},
+  });
 
   // Filtered/displayed data
-  const [restaurants, setRestaurants] = useState([]);
-  const [allFoods, setAllFoods] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [restaurants, setRestaurants] = useState(() =>
+    getCachedRestaurantsList(),
+  );
+  const [allFoods, setAllFoods] = useState(() => getCachedFoodsList());
+  const [isRestaurantsLoading, setIsRestaurantsLoading] = useState(
+    () => getCachedRestaurantsList().length === 0,
+  );
+  const [isFoodsLoading, setIsFoodsLoading] = useState(
+    () => getCachedFoodsList().length === 0,
+  );
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("restaurant"); // restaurant | food
@@ -156,6 +354,10 @@ export default function HomeScreen({ navigation }) {
     ],
     [],
   );
+
+  useEffect(() => {
+    prefetchImageUrls(Object.values(CATEGORY_IMAGES));
+  }, []);
 
   const fetchLaunchPromotionStatus = useCallback(async (tokenArg) => {
     try {
@@ -268,52 +470,234 @@ export default function HomeScreen({ navigation }) {
 
   const promoConfig = launchPromo?.promotion || LAUNCH_PROMO_DEFAULTS;
 
+  const sortRestaurantsForHome = useCallback(
+    (list) => {
+      if (!Array.isArray(list) || list.length <= 1) return list || [];
+
+      if (!orderRanking.hasDeliveredOrders) {
+        return toDeterministicRandomOrder(
+          list,
+          randomSortSeed,
+          (item) => item?.id ?? item?.restaurant_id ?? item?.restaurant_name,
+        );
+      }
+
+      return [...list].sort((a, b) => {
+        const aCount =
+          orderRanking.restaurantCounts[String(getRestaurantId(a))] || 0;
+        const bCount =
+          orderRanking.restaurantCounts[String(getRestaurantId(b))] || 0;
+
+        if (aCount !== bCount) return bCount - aCount;
+
+        const aName = String(a?.restaurant_name || "");
+        const bName = String(b?.restaurant_name || "");
+        return aName.localeCompare(bName);
+      });
+    },
+    [orderRanking, randomSortSeed],
+  );
+
+  const sortFoodsForHome = useCallback(
+    (list) => {
+      if (!Array.isArray(list) || list.length <= 1) return list || [];
+
+      if (!orderRanking.hasDeliveredOrders) {
+        return toDeterministicRandomOrder(
+          list,
+          randomSortSeed,
+          (item) => item?.id ?? item?.food_id ?? item?.name,
+        );
+      }
+
+      return [...list].sort((a, b) => {
+        const aIdCount =
+          orderRanking.foodCounts[String(a?.id ?? a?.food_id)] || 0;
+        const bIdCount =
+          orderRanking.foodCounts[String(b?.id ?? b?.food_id)] || 0;
+
+        const aNameKey = String(a?.name || "")
+          .trim()
+          .toLowerCase();
+        const bNameKey = String(b?.name || "")
+          .trim()
+          .toLowerCase();
+        const aNameCount = orderRanking.foodNameCounts[aNameKey] || 0;
+        const bNameCount = orderRanking.foodNameCounts[bNameKey] || 0;
+
+        const aCount = Math.max(aIdCount, aNameCount);
+        const bCount = Math.max(bIdCount, bNameCount);
+
+        if (aCount !== bCount) return bCount - aCount;
+
+        const aName = String(a?.name || "");
+        const bName = String(b?.name || "");
+        return aName.localeCompare(bName);
+      });
+    },
+    [orderRanking, randomSortSeed],
+  );
+
+  const fetchDeliveredOrderRanking = useCallback(async () => {
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        setOrderRanking({
+          hasDeliveredOrders: false,
+          restaurantCounts: {},
+          foodCounts: {},
+          foodNameCounts: {},
+        });
+        return;
+      }
+
+      const res = await fetch(
+        `${API_BASE_URL}/orders/my-orders?status=past&limit=200&offset=0`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      if (!res.ok) {
+        setOrderRanking({
+          hasDeliveredOrders: false,
+          restaurantCounts: {},
+          foodCounts: {},
+          foodNameCounts: {},
+        });
+        return;
+      }
+
+      const payload = await res.json().catch(() => ({}));
+      const orders = extractOrdersFromResponse(payload);
+      const deliveredOrders = orders.filter(
+        (order) =>
+          normalizeComparableStatus(
+            order?.effective_status || order?.delivery_status || order?.status,
+          ) === "delivered",
+      );
+
+      if (deliveredOrders.length === 0) {
+        setOrderRanking({
+          hasDeliveredOrders: false,
+          restaurantCounts: {},
+          foodCounts: {},
+          foodNameCounts: {},
+        });
+        return;
+      }
+
+      const deliveredOrderDetails = await Promise.allSettled(
+        deliveredOrders.map(async (order) => {
+          const orderId = order?.id || order?.order_id || order?.orderId;
+          if (!orderId) return order;
+
+          const detailRes = await fetch(`${API_BASE_URL}/orders/${orderId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (!detailRes.ok) return order;
+
+          const detailPayload = await detailRes.json().catch(() => ({}));
+          return detailPayload?.order || order;
+        }),
+      );
+
+      const normalizedDeliveredOrders = deliveredOrderDetails
+        .map((result, index) =>
+          result.status === "fulfilled" ? result.value : deliveredOrders[index],
+        )
+        .filter(Boolean);
+
+      setOrderRanking(buildDeliveredOrderRanking(normalizedDeliveredOrders));
+    } catch (err) {
+      console.log("Delivered order ranking error:", err?.message);
+      setOrderRanking({
+        hasDeliveredOrders: false,
+        restaurantCounts: {},
+        foodCounts: {},
+        foodNameCounts: {},
+      });
+    }
+  }, []);
+
   // Fetch all restaurants (no search filter, we'll do fuzzy search client-side)
   const fetchRestaurants = async () => {
     try {
-      setLoading(true);
+      if (allRestaurants.length === 0) {
+        setIsRestaurantsLoading(true);
+      }
       const url = `${API_BASE_URL}/public/restaurants`;
-      const res = await fetch(url);
-      const data = await res.json().catch(() => ({}));
+      const data = await fetchJsonWithCache(
+        RESTAURANTS_CACHE_KEY,
+        async () => {
+          const res = await fetch(url);
+          return res.json().catch(() => ({}));
+        },
+        { ttlMs: 120000 },
+      );
       const fetchedRestaurants = data.restaurants || [];
-      setAllRestaurants(fetchedRestaurants);
-      setRestaurants(fetchedRestaurants); // Initially show all
+      const orderedRestaurants = sortRestaurantsForHome(fetchedRestaurants);
+      setAllRestaurants(orderedRestaurants);
+      setRestaurants(orderedRestaurants); // Initially show all
+      prefetchImageUrls(
+        fetchedRestaurants.flatMap((item) => [
+          item?.cover_image_url,
+          item?.logo_url,
+        ]),
+      );
     } catch (err) {
       console.log("restaurants error:", err?.message);
       setAllRestaurants([]);
       setRestaurants([]);
     } finally {
-      setLoading(false);
+      setIsRestaurantsLoading(false);
     }
   };
 
   // Fetch all foods (no search filter, we'll do fuzzy search client-side)
   const fetchAllFoods = async () => {
     try {
-      setLoading(true);
+      if (allFoodsData.length === 0) {
+        setIsFoodsLoading(true);
+      }
       const url = `${API_BASE_URL}/public/foods`;
-      const res = await fetch(url);
-      const data = await res.json().catch(() => ({}));
+      const data = await fetchJsonWithCache(
+        FOODS_CACHE_KEY,
+        async () => {
+          const res = await fetch(url);
+          return res.json().catch(() => ({}));
+        },
+        { ttlMs: 120000 },
+      );
       const fetchedFoods = data.foods || [];
-      setAllFoodsData(fetchedFoods);
-      setAllFoods(fetchedFoods); // Initially show all
+      const orderedFoods = sortFoodsForHome(fetchedFoods);
+      setAllFoodsData(orderedFoods);
+      setAllFoods(orderedFoods); // Initially show all
+      prefetchImageUrls(fetchedFoods.map((item) => item?.image_url));
     } catch (err) {
       console.log("foods error:", err?.message);
       setAllFoodsData([]);
       setAllFoods([]);
     } finally {
-      setLoading(false);
+      setIsFoodsLoading(false);
     }
   };
 
   // 🔍 Initial data fetch on mount and tab switch
   useEffect(() => {
+    fetchDeliveredOrderRanking();
+  }, [fetchDeliveredOrderRanking]);
+
+  useEffect(() => {
     if (activeTab === "food") {
-      if (allFoodsData.length === 0) fetchAllFoods();
+      if (allFoodsData.length === 0) {
+        fetchAllFoods();
+      }
     } else {
       if (allRestaurants.length === 0) fetchRestaurants();
     }
-  }, [activeTab]);
+  }, [activeTab, allFoodsData.length, allRestaurants.length]);
 
   // 🔍 Fuzzy search filter when search query changes
   useEffect(() => {
@@ -322,31 +706,38 @@ export default function HomeScreen({ navigation }) {
         if (searchQuery.trim()) {
           // Apply fuzzy search
           const filtered = fuzzySearchFoods(allFoodsData, searchQuery);
-          setAllFoods(filtered);
+          setAllFoods(sortFoodsForHome(filtered));
         } else {
           // Show all foods when search is empty
-          setAllFoods(allFoodsData);
+          setAllFoods(sortFoodsForHome(allFoodsData));
         }
       } else {
         if (searchQuery.trim()) {
           // Apply fuzzy search
           const filtered = fuzzySearchRestaurants(allRestaurants, searchQuery);
-          setRestaurants(filtered);
+          setRestaurants(sortRestaurantsForHome(filtered));
         } else {
           // Show all restaurants when search is empty
-          setRestaurants(allRestaurants);
+          setRestaurants(sortRestaurantsForHome(allRestaurants));
         }
       }
     }, 300);
 
     return () => clearTimeout(t);
-  }, [searchQuery, activeTab, allRestaurants, allFoodsData]);
+  }, [
+    searchQuery,
+    activeTab,
+    allRestaurants,
+    allFoodsData,
+    sortFoodsForHome,
+    sortRestaurantsForHome,
+  ]);
 
-  const onSelectCategory = (category) => {
+  const onSelectCategory = useCallback((category) => {
     setSelectedCategory(category.id);
     setActiveTab("food");
     setSearchQuery(category.name);
-  };
+  }, []);
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery("");
@@ -354,13 +745,328 @@ export default function HomeScreen({ navigation }) {
 
     // Reset visible list immediately without waiting for debounce.
     if (activeTab === "food") {
-      setAllFoods(allFoodsData);
+      setAllFoods(sortFoodsForHome(allFoodsData));
     } else {
-      setRestaurants(allRestaurants);
+      setRestaurants(sortRestaurantsForHome(allRestaurants));
     }
 
     Keyboard.dismiss();
-  }, [activeTab, allFoodsData, allRestaurants]);
+  }, [
+    activeTab,
+    allFoodsData,
+    allRestaurants,
+    sortFoodsForHome,
+    sortRestaurantsForHome,
+  ]);
+
+  const prewarmFoodDetail = useCallback(
+    (item) => {
+      const restaurantId = item?.restaurant_id;
+      const foodId = item?.id;
+      if (!restaurantId || !foodId) return;
+
+      navigation.preload?.("FoodDetail", {
+        restaurantId,
+        foodId,
+      });
+
+      const restaurantCacheKey = `public:restaurant:${restaurantId}`;
+      const foodCacheKey = `public:restaurant:${restaurantId}:food:${foodId}`;
+
+      fetchJsonWithCache(
+        restaurantCacheKey,
+        async () => {
+          const res = await fetch(
+            `${API_BASE_URL}/public/restaurants/${restaurantId}`,
+          );
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok)
+            throw new Error(payload.message || "Restaurant not found");
+          return payload;
+        },
+        { ttlMs: 180000 },
+      )
+        .then((restaurantData) => {
+          prefetchImageUrls([
+            restaurantData?.restaurant?.logo_url,
+            restaurantData?.restaurant?.cover_image_url,
+            item?.image_url,
+          ]);
+        })
+        .catch(() => {
+          // Prewarm should never block UI.
+        });
+
+      fetchJsonWithCache(
+        foodCacheKey,
+        async () => {
+          const res = await fetch(
+            `${API_BASE_URL}/public/restaurants/${restaurantId}/foods/${foodId}`,
+          );
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(payload.message || "Food not found");
+          return payload;
+        },
+        { ttlMs: 180000 },
+      ).catch(() => {
+        // Prewarm should never block UI.
+      });
+    },
+    [navigation],
+  );
+
+  const renderRestaurantItem = useCallback(
+    ({ item }) => {
+      const restaurantId = getRestaurantId(item);
+      if (!restaurantId) return null;
+
+      return (
+        <Pressable
+          onPress={() =>
+            navigation.navigate("RestaurantFoods", {
+              restaurantId,
+            })
+          }
+          style={({ pressed }) => [
+            styles.restaurantCard,
+            pressed && { opacity: 0.92 },
+          ]}
+        >
+          {/* Image Container */}
+          <View style={styles.restaurantImageContainer}>
+            <OptimizedImage
+              uri={
+                item.cover_image_url ||
+                "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800"
+              }
+              style={styles.restaurantImage}
+              transition={80}
+            />
+
+            {/* Rating Badge - Top Right */}
+            {item.rating && (
+              <View style={styles.ratingBadge}>
+                <Text style={styles.ratingText}>⭐ {item.rating}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Info Section Below Image */}
+          <View style={styles.restaurantInfo}>
+            <View style={styles.restaurantInfoRow}>
+              {/* Logo */}
+              {item.logo_url ? (
+                <OptimizedImage
+                  uri={item.logo_url}
+                  style={styles.restaurantLogo}
+                  transition={80}
+                />
+              ) : (
+                <View
+                  style={[styles.restaurantLogo, styles.restaurantLogoFallback]}
+                >
+                  <Ionicons name="restaurant" size={18} color="#06C168" />
+                </View>
+              )}
+              <View style={styles.restaurantInfoText}>
+                <View style={styles.restaurantNameRow}>
+                  <Text style={styles.restaurantName} numberOfLines={1}>
+                    {item.restaurant_name}
+                  </Text>
+                  <VerifiedBadge size={20} />
+                </View>
+
+                {item.cuisine && (
+                  <Text style={styles.restaurantCuisine} numberOfLines={1}>
+                    {item.cuisine}
+                  </Text>
+                )}
+
+                {item.city && (
+                  <Text style={styles.restaurantCity} numberOfLines={1}>
+                    {item.city}
+                  </Text>
+                )}
+
+                {/* Opening/Closing Time */}
+                {(item.opening_time || item.close_time) && (
+                  <Text style={styles.restaurantTiming}>
+                    {formatTime(item.opening_time)} -{" "}
+                    {formatTime(item.close_time)}
+                  </Text>
+                )}
+              </View>
+
+              {/* Closed badge - right side */}
+              {item.is_open === false && (
+                <View style={styles.closedPill}>
+                  <Text style={styles.closedPillText}>Closed</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </Pressable>
+      );
+    },
+    [navigation],
+  );
+
+  const renderFoodItem = useCallback(
+    ({ item, index }) => (
+      <StaggeredFadeInUp delay={index * 16} style={styles.foodCardAnimWrap}>
+        <Pressable
+          onPress={() =>
+            navigation.navigate("FoodDetail", {
+              restaurantId: item.restaurant_id,
+              foodId: item.id,
+            })
+          }
+          style={({ pressed }) => [
+            styles.foodCard,
+            pressed && { opacity: 0.92 },
+          ]}
+        >
+          {(() => {
+            const regularPrice = item.regular_price ?? item.price;
+            const restaurantName =
+              item?.restaurants?.restaurant_name ||
+              item?.restaurant_name ||
+              "Restaurant";
+            const hasOffer =
+              item.offer_price != null &&
+              Number(item.offer_price) > 0 &&
+              Number(item.offer_price) < Number(regularPrice || 0);
+
+            return (
+              <>
+                <View style={styles.foodImgWrap}>
+                  <OptimizedImage
+                    uri={
+                      item.image_url ||
+                      "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400"
+                    }
+                    style={styles.foodImg}
+                    transition={120}
+                  />
+                  {Number(item.stars || 0) > 0 && (
+                    <View style={styles.foodRatingBadge}>
+                      <Ionicons name="star" size={11} color="#FBBF24" />
+                      <Text style={styles.foodRatingText}>{item.stars}</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.foodBody}>
+                  <Text style={styles.foodTitle} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.foodRestaurant} numberOfLines={1}>
+                    {restaurantName}
+                  </Text>
+                  <Text style={styles.foodDesc} numberOfLines={2}>
+                    {item.description || ""}
+                  </Text>
+
+                  <View style={styles.foodRow}>
+                    {hasOffer ? (
+                      <View style={styles.priceGroup}>
+                        <Text style={styles.foodPrice}>
+                          {formatPrice(item.offer_price)}
+                        </Text>
+                        <Text style={styles.oldPrice}>
+                          {formatPrice(regularPrice)}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.foodPrice}>
+                        {formatPrice(regularPrice)}
+                      </Text>
+                    )}
+                    <Text style={styles.foodTime}>
+                      {item.prep_time ? `Prep ${item.prep_time}` : ""}
+                    </Text>
+                  </View>
+                </View>
+              </>
+            );
+          })()}
+        </Pressable>
+      </StaggeredFadeInUp>
+    ),
+    [navigation],
+  );
+
+  const renderDiscoveryHeader = useCallback(
+    () => (
+      <>
+        <CategorySection
+          categories={categories}
+          selectedCategory={selectedCategory}
+          onSelectCategory={onSelectCategory}
+        />
+
+        {/* Toggle */}
+        <View style={styles.toggleRow}>
+          <Pressable
+            onPress={() =>
+              setActiveTab((prev) =>
+                prev === "restaurant" ? prev : "restaurant",
+              )
+            }
+            style={({ pressed }) => [
+              styles.toggleBtn,
+              activeTab === "restaurant" && styles.toggleActive,
+              pressed && { opacity: 0.8 },
+            ]}
+          >
+            <Text
+              style={
+                activeTab === "restaurant"
+                  ? styles.toggleTextActive
+                  : styles.toggleTextIdle
+              }
+            >
+              Restaurants
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() =>
+              setActiveTab((prev) => (prev === "food" ? prev : "food"))
+            }
+            style={({ pressed }) => [
+              styles.toggleBtn,
+              activeTab === "food" && styles.toggleActive,
+              pressed && { opacity: 0.8 },
+            ]}
+          >
+            <Text
+              style={
+                activeTab === "food"
+                  ? styles.toggleTextActive
+                  : styles.toggleTextIdle
+              }
+            >
+              Food Items
+            </Text>
+          </Pressable>
+        </View>
+
+        <Text style={[styles.sectionTitle, { marginTop: 6, marginBottom: 10 }]}>
+          {activeTab === "restaurant" ? "Restaurants" : "Popular Dishes"}
+        </Text>
+      </>
+    ),
+    [activeTab, categories, selectedCategory, onSelectCategory],
+  );
+
+  const shouldShowRestaurantSkeleton =
+    activeTab === "restaurant" &&
+    isRestaurantsLoading &&
+    restaurants.length === 0;
+  const shouldShowFoodSkeleton =
+    activeTab === "food" && isFoodsLoading && allFoods.length === 0;
+  const shouldShowSkeleton =
+    shouldShowRestaurantSkeleton || shouldShowFoodSkeleton;
 
   return (
     <SafeAreaView style={styles.page} edges={["top"]}>
@@ -384,12 +1090,8 @@ export default function HomeScreen({ navigation }) {
 
             <View style={styles.promoBody}>
               <View style={styles.promoPriceCard}>
-                <Text style={styles.promoPriceMain}>
-                  Only 1 rupees per km
-                </Text>
-                <Text style={styles.promoPriceSub}>
-                  Up to 5km
-                </Text>
+                <Text style={styles.promoPriceMain}>Only 1 rupees per km</Text>
+                <Text style={styles.promoPriceSub}>Up to 5km</Text>
               </View>
 
               <Text style={styles.promoNote}>
@@ -483,368 +1185,164 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Categories */}
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Category</Text>
-        </View>
-
+      {shouldShowSkeleton ? (
         <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.catRow}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          decelerationRate="fast"
+          disableIntervalMomentum
         >
-          {categories.map((c) => {
-            const active = selectedCategory === c.id;
-            return (
-              <Pressable
-                key={c.id}
-                onPress={() => onSelectCategory(c)}
-                style={({ pressed }) => [
-                  styles.catCard,
-                  active && styles.catCardActive,
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <View
-                  style={[styles.catIconBox, active && styles.catIconBoxActive]}
-                >
-                  <CategoryIcon type={c.type} />
+          {renderDiscoveryHeader()}
+          {activeTab === "food" ? (
+            <View style={{ gap: 12 }}>
+              {[1, 2, 3].map((row) => (
+                <View key={row} style={{ flexDirection: "row", gap: 12 }}>
+                  {[1, 2].map((col) => (
+                    <View
+                      key={`${row}-${col}`}
+                      style={{
+                        flex: 1,
+                        backgroundColor: "#fff",
+                        borderRadius: 16,
+                        borderWidth: 1,
+                        borderColor: "#F1F5F9",
+                        overflow: "hidden",
+                        height: 242,
+                      }}
+                    >
+                      <SkeletonBlock
+                        width="100%"
+                        height={130}
+                        borderRadius={0}
+                      />
+                      <View style={{ padding: 10, gap: 6 }}>
+                        <SkeletonBlock
+                          width="70%"
+                          height={14}
+                          borderRadius={6}
+                        />
+                        <SkeletonBlock
+                          width="45%"
+                          height={11}
+                          borderRadius={6}
+                        />
+                        <SkeletonBlock
+                          width="90%"
+                          height={11}
+                          borderRadius={6}
+                        />
+                        <SkeletonBlock
+                          width="75%"
+                          height={11}
+                          borderRadius={6}
+                        />
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginTop: 8,
+                          }}
+                        >
+                          <SkeletonBlock
+                            width="48%"
+                            height={14}
+                            borderRadius={6}
+                          />
+                          <SkeletonBlock
+                            width="28%"
+                            height={12}
+                            borderRadius={6}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  ))}
                 </View>
-                <Text style={[styles.catText, active && styles.catTextActive]}>
-                  {c.name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
-        {/* Toggle */}
-        <View style={styles.toggleRow}>
-          <Pressable
-            onPress={() => setActiveTab("restaurant")}
-            style={({ pressed }) => [
-              styles.toggleBtn,
-              activeTab === "restaurant" && styles.toggleActive,
-              pressed && { opacity: 0.8 },
-            ]}
-          >
-            <Text
-              style={
-                activeTab === "restaurant"
-                  ? styles.toggleTextActive
-                  : styles.toggleTextIdle
-              }
-            >
-              Restaurants
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setActiveTab("food")}
-            style={({ pressed }) => [
-              styles.toggleBtn,
-              activeTab === "food" && styles.toggleActive,
-              pressed && { opacity: 0.8 },
-            ]}
-          >
-            <Text
-              style={
-                activeTab === "food"
-                  ? styles.toggleTextActive
-                  : styles.toggleTextIdle
-              }
-            >
-              Food Items
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* Loading */}
-        {loading ? (
-          <View style={{ gap: 20 }}>
-            {/* Restaurant skeleton cards */}
-            {[1, 2, 3].map((i) => (
-              <View
-                key={i}
-                style={{
-                  backgroundColor: "#fff",
-                  borderRadius: 16,
-                  overflow: "hidden",
-                }}
-              >
-                <SkeletonBlock width="100%" height={180} borderRadius={0} />
+              ))}
+            </View>
+          ) : (
+            <View style={{ gap: 20 }}>
+              {[1, 2, 3].map((i) => (
                 <View
+                  key={i}
                   style={{
-                    padding: 12,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
+                    backgroundColor: "#fff",
+                    borderRadius: 16,
+                    overflow: "hidden",
                   }}
                 >
-                  <SkeletonBlock width={44} height={44} borderRadius={22} />
-                  <View style={{ flex: 1, gap: 8 }}>
-                    <SkeletonBlock width="65%" height={16} borderRadius={8} />
-                    <SkeletonBlock width="40%" height={12} borderRadius={6} />
-                    <SkeletonBlock width="50%" height={10} borderRadius={5} />
+                  <SkeletonBlock width="100%" height={180} borderRadius={0} />
+                  <View
+                    style={{
+                      padding: 12,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <SkeletonBlock width={44} height={44} borderRadius={22} />
+                    <View style={{ flex: 1, gap: 8 }}>
+                      <SkeletonBlock width="65%" height={16} borderRadius={8} />
+                      <SkeletonBlock width="40%" height={12} borderRadius={6} />
+                      <SkeletonBlock width="50%" height={10} borderRadius={5} />
+                    </View>
                   </View>
                 </View>
-              </View>
-            ))}
-          </View>
-        ) : activeTab === "restaurant" ? (
-          <>
-            {/* All Restaurants as Featured Cards */}
-            <Text
-              style={[styles.sectionTitle, { marginTop: 6, marginBottom: 10 }]}
-            >
-              Restaurants
-            </Text>
-
-            {restaurants.length === 0 ? (
-              <EmptyState />
-            ) : (
-              <FlatList
-                data={restaurants}
-                keyExtractor={(item) => String(item.id)}
-                scrollEnabled={false}
-                ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
-                renderItem={({ item, index }) => (
-                  <Pressable
-                    onPress={() =>
-                      navigation.navigate("RestaurantFoods", {
-                        restaurantId: item.id,
-                      })
-                    }
-                    style={({ pressed }) => [
-                      styles.restaurantCard,
-                      pressed && { opacity: 0.92 },
-                    ]}
-                  >
-                    {/* Image Container */}
-                    <View style={styles.restaurantImageContainer}>
-                      <Image
-                        source={{
-                          uri:
-                            item.cover_image_url ||
-                            "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800",
-                        }}
-                        style={styles.restaurantImage}
-                      />
-
-                      {/* Rating Badge - Top Right */}
-                      {item.rating && (
-                        <View style={styles.ratingBadge}>
-                          <Text style={styles.ratingText}>
-                            ⭐ {item.rating}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-
-                    {/* Info Section Below Image */}
-                    <View style={styles.restaurantInfo}>
-                      <View style={styles.restaurantInfoRow}>
-                        {/* Logo */}
-                        {item.logo_url ? (
-                          <Image
-                            source={{ uri: item.logo_url }}
-                            style={styles.restaurantLogo}
-                          />
-                        ) : (
-                          <View
-                            style={[
-                              styles.restaurantLogo,
-                              styles.restaurantLogoFallback,
-                            ]}
-                          >
-                            <Ionicons
-                              name="restaurant"
-                              size={18}
-                              color="#06C168"
-                            />
-                          </View>
-                        )}
-                        <View style={styles.restaurantInfoText}>
-                          <View style={styles.restaurantNameRow}>
-                            <Text
-                              style={styles.restaurantName}
-                              numberOfLines={1}
-                            >
-                              {item.restaurant_name}
-                            </Text>
-                            <VerifiedBadge size={20} />
-                          </View>
-
-                          {item.cuisine && (
-                            <Text
-                              style={styles.restaurantCuisine}
-                              numberOfLines={1}
-                            >
-                              {item.cuisine}
-                            </Text>
-                          )}
-
-                          {item.city && (
-                            <Text
-                              style={styles.restaurantCity}
-                              numberOfLines={1}
-                            >
-                              {item.city}
-                            </Text>
-                          )}
-
-                          {/* Opening/Closing Time */}
-                          {(item.opening_time || item.close_time) && (
-                            <Text style={styles.restaurantTiming}>
-                              {formatTime(item.opening_time)} -{" "}
-                              {formatTime(item.close_time)}
-                            </Text>
-                          )}
-                        </View>
-
-                        {/* Closed badge - right side */}
-                        {item.is_open === false && (
-                          <View style={styles.closedPill}>
-                            <Text style={styles.closedPillText}>Closed</Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                  </Pressable>
-                )}
-              />
-            )}
-          </>
-        ) : (
-          <>
-            {/* Foods */}
-            <Text
-              style={[styles.sectionTitle, { marginTop: 6, marginBottom: 10 }]}
-            >
-              Popular Dishes
-            </Text>
-
-            {allFoods.length === 0 ? (
-              <EmptyState />
-            ) : (
-              <FlatList
-                key="foodList"
-                data={allFoods}
-                keyExtractor={(item) => String(item.id)}
-                numColumns={2}
-                columnWrapperStyle={{ gap: 12 }}
-                scrollEnabled={false}
-                contentContainerStyle={{ gap: 12 }}
-                renderItem={({ item }) => (
-                  <Pressable
-                    onPress={() =>
-                      navigation.navigate("FoodDetail", {
-                        restaurantId: item.restaurant_id,
-                        foodId: item.id,
-                      })
-                    }
-                    style={({ pressed }) => [
-                      styles.foodCard,
-                      pressed && { opacity: 0.92 },
-                    ]}
-                  >
-                    {(() => {
-                      const regularPrice = item.regular_price ?? item.price;
-                      const restaurantName =
-                        item?.restaurants?.restaurant_name ||
-                        item?.restaurant_name ||
-                        "Restaurant";
-                      const hasOffer =
-                        item.offer_price != null &&
-                        Number(item.offer_price) > 0 &&
-                        Number(item.offer_price) < Number(regularPrice || 0);
-                      const timeTags = Array.isArray(item.available_time)
-                        ? item.available_time
-                        : typeof item.available_time === "string"
-                        ? item.available_time
-                            .split(",")
-                            .map((tag) => tag.trim())
-                            .filter(Boolean)
-                        : [];
-
-                      return (
-                        <>
-                    <View style={styles.foodImgWrap}>
-                      <Image
-                        source={{
-                          uri:
-                            item.image_url ||
-                            "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400",
-                        }}
-                        style={styles.foodImg}
-                      />
-                      {Number(item.stars || 0) > 0 && (
-                        <View style={styles.foodRatingBadge}>
-                          <Ionicons name="star" size={11} color="#FBBF24" />
-                          <Text style={styles.foodRatingText}>{item.stars}</Text>
-                        </View>
-                      )}
-                      {item.is_available === false && (
-                        <View style={styles.notAvailOverlay}>
-                          <View style={styles.notAvailPill}>
-                            <Text style={styles.notAvailText}>Unavailable</Text>
-                          </View>
-                        </View>
-                      )}
-                    </View>
-                    <View style={styles.foodBody}>
-                      <Text style={styles.foodTitle} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <Text style={styles.foodRestaurant} numberOfLines={1}>
-                        {restaurantName}
-                      </Text>
-                      <Text style={styles.foodDesc} numberOfLines={2}>
-                        {item.description || ""}
-                      </Text>
-
-                      {timeTags.length > 0 && (
-                        <View style={styles.tagsRow}>
-                          {timeTags.map((tag) => (
-                            <View key={`${item.id}-${tag}`} style={styles.tag}>
-                              <Text style={styles.tagText}>
-                                {tag.charAt(0).toUpperCase() + tag.slice(1)}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-
-                      <View style={styles.foodRow}>
-                        {hasOffer ? (
-                          <View style={styles.priceGroup}>
-                            <Text style={styles.foodPrice}>{formatPrice(item.offer_price)}</Text>
-                            <Text style={styles.oldPrice}>{formatPrice(regularPrice)}</Text>
-                          </View>
-                        ) : (
-                          <Text style={styles.foodPrice}>{formatPrice(regularPrice)}</Text>
-                        )}
-                        <Text style={styles.foodTime}>
-                          {item.prep_time ? `Prep ${item.prep_time}` : ""}
-                        </Text>
-                      </View>
-                    </View>
-                        </>
-                      );
-                    })()}
-                  </Pressable>
-                )}
-              />
-            )}
-          </>
-        )}
-
-        <View style={{ height: 90 }} />
-      </ScrollView>
+              ))}
+            </View>
+          )}
+          <View style={{ height: 90 }} />
+        </ScrollView>
+      ) : activeTab === "restaurant" ? (
+        <FlatList
+          key="restaurantList"
+          data={restaurants}
+          keyExtractor={(item, index) =>
+            String(getRestaurantId(item) ?? `restaurant-${index}`)
+          }
+          ListHeaderComponent={renderDiscoveryHeader}
+          ListEmptyComponent={EmptyState}
+          ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
+          renderItem={renderRestaurantItem}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={6}
+          maxToRenderPerBatch={6}
+          updateCellsBatchingPeriod={40}
+          windowSize={5}
+          removeClippedSubviews
+          getItemLayout={(_, index) => ({
+            length: RESTAURANT_CARD_ESTIMATED_HEIGHT,
+            offset: RESTAURANT_CARD_ESTIMATED_HEIGHT * index,
+            index,
+          })}
+          decelerationRate="fast"
+          disableIntervalMomentum
+          ListFooterComponent={<View style={{ height: 90 }} />}
+        />
+      ) : (
+        <FlatList
+          key="foodList"
+          data={allFoods}
+          keyExtractor={(item) => String(item.id)}
+          numColumns={2}
+          ListHeaderComponent={renderDiscoveryHeader}
+          ListEmptyComponent={EmptyState}
+          renderItem={renderFoodItem}
+          columnWrapperStyle={{ gap: 12 }}
+          contentContainerStyle={[styles.content, { gap: 12 }]}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={10}
+          maxToRenderPerBatch={12}
+          updateCellsBatchingPeriod={24}
+          windowSize={6}
+          removeClippedSubviews
+          decelerationRate="fast"
+          disableIntervalMomentum
+          ListFooterComponent={<View style={{ height: 90 }} />}
+        />
+      )}
 
       {/* Floating Cart */}
       {cartCount > 0 && (
@@ -852,7 +1350,9 @@ export default function HomeScreen({ navigation }) {
           onPress={() => navigation.navigate("Cart")}
           style={({ pressed }) => [styles.fabCart, pressed && { opacity: 0.9 }]}
         >
-          <Text style={styles.fabText}>🛒 {cartCount} item{cartCount !== 1 ? "s" : ""} →</Text>
+          <Text style={styles.fabText}>
+            🛒 {cartCount} item{cartCount !== 1 ? "s" : ""} →
+          </Text>
         </Pressable>
       )}
     </SafeAreaView>
@@ -974,8 +1474,8 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: "rgba(255, 255, 255, 0.9)",
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
+    paddingTop: 2,
+    paddingBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
   },
@@ -990,8 +1490,8 @@ const styles = StyleSheet.create({
   logoBox: {
     width: 48,
     height: 48,
-    borderRadius: 24,
-    backgroundColor: "#06C168",
+    borderRadius: 100,
+    backgroundColor: "#fffffff",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -1335,6 +1835,10 @@ const styles = StyleSheet.create({
   rowSub: { color: "#6B7280", marginTop: 3 },
   rowMeta: { color: "#9CA3AF", marginTop: 6, fontSize: 12 },
 
+  foodCardAnimWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
   foodCard: {
     flex: 1,
     backgroundColor: "#fff",
@@ -1347,6 +1851,7 @@ const styles = StyleSheet.create({
     elevation: 2,
     borderWidth: 1,
     borderColor: "#F1F5F9",
+    height: 258,
   },
   foodImgWrap: {
     position: "relative",
@@ -1375,28 +1880,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
   },
-  notAvailOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  notAvailPill: {
-    backgroundColor: "#EF4444",
+  foodBody: {
+    flex: 1,
+    paddingTop: 10,
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    paddingBottom: 14,
   },
-  notAvailText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  foodBody: { padding: 10 },
   foodTitle: {
     fontWeight: "700",
     color: "#111827",
@@ -1413,30 +1902,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#6B7280",
     lineHeight: 15,
-    marginBottom: 4,
-  },
-  tagsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 4,
     marginBottom: 6,
-  },
-  tag: {
-    backgroundColor: "#FFF7ED",
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 999,
-  },
-  tagText: {
-    fontSize: 10,
-    color: "#06C168",
-    fontWeight: "600",
   },
   foodRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 2,
+    marginTop: "auto",
+    paddingBottom: 2,
   },
   priceGroup: {
     flexDirection: "row",
@@ -1446,8 +1919,9 @@ const styles = StyleSheet.create({
   foodPrice: { color: "#06C168", fontWeight: "900", fontSize: 14 },
   oldPrice: {
     fontSize: 11,
-    color: "#9CA3AF",
+    color: "#DC2626",
     textDecorationLine: "line-through",
+    textDecorationColor: "#DC2626",
   },
   foodTime: { color: "#94A3B8", fontSize: 11, fontWeight: "600" },
 

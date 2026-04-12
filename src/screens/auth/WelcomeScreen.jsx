@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Animated,
   View,
   Text,
   StyleSheet,
@@ -8,26 +9,49 @@ import {
   Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import MeezoLogo from "../../components/common/MeezoLogo";
 
 const { width, height } = Dimensions.get("window");
 
 export default function WelcomeScreen({ navigation }) {
+  const pulse = React.useRef(new Animated.Value(1)).current;
+
+  React.useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1.06,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => animation.stop();
+  }, [pulse]);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
       
-      {/* Hero Image Section - Top 60% */}
+      {/* Hero Logo Section */}
       <View style={styles.heroSection}>
-        <Image
-          source={require("../../assets/images/md.jpg")}
-          style={styles.heroImage}
-          contentFit="cover"
-        />
-        {/* Soft Blur Gradient Overlay */}
         <LinearGradient
-          colors={["transparent", "transparent", "rgba(255,255,255,0.5)", "#ffffff"]}
+          colors={["#EAFBF2", "#F7FFFB", "#FFFFFF"]}
+          style={styles.heroBackground}
+        />
+        <Animated.View style={[styles.logoWrap, { transform: [{ scale: pulse }] }]}>
+          <MeezoLogo size={220} />
+        </Animated.View>
+        <LinearGradient
+          colors={["transparent", "transparent", "rgba(255,255,255,0.75)", "#ffffff"]}
           style={styles.gradientOverlay}
         />
       </View>
@@ -68,6 +92,26 @@ const styles = StyleSheet.create({
     width: "100%",
     position: "relative",
     overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  heroBackground: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  logoWrap: {
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#06C168",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 8,
   },
 
   heroImage: {

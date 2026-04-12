@@ -1,15 +1,39 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+} from "react-native";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import colors from "../../constants/colors";
 import OSMMapView from "../../components/maps/OSMMapView";
+import SkeletonBlock from "../../components/common/SkeletonBlock";
+import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 
 const GEOCODE_DEBOUNCE_MS = 700;
 const GEOCODE_TIMEOUT_MS = 6500;
 const MIN_GEOCODE_DISTANCE_METERS = 20;
+const LOCATION_TIMEOUT_MS = 9000;
+
+function buildPinMarkerHtml() {
+  return (
+    "<div style='display:flex;align-items:center;justify-content:center;width:52px;height:52px;'>" +
+    "<svg width='52' height='52' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' aria-label='delivery pin'>" +
+    "<path d='M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z' fill='#D90445'/>" +
+    "<circle cx='12' cy='9' r='3' fill='#FFFFFF'/>" +
+    "</svg>" +
+    "</div>"
+  );
+}
 
 function getDistanceMeters(lat1, lng1, lat2, lng2) {
   const toRad = (v) => (v * Math.PI) / 180;
@@ -18,13 +42,34 @@ function getDistanceMeters(lat1, lng1, lat2, lng2) {
   const dLng = toRad(lng2 - lng1);
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
 
+function withTimeout(promise, timeoutMs, timeoutMessage) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    }),
+  ]);
+}
+
+function toCoordinates(locationPayload) {
+  const latitude = Number(locationPayload?.coords?.latitude);
+  const longitude = Number(locationPayload?.coords?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+  return { latitude, longitude };
+}
+
 export default function AddressPickerScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
   const geocodeTimerRef = useRef(null);
   const lastGeocodePointRef = useRef(null);
@@ -37,125 +82,178 @@ export default function AddressPickerScreen({ navigation }) {
   const [addressCity, setAddressCity] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [fetchingLocation, setFetchingLocation] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
+  const [showUserLocationMarker, setShowUserLocationMarker] = useState(false);
 
   useEffect(() => {
     addressLabelRef.current = addressLabel;
   }, [addressLabel]);
 
-  const reverseGeocode = useCallback(async (latitude, longitude, options = {}) => {
-    const { force = false, showLoading = false } = options;
-    const cacheKey = `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+  const reverseGeocode = useCallback(
+    async (latitude, longitude, options = {}) => {
+      const { force = false, showLoading = false } = options;
+      const cacheKey = `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
 
-    const cached = geocodeCacheRef.current.get(cacheKey);
-    if (cached) {
-      setAddressLabel(cached.label);
-      setAddressCity(cached.city);
-      return;
-    }
-
-    const lastPoint = lastGeocodePointRef.current;
-    if (!force && lastPoint) {
-      const moved = getDistanceMeters(lastPoint.latitude, lastPoint.longitude, latitude, longitude);
-      if (moved < MIN_GEOCODE_DISTANCE_METERS) {
-        return;
-      }
-    }
-
-    const requestId = ++geocodeRequestIdRef.current;
-    if (showLoading) {
-      setAddressLabel("Loading address...");
-    }
-
-    try {
-      const geocodePromise = Location.reverseGeocodeAsync({ latitude, longitude });
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error("reverse_geocode_timeout")), GEOCODE_TIMEOUT_MS);
-      });
-
-      const geocode = await Promise.race([geocodePromise, timeoutPromise]);
-
-      if (requestId !== geocodeRequestIdRef.current) {
+      const cached = geocodeCacheRef.current.get(cacheKey);
+      if (cached) {
+        setAddressLabel(cached.label);
+        setAddressCity(cached.city);
         return;
       }
 
-      if (Array.isArray(geocode) && geocode.length > 0) {
-        const place = geocode[0];
-        const formattedAddress = `${place.name ? `${place.name}, ` : ""}${place.street || ""}, ${place.city || ""}`;
-        const label = formattedAddress.trim().replace(/^,|,$/g, "") || "Selected Location";
-        const city = place.city || place.subregion || place.region || "";
-
-        setAddressLabel(label);
-        setAddressCity(city);
-        lastGeocodePointRef.current = { latitude, longitude };
-
-        geocodeCacheRef.current.set(cacheKey, { label, city });
-        if (geocodeCacheRef.current.size > 50) {
-          const firstKey = geocodeCacheRef.current.keys().next().value;
-          geocodeCacheRef.current.delete(firstKey);
+      const lastPoint = lastGeocodePointRef.current;
+      if (!force && lastPoint) {
+        const moved = getDistanceMeters(
+          lastPoint.latitude,
+          lastPoint.longitude,
+          latitude,
+          longitude,
+        );
+        if (moved < MIN_GEOCODE_DISTANCE_METERS) {
+          return;
         }
-      } else {
-        setAddressLabel("Unknown location");
-        setAddressCity("");
-      }
-    } catch (error) {
-      if (requestId !== geocodeRequestIdRef.current) {
-        return;
       }
 
-      const message = String(error?.message || error || "");
-      const isTimeout = /timeout|TimeoutException|reverse_geocode_timeout/i.test(message);
-      if (isTimeout) {
-        console.warn("Reverse geocode timed out, keeping previous address");
-      } else {
-        console.error("Reverse Geocode error:", error);
+      const requestId = ++geocodeRequestIdRef.current;
+      if (showLoading) {
+        setAddressLabel("Loading address...");
       }
-      if (!addressLabelRef.current || addressLabelRef.current === "Loading address...") {
-        setAddressLabel("Could not get address details");
-        setAddressCity("");
+
+      try {
+        const geocodePromise = Location.reverseGeocodeAsync({
+          latitude,
+          longitude,
+        });
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(
+            () => reject(new Error("reverse_geocode_timeout")),
+            GEOCODE_TIMEOUT_MS,
+          );
+        });
+
+        const geocode = await Promise.race([geocodePromise, timeoutPromise]);
+
+        if (requestId !== geocodeRequestIdRef.current) {
+          return;
+        }
+
+        if (Array.isArray(geocode) && geocode.length > 0) {
+          const place = geocode[0];
+          const formattedAddress = `${place.name ? `${place.name}, ` : ""}${place.street || ""}, ${place.city || ""}`;
+          const label =
+            formattedAddress.trim().replace(/^,|,$/g, "") ||
+            "Selected Location";
+          const city = place.city || place.subregion || place.region || "";
+
+          setAddressLabel(label);
+          setAddressCity(city);
+          lastGeocodePointRef.current = { latitude, longitude };
+
+          geocodeCacheRef.current.set(cacheKey, { label, city });
+          if (geocodeCacheRef.current.size > 50) {
+            const firstKey = geocodeCacheRef.current.keys().next().value;
+            geocodeCacheRef.current.delete(firstKey);
+          }
+        } else {
+          setAddressLabel("Unknown location");
+          setAddressCity("");
+        }
+      } catch (error) {
+        if (requestId !== geocodeRequestIdRef.current) {
+          return;
+        }
+
+        const message = String(error?.message || error || "");
+        const isTimeout =
+          /timeout|TimeoutException|reverse_geocode_timeout/i.test(message);
+        if (isTimeout) {
+          console.warn("Reverse geocode timed out, keeping previous address");
+        } else {
+          console.error("Reverse Geocode error:", error);
+        }
+        if (
+          !addressLabelRef.current ||
+          addressLabelRef.current === "Loading address..."
+        ) {
+          setAddressLabel("Could not get address details");
+          setAddressCity("");
+        }
       }
-    }
-  }, []);
+    },
+    [],
+  );
 
-  const scheduleReverseGeocode = useCallback((latitude, longitude, options = {}) => {
-    if (geocodeTimerRef.current) {
-      clearTimeout(geocodeTimerRef.current);
-    }
-    geocodeTimerRef.current = setTimeout(() => {
-      reverseGeocode(latitude, longitude, options);
-    }, GEOCODE_DEBOUNCE_MS);
-  }, [reverseGeocode]);
+  const scheduleReverseGeocode = useCallback(
+    (latitude, longitude, options = {}) => {
+      if (geocodeTimerRef.current) {
+        clearTimeout(geocodeTimerRef.current);
+      }
+      geocodeTimerRef.current = setTimeout(() => {
+        reverseGeocode(latitude, longitude, options);
+      }, GEOCODE_DEBOUNCE_MS);
+    },
+    [reverseGeocode],
+  );
 
-  const getBestCurrentLocation = useCallback(async () => {
-    try {
-      const live = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Highest,
-        mayShowUserSettingsDialog: true,
+  const getReliableCurrentLocation = useCallback(
+    async ({ preferFresh = false } = {}) => {
+      let permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status !== "granted") {
+        permission = await Location.requestForegroundPermissionsAsync();
+      }
+      if (permission.status !== "granted") {
+        throw new Error("location_permission_denied");
+      }
+
+      const attempts = [
+        {
+          accuracy: Location.Accuracy.BestForNavigation,
+          timeout: LOCATION_TIMEOUT_MS,
+        },
+        { accuracy: Location.Accuracy.High, timeout: 7500 },
+        { accuracy: Location.Accuracy.Balanced, timeout: 6000 },
+      ];
+
+      for (const attempt of attempts) {
+        try {
+          const live = await withTimeout(
+            Location.getCurrentPositionAsync({
+              accuracy: attempt.accuracy,
+              mayShowUserSettingsDialog: true,
+            }),
+            attempt.timeout,
+            "location_timeout",
+          );
+
+          const parsed = toCoordinates(live);
+          if (!parsed) continue;
+
+          const reportedAccuracy = Number(live?.coords?.accuracy || 9999);
+          if (preferFresh && reportedAccuracy > 180) {
+            continue;
+          }
+
+          return parsed;
+        } catch (error) {
+          console.log(
+            "Location attempt failed:",
+            attempt.accuracy,
+            error?.message || error,
+          );
+        }
+      }
+
+      const lastKnown = await Location.getLastKnownPositionAsync({
+        maxAge: preferFresh ? 30000 : 120000,
+        requiredAccuracy: 250,
       });
-      if (live?.coords?.latitude && live?.coords?.longitude) {
-        return {
-          latitude: live.coords.latitude,
-          longitude: live.coords.longitude,
-        };
-      }
-    } catch (error) {
-      console.log("High accuracy location failed:", error);
-    }
+      const parsedLastKnown = toCoordinates(lastKnown);
+      if (parsedLastKnown) return parsedLastKnown;
 
-    const lastKnown = await Location.getLastKnownPositionAsync({
-      maxAge: 15000,
-      requiredAccuracy: 100,
-    });
-    if (lastKnown?.coords?.latitude && lastKnown?.coords?.longitude) {
-      return {
-        latitude: lastKnown.coords.latitude,
-        longitude: lastKnown.coords.longitude,
-      };
-    }
-
-    throw new Error("Unable to detect current location");
-  }, []);
+      throw new Error("Unable to detect current location");
+    },
+    [],
+  );
 
   useEffect(() => {
     (async () => {
@@ -168,21 +266,39 @@ export default function AddressPickerScreen({ navigation }) {
           return;
         }
 
-        const savedAddressStr = await AsyncStorage.getItem("@saved_address");
         let startLocation;
 
-        if (savedAddressStr) {
-          const savedAddress = JSON.parse(savedAddressStr);
-          startLocation = {
-            latitude: savedAddress.latitude,
-            longitude: savedAddress.longitude,
-          };
-          setAddressLabel(savedAddress.label || "Selected Location");
-          setAddressCity(savedAddress.city || "");
-        } else {
-          startLocation = await getBestCurrentLocation();
-          reverseGeocode(startLocation.latitude, startLocation.longitude, { force: true, showLoading: true });
+        try {
+          startLocation = await getReliableCurrentLocation({
+            preferFresh: true,
+          });
+        } catch (liveError) {
+          console.warn(
+            "Live location on entry failed, trying saved pin:",
+            liveError,
+          );
+          const savedAddressStr = await AsyncStorage.getItem("@saved_address");
+          if (savedAddressStr) {
+            const savedAddress = JSON.parse(savedAddressStr);
+            if (savedAddress?.latitude && savedAddress?.longitude) {
+              startLocation = {
+                latitude: savedAddress.latitude,
+                longitude: savedAddress.longitude,
+              };
+              if (savedAddress.label) setAddressLabel(savedAddress.label);
+              if (savedAddress.city) setAddressCity(savedAddress.city);
+            }
+          }
+
+          if (!startLocation) {
+            throw liveError;
+          }
         }
+
+        reverseGeocode(startLocation.latitude, startLocation.longitude, {
+          force: true,
+          showLoading: true,
+        });
 
         const region = {
           latitude: startLocation.latitude,
@@ -194,32 +310,55 @@ export default function AddressPickerScreen({ navigation }) {
         setInitialRegion(region);
         setCurrentCoordinate(startLocation);
         setUserLocation(startLocation);
-
+        setShowUserLocationMarker(true);
       } catch (error) {
         console.error("Location error:", error);
-        setAddressLabel("Could not fetch location");
+        if (
+          String(error?.message || "").includes("location_permission_denied")
+        ) {
+          setAddressLabel("Location permission denied");
+        } else {
+          setAddressLabel("Could not fetch location");
+        }
       } finally {
         setLoading(false);
       }
     })();
-  }, [getBestCurrentLocation, reverseGeocode]);
+  }, [getReliableCurrentLocation, reverseGeocode]);
 
-  useEffect(() => () => {
-    if (geocodeTimerRef.current) {
-      clearTimeout(geocodeTimerRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (geocodeTimerRef.current) {
+        clearTimeout(geocodeTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const handleRegionChangeComplete = (region) => {
     if (!region) return;
-    setCurrentCoordinate({ latitude: region.latitude, longitude: region.longitude });
-    scheduleReverseGeocode(region.latitude, region.longitude);
+    // Intentionally do not update selected pin by map center.
+    // Pin selection is based on explicit user tap for accuracy.
+  };
+
+  const handleMapPress = (event) => {
+    const latitude = Number(event?.nativeEvent?.coordinate?.latitude);
+    const longitude = Number(event?.nativeEvent?.coordinate?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+    setCurrentCoordinate({ latitude, longitude });
+    scheduleReverseGeocode(latitude, longitude, {
+      force: true,
+      showLoading: true,
+    });
   };
 
   const saveLocation = async () => {
     if (!currentCoordinate) return;
     setSaving(true);
     try {
+      const token = await getAccessToken();
+
       const addressData = {
         latitude: currentCoordinate.latitude,
         longitude: currentCoordinate.longitude,
@@ -227,6 +366,42 @@ export default function AddressPickerScreen({ navigation }) {
         city: addressCity,
       };
       await AsyncStorage.setItem("@saved_address", JSON.stringify(addressData));
+
+      // Persist only coordinates with existing profile address (not reverse-geocoded map address).
+      if (token) {
+        try {
+          const profileRes = await fetch(
+            `${API_BASE_URL}/cart/customer-profile`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
+          const profileJson = await profileRes.json().catch(() => ({}));
+          const existingAddress = String(
+            profileJson?.customer?.address || "",
+          ).trim();
+          const existingCity = String(profileJson?.customer?.city || "").trim();
+
+          if (existingAddress) {
+            await fetch(`${API_BASE_URL}/customer/address`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                address: existingAddress,
+                city: existingCity,
+                latitude: currentCoordinate.latitude,
+                longitude: currentCoordinate.longitude,
+              }),
+            });
+          }
+        } catch (persistError) {
+          console.warn("Coordinate sync failed:", persistError);
+        }
+      }
+
       navigation.goBack();
     } catch (error) {
       console.error("Error saving address:", error);
@@ -235,45 +410,48 @@ export default function AddressPickerScreen({ navigation }) {
     }
   };
 
-  const centerOnUser = async () => {
-    try {
-      setFetchingLocation(true);
-      const coords = await getBestCurrentLocation();
-      setUserLocation(coords);
-      setCurrentCoordinate(coords);
-
-      if (mapRef.current?.animateToRegion) {
-        mapRef.current.animateToRegion({
-          ...coords,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        });
-      } else if (mapRef.current?.panTo) {
-        mapRef.current.panTo(coords.latitude, coords.longitude, 16);
-      }
-      scheduleReverseGeocode(coords.latitude, coords.longitude, { force: true, showLoading: true });
-    } catch (error) {
-      console.error("Error centering user:", error);
-      setAddressLabel("Could not fetch current location");
-    } finally {
-      setFetchingLocation(false);
-    }
-  };
-
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#06C168" />
-        <Text style={styles.loadingText}>Fetching location...</Text>
-      </View>
+      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#06C168" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Select Delivery Address</Text>
+        </View>
+
+        <View style={styles.loadingContainer}>
+          <SkeletonBlock width="92%" height="64%" borderRadius={24} />
+          <View style={styles.loadingBottomSheet}>
+            <SkeletonBlock
+              width="44%"
+              height={14}
+              style={{ marginBottom: 10 }}
+            />
+            <SkeletonBlock
+              width="86%"
+              height={18}
+              style={{ marginBottom: 10 }}
+            />
+            <SkeletonBlock width="100%" height={50} borderRadius={12} />
+          </View>
+          <Text style={styles.loadingText}>Fetching location...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
           <Ionicons name="arrow-back" size={24} color="#06C168" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Select Delivery Address</Text>
@@ -285,44 +463,46 @@ export default function AddressPickerScreen({ navigation }) {
             ref={mapRef}
             style={styles.map}
             initialRegion={initialRegion}
+            onPress={handleMapPress}
             onRegionChangeComplete={handleRegionChangeComplete}
-            showsUserLocation={true}
+            showsUserLocation={showUserLocationMarker}
             userLocation={userLocation}
+            markers={
+              currentCoordinate
+                ? [
+                    {
+                      id: "delivery-pin",
+                      coordinate: currentCoordinate,
+                      type: "customer",
+                      title: "Pinned delivery location",
+                      emoji: "",
+                      customHtml: buildPinMarkerHtml(),
+                      iconOnly: true,
+                      iconSize: [52, 52],
+                      iconAnchor: [26, 52],
+                    },
+                  ]
+                : []
+            }
           />
         )}
-        
-        {/* Fixed Center Pin */}
-        <View style={styles.centerPinContainer} pointerEvents="none">
-          <Ionicons name="location" size={48} color="#E11D48" style={styles.pinIcon} />
-        </View>
-
-        {/* Floating precise location button */}
-        <TouchableOpacity style={styles.myLocationButton} onPress={centerOnUser} disabled={fetchingLocation}>
-          {fetchingLocation ? (
-            <ActivityIndicator size="small" color="#06C168" />
-          ) : (
-            <>
-              <Ionicons name="locate" size={18} color="#06C168" />
-              <Text style={styles.myLocationButtonText}>Find My Area</Text>
-            </>
-          )}
-        </TouchableOpacity>
       </View>
 
       {/* Bottom Panel */}
-      <View style={styles.bottomPanel}>
-        <View style={styles.addressInfoContainer}>
-          <Ionicons name="location-outline" size={24} color={colors.text} />
-          <View style={styles.addressTextContainer}>
-            <Text style={styles.addressLabel}>Delivery Location</Text>
-            <Text style={styles.addressText} numberOfLines={2}>
-              {addressLabel}
-            </Text>
-          </View>
-        </View>
+      <View
+        style={[
+          styles.bottomPanel,
+          {
+            paddingBottom: 12 + Math.max(0, insets.bottom),
+          },
+        ]}
+      >
+        <Text style={styles.pinInstructionText}>
+          Pin your delivery location on the map, then confirm.
+        </Text>
 
-        <TouchableOpacity 
-          style={[styles.confirmButton, saving && styles.confirmButtonDisabled]} 
+        <TouchableOpacity
+          style={[styles.confirmButton, saving && styles.confirmButtonDisabled]}
           onPress={saveLocation}
           disabled={saving}
         >
@@ -344,19 +524,28 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  loadingBottomSheet: {
+    width: "92%",
+    backgroundColor: "#FFFFFF",
+    marginTop: 12,
+    borderRadius: 20,
+    padding: 16,
   },
   loadingText: {
     marginTop: 10,
     color: colors.textDetails,
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: "600",
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: colors.white,
     zIndex: 1,
     elevation: 3,
@@ -364,8 +553,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
-    // Add top padding for Android SafeAreaView issue
-    paddingTop: Platform.OS === 'android' ? 40 : 15,
   },
   backButton: {
     padding: 5,
@@ -377,86 +564,38 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   mapContainer: {
-    height: "50%",
+    flex: 3.1,
     minHeight: 260,
     position: "relative",
   },
   map: {
     ...StyleSheet.absoluteFillObject,
   },
-  centerPinContainer: {
-    position: "absolute",
-    top: "50%",
-    left: "50%",
-    marginLeft: -24,
-    marginTop: -48,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  pinIcon: {
-    textShadowColor: "rgba(0, 0, 0, 0.3)",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 3,
-  },
-  myLocationButton: {
-    position: "absolute",
-    bottom: 20,
-    right: 20,
-    backgroundColor: colors.white,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    minWidth: 128,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-  },
-  myLocationButtonText: {
-    color: "#06C168",
-    fontWeight: "700",
-    fontSize: 13,
-  },
   bottomPanel: {
-    flex: 1,
+    flex: 1.1,
     backgroundColor: colors.white,
-    padding: 20,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 12,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+    justifyContent: "flex-end",
     elevation: 10,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.1,
     shadowRadius: 5,
   },
-  addressInfoContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  addressTextContainer: {
-    marginLeft: 15,
-    flex: 1,
-  },
-  addressLabel: {
-    fontSize: 12,
-    color: colors.textDetails,
-    marginBottom: 4,
-  },
-  addressText: {
-    fontSize: 16,
-    color: colors.text,
-    fontWeight: "500",
+  pinInstructionText: {
+    fontSize: 13,
+    color: "#64748B",
+    marginBottom: 8,
+    fontWeight: "600",
   },
   confirmButton: {
     backgroundColor: "#06C168",
     paddingVertical: 15,
-    borderRadius: 12,
+    borderRadius: 999,
     alignItems: "center",
   },
   confirmButtonDisabled: {
