@@ -24,7 +24,8 @@
         "buildType": "apk"
       },
       "env": {
-        "APP_ENV": "preview"
+        "APP_ENV": "preview",
+        "EAS_BUILD_DISABLE_MAVEN_CACHE": "1"
       }
     },
     "production": {
