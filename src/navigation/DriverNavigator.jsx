@@ -14,6 +14,7 @@ import DriverPendingScreen from "../screens/driver/DriverPendingScreen";
 import DriverAccountProfileScreen from "../screens/driver/DriverAccountProfileScreen";
 import DriverProfileScreen from "../screens/driver/DriverProfileScreen";
 import DriverWithdrawalsScreen from "../screens/driver/DriverWithdrawalsScreen";
+import DriverLiveLocationSync from "../components/driver/DriverLiveLocationSync";
 import WebViewScreen from "../screens/common/WebViewScreen";
 import OnboardingStep1Screen from "../screens/driver/onboarding/OnboardingStep1Screen";
 import OnboardingStep2Screen from "../screens/driver/onboarding/OnboardingStep2Screen";
@@ -157,47 +158,50 @@ function PaymentStack() {
 
 export default function DriverNavigator() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="DriverTabs" component={DriverTabs} />
-      <Stack.Screen name="DriverMap" component={DriverMapScreen} />
-      <Stack.Screen
-        name="DriverNotifications"
-        component={DriverNotificationsScreen}
-      />
-      <Stack.Screen name="History" component={DeliveryHistoryScreen} />
-      <Stack.Screen
-        name="DriverAccountProfile"
-        component={DriverAccountProfileScreen}
-      />
-      <Stack.Screen name="DriverProfile" component={DriverProfileScreen} />
-      <Stack.Screen name="WebView" component={WebViewScreen} />
-      <Stack.Screen
-        name="DriverWithdrawals"
-        component={DriverWithdrawalsScreen}
-      />
-      <Stack.Screen name="DriverDeposits" component={DriverDepositsScreen} />
-      <Stack.Screen name="DriverPending" component={DriverPendingScreen} />
-      <Stack.Screen
-        name="DriverOnboardingStep1"
-        component={OnboardingStep1Screen}
-      />
-      <Stack.Screen
-        name="DriverOnboardingStep2"
-        component={OnboardingStep2Screen}
-      />
-      <Stack.Screen
-        name="DriverOnboardingStep3"
-        component={OnboardingStep3Screen}
-      />
-      <Stack.Screen
-        name="DriverOnboardingStep4"
-        component={OnboardingStep4Screen}
-      />
-      <Stack.Screen
-        name="DriverOnboardingStep5"
-        component={OnboardingStep5Screen}
-      />
-    </Stack.Navigator>
+    <>
+      <DriverLiveLocationSync />
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="DriverTabs" component={DriverTabs} />
+        <Stack.Screen name="DriverMap" component={DriverMapScreen} />
+        <Stack.Screen
+          name="DriverNotifications"
+          component={DriverNotificationsScreen}
+        />
+        <Stack.Screen name="History" component={DeliveryHistoryScreen} />
+        <Stack.Screen
+          name="DriverAccountProfile"
+          component={DriverAccountProfileScreen}
+        />
+        <Stack.Screen name="DriverProfile" component={DriverProfileScreen} />
+        <Stack.Screen name="WebView" component={WebViewScreen} />
+        <Stack.Screen
+          name="DriverWithdrawals"
+          component={DriverWithdrawalsScreen}
+        />
+        <Stack.Screen name="DriverDeposits" component={DriverDepositsScreen} />
+        <Stack.Screen name="DriverPending" component={DriverPendingScreen} />
+        <Stack.Screen
+          name="DriverOnboardingStep1"
+          component={OnboardingStep1Screen}
+        />
+        <Stack.Screen
+          name="DriverOnboardingStep2"
+          component={OnboardingStep2Screen}
+        />
+        <Stack.Screen
+          name="DriverOnboardingStep3"
+          component={OnboardingStep3Screen}
+        />
+        <Stack.Screen
+          name="DriverOnboardingStep4"
+          component={OnboardingStep4Screen}
+        />
+        <Stack.Screen
+          name="DriverOnboardingStep5"
+          component={OnboardingStep5Screen}
+        />
+      </Stack.Navigator>
+    </>
   );
 }
 

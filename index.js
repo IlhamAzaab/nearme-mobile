@@ -1,6 +1,7 @@
 import { registerRootComponent } from "expo";
 import { LogBox } from "react-native";
 import { enableScreens } from "react-native-screens";
+import "./src/services/driverBackgroundLocationService";
 
 LogBox.ignoreLogs([
   "[expo-av]: Expo AV has been deprecated",

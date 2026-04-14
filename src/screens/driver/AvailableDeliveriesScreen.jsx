@@ -53,6 +53,7 @@ const CACHE_KEY = "available_deliveries_cache";
 const CACHE_EXPIRY = 60000; // 1 minute cache
 const DATA_REFRESH_THRESHOLD = 200; // Only fetch API data when driver moves 200m+
 const LIVE_TRACKING_INTERVAL = 3000; // 3 seconds - smooth driver marker updates
+const LIVE_DELIVERIES_REFRESH_INTERVAL_MS = 5000;
 const LOCATION_MAX_ACCURACY_METERS = 250;
 const LOCATION_MAX_RETRIES = 3;
 const LOCATION_RETRY_DELAY_MS = 1200;
@@ -215,6 +216,7 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   const abortControllerRef = useRef(null);
   const locationIntervalRef = useRef(null);
   const lastFetchLocationRef = useRef(null);
+  const driverLocationRef = useRef(null);
   const fetchPendingDeliveriesRef = useRef(null);
   const locationSubscriptionRef = useRef(null);
   const fetchInFlightRef = useRef(false);
@@ -562,6 +564,10 @@ export default function AvailableDeliveriesScreen({ navigation }) {
     [hasCompletedFirstFetch],
   );
 
+  useEffect(() => {
+    driverLocationRef.current = driverLocation;
+  }, [driverLocation]);
+
   // ============================================================================
   // CHECK DELIVERING MODE
   // ============================================================================
@@ -760,6 +766,25 @@ export default function AvailableDeliveriesScreen({ navigation }) {
 
   // Store fetch function in ref
   fetchPendingDeliveriesRef.current = fetchPendingDeliveriesWithLocation;
+
+  useEffect(() => {
+    if (!isFocused || !isLocationResolved) return;
+
+    const interval = setInterval(() => {
+      if (!isFocusedRef.current) return;
+
+      const location =
+        (isValidLocation(driverLocationRef.current) &&
+          driverLocationRef.current) ||
+        lastFetchLocationRef.current;
+
+      if (!isValidLocation(location)) return;
+
+      fetchPendingDeliveriesRef.current?.(location, true, "live_location_tick");
+    }, LIVE_DELIVERIES_REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [isFocused, isLocationResolved]);
 
   useEffect(() => {
     setIsSocketConnected(Boolean(isConnected));

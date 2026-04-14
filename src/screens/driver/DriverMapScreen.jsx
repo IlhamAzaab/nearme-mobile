@@ -59,6 +59,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 const LIVE_TRACKING_INTERVAL = 3000; // 3s - smooth driver marker updates
 const DATA_REFRESH_THRESHOLD = 100; // 100m - only fetch API data after this
+const LIVE_DATA_REFRESH_INTERVAL_MS = 5000;
 const DEFAULT_LOCATION = { latitude: 8.5017, longitude: 81.186 };
 const DRIVER_MAP_CACHE_KEY = "driver_map_cache";
 const DRIVER_MAP_CACHE_TTL_MS = 120000;
@@ -547,6 +548,23 @@ export default function DriverMapScreen({ route, navigation }) {
       setLoading(false);
     }
   };
+
+  useEffect(
+    function () {
+      if (!isTracking) return;
+
+      const interval = setInterval(function () {
+        const refreshLocation =
+          driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+        fetchPickupsAndDeliveries(refreshLocation);
+      }, LIVE_DATA_REFRESH_INTERVAL_MS);
+
+      return function () {
+        clearInterval(interval);
+      };
+    },
+    [isTracking, driverLocation],
+  );
 
   // ============================================================================
   // ROUTE + TARGET LOCATION

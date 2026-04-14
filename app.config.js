@@ -12,7 +12,11 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.nearme.mobile",
       infoPlist: {
-        UIBackgroundModes: ["remote-notification"],
+        UIBackgroundModes: ["remote-notification", "location"],
+        NSLocationWhenInUseUsageDescription:
+          "Meezo uses your location to show nearby deliveries and navigation updates.",
+        NSLocationAlwaysAndWhenInUseUsageDescription:
+          "Meezo needs background location to keep customer tracking accurate during active deliveries.",
       },
     },
     android: {
@@ -33,6 +37,11 @@ export default {
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
         "android.permission.USE_FULL_SCREEN_INTENT",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
       ],
     },
     web: {
@@ -61,6 +70,13 @@ export default {
           // Used by the urgent_orders notification channel so background/killed
           // FCM notifications ring with the custom sound (requires a new build).
           sounds: ["./assets/sounds/alarm.mp3"],
+        },
+      ],
+      [
+        "expo-location",
+        {
+          isAndroidBackgroundLocationEnabled: true,
+          isIosBackgroundLocationEnabled: true,
         },
       ],
       [

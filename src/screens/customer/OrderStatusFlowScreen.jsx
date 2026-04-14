@@ -1884,17 +1884,20 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
           cacheDriverInfo(orderId, data.driver);
         }
 
+        const driverLat = Number(data.driverLocation?.latitude);
+        const driverLng = Number(data.driverLocation?.longitude);
+        const driverHeading = Number(
+          data.driverLocation?.heading ??
+            data.driverLocation?.bearing ??
+            data.driverLocation?.course ??
+            0,
+        );
         const parsedDriverLocation =
-          data.driverLocation?.latitude && data.driverLocation?.longitude
+          Number.isFinite(driverLat) && Number.isFinite(driverLng)
             ? {
-                lat: parseFloat(data.driverLocation.latitude),
-                lng: parseFloat(data.driverLocation.longitude),
-                heading: Number(
-                  data.driverLocation.heading ??
-                    data.driverLocation.bearing ??
-                    data.driverLocation.course ??
-                    0,
-                ),
+                lat: driverLat,
+                lng: driverLng,
+                heading: Number.isFinite(driverHeading) ? driverHeading : 0,
               }
             : null;
 
@@ -1902,11 +1905,13 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
           setDriverLocation(parsedDriverLocation);
         }
 
+        const customerLat = Number(data.customerLocation?.latitude);
+        const customerLng = Number(data.customerLocation?.longitude);
         const parsedCustomerLocation =
-          data.customerLocation?.latitude && data.customerLocation?.longitude
+          Number.isFinite(customerLat) && Number.isFinite(customerLng)
             ? {
-                lat: parseFloat(data.customerLocation.latitude),
-                lng: parseFloat(data.customerLocation.longitude),
+                lat: customerLat,
+                lng: customerLng,
               }
             : null;
 
@@ -1920,13 +1925,12 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
           }
         }
 
-        if (
-          data.restaurantLocation?.latitude &&
-          data.restaurantLocation?.longitude
-        ) {
+        const restaurantLat = Number(data.restaurantLocation?.latitude);
+        const restaurantLng = Number(data.restaurantLocation?.longitude);
+        if (Number.isFinite(restaurantLat) && Number.isFinite(restaurantLng)) {
           setRestaurantLocation({
-            lat: parseFloat(data.restaurantLocation.latitude),
-            lng: parseFloat(data.restaurantLocation.longitude),
+            lat: restaurantLat,
+            lng: restaurantLng,
           });
         }
 
@@ -2026,7 +2030,9 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
 
     poll();
     const intervalMs =
-      currentStatus === "on_the_way" ? ON_THE_WAY_POLL_INTERVAL : POLL_INTERVAL;
+      currentStatus === "on_the_way" || currentStatus === "at_customer"
+        ? ON_THE_WAY_POLL_INTERVAL
+        : POLL_INTERVAL;
     pollRef.current = setInterval(poll, intervalMs);
     return () => clearInterval(pollRef.current);
   }, [orderId, loading, currentStatus, getBikeEtaMinutes]);

@@ -62,6 +62,7 @@ const DRIVER_STATUS_ENDPOINT = "/driver/working-hours-status";
 const NEARBY_PAGE_SIZE = 5;
 const DASHBOARD_CACHE_KEY = ["driver", "dashboard", "snapshot"];
 const AVAILABLE_SYNC_MOVEMENT_THRESHOLD = 200;
+const LIVE_LOCATION_NEARBY_REFRESH_INTERVAL_MS = 5000;
 const DRIVER_STATUS_FOCUS_SIGNAL_KEY = "driver_status_focus_signal";
 const DRIVER_STATUS_FOCUS_WINDOW_MS = 120000;
 const DRIVER_PROFILE_CACHE_KEY = "driver_profile_cache";
@@ -615,62 +616,68 @@ export default function DashboardScreen({ navigation }) {
   // FETCH DASHBOARD DATA
   // ============================================================================
 
-  const resolveVerifiedDriverLocation = useCallback(async () => {
-    if (isValidLocation(driverLocationRef.current)) {
-      return driverLocationRef.current;
-    }
+  const resolveVerifiedDriverLocation = useCallback(
+    async (forceFresh = false) => {
+      if (!forceFresh && isValidLocation(driverLocationRef.current)) {
+        return driverLocationRef.current;
+      }
 
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== "granted") {
-      return null;
-    }
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        return null;
+      }
 
-    for (let attempt = 1; attempt <= LOCATION_MAX_RETRIES; attempt += 1) {
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.BestForNavigation,
-        maximumAge: 0,
-        mayShowUserSettingsDialog: true,
+      for (let attempt = 1; attempt <= LOCATION_MAX_RETRIES; attempt += 1) {
+        const position = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.BestForNavigation,
+          maximumAge: 0,
+          mayShowUserSettingsDialog: true,
+        });
+
+        const candidate = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        };
+        const accuracy = Number(position.coords.accuracy || Infinity);
+
+        if (
+          isValidLocation(candidate) &&
+          accuracy <= LOCATION_MAX_ACCURACY_METERS
+        ) {
+          return candidate;
+        }
+
+        if (attempt < LOCATION_MAX_RETRIES) {
+          await sleep(LOCATION_RETRY_DELAY_MS);
+        }
+      }
+
+      const lastKnown = await Location.getLastKnownPositionAsync({
+        maxAge: 10000,
+        requiredAccuracy: LOCATION_MAX_ACCURACY_METERS,
       });
 
-      const candidate = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-      };
-      const accuracy = Number(position.coords.accuracy || Infinity);
-
-      if (
-        isValidLocation(candidate) &&
-        accuracy <= LOCATION_MAX_ACCURACY_METERS
-      ) {
-        return candidate;
+      if (lastKnown) {
+        const fallback = {
+          latitude: lastKnown.coords.latitude,
+          longitude: lastKnown.coords.longitude,
+        };
+        if (isValidLocation(fallback)) {
+          return fallback;
+        }
       }
 
-      if (attempt < LOCATION_MAX_RETRIES) {
-        await sleep(LOCATION_RETRY_DELAY_MS);
-      }
-    }
-
-    const lastKnown = await Location.getLastKnownPositionAsync({
-      maxAge: 10000,
-      requiredAccuracy: LOCATION_MAX_ACCURACY_METERS,
-    });
-
-    if (lastKnown) {
-      const fallback = {
-        latitude: lastKnown.coords.latitude,
-        longitude: lastKnown.coords.longitude,
-      };
-      if (isValidLocation(fallback)) {
-        return fallback;
-      }
-    }
-
-    return null;
-  }, []);
+      return null;
+    },
+    [],
+  );
 
   const syncAvailableDeliveriesInBackground = useCallback(
-    async (token, reason = "dashboard_open") => {
+    async (token, reason = "dashboard_open", options = {}) => {
       if (nearbySyncInFlightRef.current) return;
+
+      const forceSync = Boolean(options?.forceSync);
+      const forceFreshLocation = Boolean(options?.forceFreshLocation);
 
       const forceReasons = new Set([
         "new_delivery",
@@ -678,7 +685,8 @@ export default function DashboardScreen({ navigation }) {
         "delivery_accepted",
       ]);
 
-      const currentLocation = await resolveVerifiedDriverLocation();
+      const currentLocation =
+        await resolveVerifiedDriverLocation(forceFreshLocation);
       if (!isValidLocation(currentLocation)) {
         setNearbySyncError("Unable to confirm your location.");
         return;
@@ -692,6 +700,7 @@ export default function DashboardScreen({ navigation }) {
         : Infinity;
 
       const shouldSync =
+        forceSync ||
         forceReasons.has(reason) ||
         !hasNearbyInitialSyncCompleted ||
         movedDistance >= AVAILABLE_SYNC_MOVEMENT_THRESHOLD;
@@ -949,6 +958,22 @@ export default function DashboardScreen({ navigation }) {
       clearInterval(dataInterval);
     };
   }, [fetchDriverProfile, fetchStatusInfo, fetchDashboardData, isFocused]);
+
+  useEffect(() => {
+    if (!isFocused) return;
+
+    const interval = setInterval(async () => {
+      const token = await getAccessToken();
+      if (!token) return;
+
+      syncAvailableDeliveriesInBackground(token, "live_location_tick", {
+        forceSync: true,
+        forceFreshLocation: true,
+      });
+    }, LIVE_LOCATION_NEARBY_REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [isFocused, syncAvailableDeliveriesInBackground]);
 
   useEffect(() => {
     if (!on || !off) return;
