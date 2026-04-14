@@ -9,12 +9,14 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { getAccessToken } from "../../lib/authStorage";
+import { useAuth } from "../../app/providers/AuthProvider";
+import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken, persistAuthSession } from "../../lib/authStorage";
 import MeezoLogo from "../../components/common/MeezoLogo";
+import FloatingLabelInput from "../../components/common/FloatingLabelInput";
 import Svg, { Path } from "react-native-svg";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -48,24 +50,16 @@ const LockIcon = ({ size = 20, color = "#9CA3AF" }) => (
   </Svg>
 );
 
-const CityIcon = ({ size = 20, color = "#9CA3AF" }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path
-      d="M3 21h18v-2H3v2zm2-3h4v-8H5v8zm5 0h4V4h-4v14zm5 0h4v-11h-4v11z"
-      fill={color}
-    />
-  </Svg>
-);
-
-export default function CompleteProfileScreen({ navigation, route }) {
-  const { userId, accessToken, prefillPhone } = route.params || {};
+export default function CompleteProfileScreen({ route }) {
+  const { refreshAuthState, markProfileCompleted } = useAuth();
+  const { userId, accessToken } = route.params || {};
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
-    city: "",
   });
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const shakeX = useRef(new Animated.Value(0)).current;
 
@@ -111,10 +105,9 @@ export default function CompleteProfileScreen({ navigation, route }) {
     if (
       !formData.name.trim() ||
       !formData.email.trim() ||
-      !formData.password.trim() ||
-      !formData.city.trim()
+      !formData.password.trim()
     ) {
-      setError("Name, email, password and city are required");
+      setError("Name, email and password are required");
       triggerShake();
       return;
     }
@@ -140,21 +133,57 @@ export default function CompleteProfileScreen({ navigation, route }) {
         return;
       }
 
-      navigation.navigate("CompleteProfileLocation", {
-        userId,
-        accessToken: effectiveAccessToken,
-        profileData: {
+      setSaving(true);
+
+      const completeRes = await fetch(`${API_BASE_URL}/auth/complete-profile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${effectiveAccessToken}`,
+        },
+        body: JSON.stringify({
           name: formData.name.trim(),
           email: normalizedEmail,
           password: formData.password.trim(),
-          city: formData.city.trim(),
-          phone: String(prefillPhone || "").trim(),
-        },
+        }),
       });
+
+      const completeData = await completeRes.json().catch(() => ({}));
+
+      if (!completeRes.ok) {
+        setError(completeData?.message || "Failed to complete profile");
+        triggerShake();
+        return;
+      }
+
+      const returnedToken =
+        completeData?.data?.token ||
+        completeData?.token ||
+        effectiveAccessToken;
+      const resolvedUserId =
+        userId || completeData?.data?.id || completeData?.id || null;
+
+      await persistAuthSession(
+        {
+          token: returnedToken,
+          role: "customer",
+          userId: resolvedUserId,
+          userName: formData.name.trim(),
+        },
+        {
+          userEmail: normalizedEmail,
+          profileCompleted: true,
+        },
+      );
+
+      await markProfileCompleted();
+      await refreshAuthState();
     } catch (err) {
       console.error("Profile completion error:", err);
       setError("Network error. Please try again.");
       triggerShake();
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -208,10 +237,12 @@ export default function CompleteProfileScreen({ navigation, route }) {
               </Svg>
             </View>
 
-            <View style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}>
+            <View
+              style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}
+            >
               <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
                 <Text style={styles.cardTitle}>Profile Setup</Text>
-                <Text style={styles.cardSub}>Step 1 of 2: account details</Text>
+                <Text style={styles.cardSub}>Account details</Text>
 
                 {!!error && (
                   <View style={styles.errorBox}>
@@ -219,68 +250,44 @@ export default function CompleteProfileScreen({ navigation, route }) {
                   </View>
                 )}
 
-                <View style={styles.inputWrap}>
-                  <View style={styles.inputIconWrap}>
-                    <UserIcon size={20} color="#9CA3AF" />
-                  </View>
-                  <TextInput
-                    value={formData.name}
-                    onChangeText={(v) => handleChange("name", v)}
-                    placeholder="Enter your full name"
-                    placeholderTextColor="#B0B8C4"
-                    autoCapitalize="words"
-                    style={styles.input}
-                  />
-                </View>
+                <FloatingLabelInput
+                  label="Username"
+                  value={formData.name}
+                  onChangeText={(v) => handleChange("name", v)}
+                  inactivePlaceholder="Username"
+                  activePlaceholder="Enter your name"
+                  autoCapitalize="words"
+                  leftIcon={<UserIcon size={20} color="#9CA3AF" />}
+                />
 
-                <View style={[styles.inputWrap, { marginTop: 14 }]}>
-                  <View style={styles.inputIconWrap}>
-                    <EmailIcon size={20} color="#9CA3AF" />
-                  </View>
-                  <TextInput
-                    value={formData.email}
-                    onChangeText={(v) => handleChange("email", v)}
-                    placeholder="you@example.com"
-                    placeholderTextColor="#B0B8C4"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    style={styles.input}
-                  />
-                </View>
+                <FloatingLabelInput
+                  label="Email"
+                  value={formData.email}
+                  onChangeText={(v) => handleChange("email", v)}
+                  inactivePlaceholder="Email"
+                  activePlaceholder="Eg: customer1@gmail.com"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  leftIcon={<EmailIcon size={20} color="#9CA3AF" />}
+                />
 
-                <View style={[styles.inputWrap, { marginTop: 14 }]}>
-                  <View style={styles.inputIconWrap}>
-                    <LockIcon size={20} color="#9CA3AF" />
-                  </View>
-                  <TextInput
-                    value={formData.password}
-                    onChangeText={(v) => handleChange("password", v)}
-                    placeholder="Minimum 6 characters"
-                    placeholderTextColor="#B0B8C4"
-                    autoCapitalize="none"
-                    secureTextEntry
-                    style={styles.input}
-                  />
-                </View>
-
-                <View style={[styles.inputWrap, { marginTop: 14 }]}>
-                  <View style={styles.inputIconWrap}>
-                    <CityIcon size={20} color="#9CA3AF" />
-                  </View>
-                  <TextInput
-                    value={formData.city}
-                    onChangeText={(v) => handleChange("city", v)}
-                    placeholder="Enter your city"
-                    placeholderTextColor="#B0B8C4"
-                    autoCapitalize="words"
-                    style={styles.input}
-                  />
-                </View>
+                <FloatingLabelInput
+                  label="Password"
+                  value={formData.password}
+                  onChangeText={(v) => handleChange("password", v)}
+                  inactivePlaceholder="Password"
+                  activePlaceholder="Minimum 6 characters"
+                  autoCapitalize="none"
+                  secureTextEntry
+                  leftIcon={<LockIcon size={20} color="#9CA3AF" />}
+                />
 
                 <Pressable
                   onPress={handleSubmit}
+                  disabled={saving}
                   style={({ pressed }) => [
                     styles.primaryBtn,
+                    saving && { opacity: 0.8 },
                     pressed && styles.pressed,
                   ]}
                 >
@@ -290,7 +297,9 @@ export default function CompleteProfileScreen({ navigation, route }) {
                     end={{ x: 1, y: 0 }}
                     style={styles.primaryBtnGradient}
                   >
-                    <Text style={styles.primaryBtnText}>Continue to Map Pin</Text>
+                    <Text style={styles.primaryBtnText}>
+                      {saving ? "Saving..." : "Complete Profile"}
+                    </Text>
                   </LinearGradient>
                 </Pressable>
               </View>
@@ -414,29 +423,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   errorText: { color: "#DC2626", fontWeight: "700", fontSize: 13 },
-  inputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: "#E8ECF0",
-    backgroundColor: "#F7F8FA",
-    height: 56,
-    paddingHorizontal: 14,
-  },
-  inputIconWrap: {
-    width: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 4,
-  },
-  input: {
-    flex: 1,
-    color: "#111827",
-    fontSize: 15,
-    paddingHorizontal: 8,
-    fontWeight: "500",
-  },
   primaryBtn: {
     marginTop: 24,
     borderRadius: 16,

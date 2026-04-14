@@ -33,6 +33,7 @@ import {
   fetchPublicFeeConfig,
   resolveMinimumSubtotal,
 } from "../../lib/feeConfig";
+import { fetchOSRMRoute } from "../../utils/osrmClient";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -49,22 +50,48 @@ const CHECKOUT_ADDRESS_PIN_HTML =
   "<circle cx='12' cy='9' r='3' fill='#FFFFFF'/>" +
   "</svg>" +
   "</div>";
+const DEFAULT_CHECKOUT_POSITION = {
+  latitude: 7.8731,
+  longitude: 80.7718,
+};
+
+function hasValidCoordinates(latitude, longitude) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
 
 // ============================================================================
 // OSRM route distance
 // ============================================================================
 async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
   try {
-    const url = `https://router.project-osrm.org/route/v1/foot/${lon1},${lat1};${lon2},${lat2}?overview=false`;
-    const res = await fetch(url);
-    const data = await res.json();
+    const route = await fetchOSRMRoute({
+      from: { latitude: lat1, longitude: lon1 },
+      to: { latitude: lat2, longitude: lon2 },
+      profile: "foot",
+      retries: 2,
+      timeoutMs: 10000,
+      overview: "false",
+      geometries: "geojson",
+    });
 
-    if (data.code === "Ok" && data.routes?.length) {
-      const r = data.routes[0];
+    if (
+      route &&
+      Number.isFinite(route.distance) &&
+      Number.isFinite(route.duration)
+    ) {
       return {
         success: true,
-        distance: r.distance / 1000,
-        duration: r.duration / 60,
+        distance: route.distance / 1000,
+        duration: route.duration / 60,
       };
     }
     return { success: false, error: "No route found" };
@@ -124,10 +151,9 @@ export default function CheckoutScreen({ route, navigation }) {
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
 
-  const [position, setPosition] = useState({
-    latitude: 7.8731,
-    longitude: 80.7718,
-  });
+  const [position, setPosition] = useState(DEFAULT_CHECKOUT_POSITION);
+  const [hasExplicitDeliveryLocation, setHasExplicitDeliveryLocation] =
+    useState(false);
 
   const [isMapEditMode, setIsMapEditMode] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
@@ -190,21 +216,32 @@ export default function CheckoutScreen({ route, navigation }) {
           const savedStr = await AsyncStorage.getItem("@saved_address");
           if (savedStr) {
             const saved = JSON.parse(savedStr);
-            if (saved.latitude && saved.longitude) {
+            if (hasValidCoordinates(saved.latitude, saved.longitude)) {
               setPosition({
-                latitude: saved.latitude,
-                longitude: saved.longitude,
+                latitude: Number(saved.latitude),
+                longitude: Number(saved.longitude),
               });
+              setHasExplicitDeliveryLocation(true);
+              if (saved.label) {
+                setAddress(String(saved.label));
+              }
+              if (saved.city) {
+                setCity(String(saved.city));
+              }
               // Animate map to new saved pin location
               if (mapRef.current?.animateToRegion) {
                 mapRef.current.animateToRegion({
-                  latitude: saved.latitude,
-                  longitude: saved.longitude,
+                  latitude: Number(saved.latitude),
+                  longitude: Number(saved.longitude),
                   latitudeDelta: 0.01,
                   longitudeDelta: 0.01,
                 });
               } else if (mapRef.current?.panTo) {
-                mapRef.current.panTo(saved.latitude, saved.longitude, 15);
+                mapRef.current.panTo(
+                  Number(saved.latitude),
+                  Number(saved.longitude),
+                  15,
+                );
               }
             }
           }
@@ -247,6 +284,7 @@ export default function CheckoutScreen({ route, navigation }) {
       };
 
       setPosition(newPosition);
+      setHasExplicitDeliveryLocation(true);
 
       // Animate map to new location
       if (mapRef.current) {
@@ -296,10 +334,17 @@ export default function CheckoutScreen({ route, navigation }) {
   useEffect(() => {
     const run = async () => {
       if (
+        !hasExplicitDeliveryLocation ||
         !position ||
         !cart?.restaurant?.latitude ||
-        !cart?.restaurant?.longitude
+        !cart?.restaurant?.longitude ||
+        !hasValidCoordinates(position.latitude, position.longitude) ||
+        !hasValidCoordinates(
+          cart.restaurant.latitude,
+          cart.restaurant.longitude,
+        )
       ) {
+        setRouteLoading(false);
         setRouteInfo(null);
         return;
       }
@@ -320,7 +365,12 @@ export default function CheckoutScreen({ route, navigation }) {
     };
 
     run();
-  }, [position, cart?.restaurant?.latitude, cart?.restaurant?.longitude]);
+  }, [
+    hasExplicitDeliveryLocation,
+    position,
+    cart?.restaurant?.latitude,
+    cart?.restaurant?.longitude,
+  ]);
 
   const fetchCheckoutData = async () => {
     try {
@@ -370,28 +420,46 @@ export default function CheckoutScreen({ route, navigation }) {
       setCart(selected);
 
       if (profileData.customer) {
-        setPhone(profileData.customer.phone || "");
+        const profilePhone = profileData.customer.phone || "";
+        const profileAddress = String(
+          profileData.customer.address || "",
+        ).trim();
+        const profileCity = String(profileData.customer.city || "").trim();
+        const profileLat = Number(profileData.customer.latitude);
+        const profileLng = Number(profileData.customer.longitude);
+
+        setPhone(profilePhone);
+        setAddress(profileAddress);
+        setCity(profileCity);
+        setHasExplicitDeliveryLocation(false);
 
         // Prefer AsyncStorage saved address if user updated it
         const savedAddressStr = await AsyncStorage.getItem("@saved_address");
         if (savedAddressStr) {
           const saved = JSON.parse(savedAddressStr);
-          setAddress(profileData.customer.address || "");
-          setCity(profileData.customer.city || "");
-          if (saved.latitude && saved.longitude) {
+          if (saved.label && !profileAddress) {
+            setAddress(String(saved.label));
+          }
+          if (saved.city && !profileCity) {
+            setCity(String(saved.city));
+          }
+          if (hasValidCoordinates(saved.latitude, saved.longitude)) {
             setPosition({
-              latitude: saved.latitude,
-              longitude: saved.longitude,
+              latitude: Number(saved.latitude),
+              longitude: Number(saved.longitude),
             });
+            setHasExplicitDeliveryLocation(true);
+          } else if (hasValidCoordinates(profileLat, profileLng)) {
+            setPosition({ latitude: profileLat, longitude: profileLng });
+            setHasExplicitDeliveryLocation(true);
           }
         } else {
-          setAddress(profileData.customer.address || "");
-          setCity(profileData.customer.city || "");
-          if (profileData.customer.latitude && profileData.customer.longitude) {
+          if (hasValidCoordinates(profileLat, profileLng)) {
             setPosition({
-              latitude: parseFloat(profileData.customer.latitude),
-              longitude: parseFloat(profileData.customer.longitude),
+              latitude: profileLat,
+              longitude: profileLng,
             });
+            setHasExplicitDeliveryLocation(true);
           }
         }
       }
@@ -431,6 +499,7 @@ export default function CheckoutScreen({ route, navigation }) {
       setAddress(newAddress);
       setCity(newCity);
       setPosition(newPosition);
+      setHasExplicitDeliveryLocation(true);
       setError("");
     } catch (e) {
       setError(e.message || "Save failed");
@@ -439,41 +508,23 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
-  const resolveDeliveryCity = async () => {
-    const currentCity = String(city || "").trim();
-    if (currentCity) return currentCity;
-
-    try {
-      const [geocode] = await Location.reverseGeocodeAsync({
-        latitude: position.latitude,
-        longitude: position.longitude,
-      });
-
-      const geocodeCity =
-        geocode?.city || geocode?.subregion || geocode?.region || "";
-      if (geocodeCity) return geocodeCity;
-    } catch (error) {
-      console.log("Resolve city failed:", error);
-    }
-
-    const addressParts = String(address || "")
-      .split(",")
-      .map((part) => part.trim())
-      .filter(Boolean);
-    if (addressParts.length > 1) return addressParts[addressParts.length - 1];
-
-    return "Unknown";
-  };
-
   const handlePlaceOrder = async () => {
     try {
-      if (!phone || !address || !position)
-        throw new Error("Please fill address & location");
+      if (!phone) throw new Error("Phone number is required");
+      if (!String(address || "").trim())
+        throw new Error("Delivery address is required");
+      if (!String(city || "").trim()) throw new Error("City is required");
+      if (!hasExplicitDeliveryLocation || !position)
+        throw new Error("Please set delivery pin before placing order");
       if (!cart) throw new Error("Cart missing");
 
       const subtotal = Number(cart.cart_total) || 0;
       if (!routeInfo)
         throw new Error("Please wait for delivery fee calculation");
+      if (!isDistanceWithinLimit)
+        throw new Error(
+          `This location is outside delivery range (${maxOrderDistanceKm} km).`,
+        );
 
       const requiredMinSubtotal = resolveMinimumSubtotal(
         routeInfo.distance,
@@ -486,7 +537,7 @@ export default function CheckoutScreen({ route, navigation }) {
       setError("");
 
       const token = await getAccessToken();
-      const deliveryCity = await resolveDeliveryCity();
+      const deliveryCity = String(city || "").trim();
 
       const res = await fetch(`${API_BASE_URL}/orders/place`, {
         method: "POST",
@@ -505,6 +556,10 @@ export default function CheckoutScreen({ route, navigation }) {
           estimated_duration_min:
             estimatedDeliveryWindow?.midpoint ||
             Math.ceil(routeInfo.duration || 0),
+          checkout_subtotal: subtotal,
+          checkout_service_fee: serviceFee,
+          checkout_delivery_fee: deliveryFee,
+          checkout_total_amount: finalTotal,
         }),
       });
 
@@ -598,6 +653,17 @@ export default function CheckoutScreen({ route, navigation }) {
     [routeInfo, feeConfig],
   );
 
+  const maxOrderDistanceKm = useMemo(() => {
+    const maxDistance = Number(feeConfig?.max_order_distance_km);
+    return Number.isFinite(maxDistance) ? maxDistance : 25;
+  }, [feeConfig]);
+
+  const isDistanceWithinLimit = useMemo(() => {
+    if (!routeInfo?.distance) return false;
+    const distance = Number(routeInfo.distance);
+    return Number.isFinite(distance) && distance <= maxOrderDistanceKm;
+  }, [routeInfo, maxOrderDistanceKm]);
+
   const isSubtotalValid = subtotal >= requiredMinSubtotal;
 
   const totalAmount = useMemo(() => {
@@ -610,6 +676,24 @@ export default function CheckoutScreen({ route, navigation }) {
     // keep priority off for now (you can add toggle later)
     return totalAmount;
   }, [totalAmount]);
+
+  const isLocationDetailsComplete = useMemo(
+    () =>
+      Boolean(phone) &&
+      Boolean(String(address || "").trim()) &&
+      Boolean(String(city || "").trim()) &&
+      hasExplicitDeliveryLocation,
+    [phone, address, city, hasExplicitDeliveryLocation],
+  );
+
+  const isPlaceOrderDisabled =
+    !isSubtotalValid ||
+    !isDistanceWithinLimit ||
+    deliveryFee === null ||
+    routeLoading ||
+    placing ||
+    !isLocationDetailsComplete ||
+    !routeInfo;
 
   // ✅ Loading / Error
   if (loading) {
@@ -782,9 +866,11 @@ export default function CheckoutScreen({ route, navigation }) {
               <Text style={styles.value}>
                 {routeLoading
                   ? "Calculating..."
-                  : estimatedDeliveryWindow
-                    ? `${estimatedDeliveryWindow.min}-${estimatedDeliveryWindow.max} mins`
-                    : "—"}
+                  : !hasExplicitDeliveryLocation
+                    ? "Set your delivery pin"
+                    : estimatedDeliveryWindow
+                      ? `${estimatedDeliveryWindow.min}-${estimatedDeliveryWindow.max} mins`
+                      : "—"}
               </Text>
             </View>
           </View>
@@ -823,7 +909,9 @@ export default function CheckoutScreen({ route, navigation }) {
                 >
                   {routeInfo
                     ? `${routeInfo.distance.toFixed(1)} km away`
-                    : "Calculating..."}
+                    : hasExplicitDeliveryLocation
+                      ? "Calculating..."
+                      : "Set pin to calculate"}
                 </Text>
               </View>
               <Text style={[styles.muted, { fontSize: 13, marginTop: 4 }]}>
@@ -959,6 +1047,32 @@ export default function CheckoutScreen({ route, navigation }) {
           </View>
         )}
 
+        {!hasExplicitDeliveryLocation && (
+          <View style={styles.warn}>
+            <Text style={styles.warnText}>
+              Set your delivery pin for first order before placing this order.
+            </Text>
+          </View>
+        )}
+
+        {hasExplicitDeliveryLocation && !String(city || "").trim() && (
+          <View style={styles.warn}>
+            <Text style={styles.warnText}>
+              City is required to place the order.
+            </Text>
+          </View>
+        )}
+
+        {routeInfo && !isDistanceWithinLimit && (
+          <View style={styles.warn}>
+            <Text style={styles.warnText}>
+              Delivery not available for this distance (
+              {routeInfo.distance.toFixed(1)}
+              km). Maximum allowed is {maxOrderDistanceKm} km.
+            </Text>
+          </View>
+        )}
+
         {!!error && (
           <View style={styles.errBox}>
             <Text style={styles.errBoxText}>{error}</Text>
@@ -975,45 +1089,30 @@ export default function CheckoutScreen({ route, navigation }) {
       >
         <Pressable
           onPress={handlePlaceOrder}
-          disabled={
-            !isSubtotalValid ||
-            deliveryFee === null ||
-            routeLoading ||
-            placing ||
-            !phone ||
-            !address
-          }
-          style={[
-            styles.cta,
-            (!isSubtotalValid ||
-              deliveryFee === null ||
-              routeLoading ||
-              placing ||
-              !phone ||
-              !address) &&
-              styles.ctaDisabled,
-          ]}
+          disabled={isPlaceOrderDisabled}
+          style={[styles.cta, isPlaceOrderDisabled && styles.ctaDisabled]}
         >
           <Text
             style={[
               styles.ctaText,
-              (!isSubtotalValid ||
-                deliveryFee === null ||
-                routeLoading ||
-                placing ||
-                !phone ||
-                !address) && { color: "#6EDE9A" },
+              isPlaceOrderDisabled && { color: "#6EDE9A" },
             ]}
           >
             {placing
               ? "Placing..."
               : routeLoading
                 ? "Calculating..."
-                : !isSubtotalValid
-                  ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
-                  : finalTotal !== null
-                    ? `Place Order • ${formatPrice(finalTotal)}`
-                    : "Place Order"}
+                : !hasExplicitDeliveryLocation
+                  ? "Set delivery pin to continue"
+                  : !String(city || "").trim()
+                    ? "Add city to continue"
+                    : !isDistanceWithinLimit && routeInfo
+                      ? `Not available beyond ${maxOrderDistanceKm} km`
+                      : !isSubtotalValid
+                        ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
+                        : finalTotal !== null
+                          ? `Place Order • ${formatPrice(finalTotal)}`
+                          : "Place Order"}
           </Text>
         </Pressable>
       </View>
@@ -1060,6 +1159,14 @@ export default function CheckoutScreen({ route, navigation }) {
                 onPress={async () => {
                   if (!editAddress.trim()) {
                     setError("Address is required");
+                    return;
+                  }
+                  if (!editCity.trim()) {
+                    setError("City is required");
+                    return;
+                  }
+                  if (!hasExplicitDeliveryLocation) {
+                    setError("Please set delivery pin first using Edit Pin");
                     return;
                   }
                   await saveAddressAndLocation({

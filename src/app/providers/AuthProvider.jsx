@@ -26,7 +26,7 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authTransitionMode, setAuthTransitionMode] = useState("none");
-  const [authInitialRoute, setAuthInitialRoute] = useState("Welcome");
+  const [authInitialRoute, setAuthInitialRoute] = useState("Login");
   const [skipSplashOnAuth, setSkipSplashOnAuth] = useState(false);
   const [userRole, setUserRole] = useState(null);
   const [profileCompleted, setProfileCompleted] = useState(false);
@@ -55,7 +55,7 @@ export function AuthProvider({ children }) {
         setUser({ id: userId, email: userEmail, name: userName, role });
         setUserRole(role);
         setIsAuthenticated(true);
-        setAuthInitialRoute("Welcome");
+        setAuthInitialRoute("Login");
         setSkipSplashOnAuth(false);
         setProfileCompleted(profileDone === "true");
       } else {

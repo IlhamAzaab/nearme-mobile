@@ -171,10 +171,14 @@ export default function VerifyOtpScreen({ navigation, route }) {
       const resolvedToken = data?.session?.access_token || accessToken;
       const authUser = data?.user || null;
       const role = authUser?.user_metadata?.role || "customer";
-      const profileCompleted = Boolean(authUser?.user_metadata?.profile_completed);
+      const profileCompleted = Boolean(
+        authUser?.user_metadata?.profile_completed,
+      );
       const resolvedUserId = authUser?.id || userId || null;
       const userName =
-        authUser?.user_metadata?.username || authUser?.user_metadata?.name || null;
+        authUser?.user_metadata?.username ||
+        authUser?.user_metadata?.name ||
+        null;
 
       if (!resolvedToken || !resolvedUserId) {
         setError("Verification succeeded, but session is incomplete.");
@@ -202,7 +206,9 @@ export default function VerifyOtpScreen({ navigation, route }) {
       }
 
       const shouldRouteToProfile =
-        role === "customer" ? !profileCompleted : nextScreen === "CompleteProfile";
+        role === "customer"
+          ? !profileCompleted
+          : nextScreen === "CompleteProfile";
 
       setLoading(false);
       setIsTransitioning(true);
@@ -316,7 +322,9 @@ export default function VerifyOtpScreen({ navigation, route }) {
               </Svg>
             </View>
 
-            <View style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}>
+            <View
+              style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}
+            >
               <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
                 <Text style={styles.cardTitle}>Verify OTP</Text>
                 <Text style={styles.cardSub}>
@@ -379,14 +387,16 @@ export default function VerifyOtpScreen({ navigation, route }) {
                         <Text style={styles.loginBtnText}>Verifying...</Text>
                       </View>
                     ) : (
-                      <Text style={styles.loginBtnText}>Verify OTP</Text>
+                      <Text style={styles.loginBtnText}>Verify</Text>
                     )}
                   </LinearGradient>
                 </Pressable>
 
                 <View style={styles.footerRow}>
                   {resendTimer > 0 ? (
-                    <Text style={styles.footerText}>Resend OTP in {resendTimer}s</Text>
+                    <Text style={styles.footerText}>
+                      Resend OTP in {resendTimer}s
+                    </Text>
                   ) : (
                     <Pressable onPress={handleResend} disabled={resending}>
                       <Text style={styles.footerLink}>
@@ -588,7 +598,7 @@ const styles = StyleSheet.create({
     zIndex: 50,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: "#06C168",
     padding: 24,
   },
   successCircle: {

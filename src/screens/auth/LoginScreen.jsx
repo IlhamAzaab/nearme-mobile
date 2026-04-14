@@ -19,6 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { G, Path, Rect } from "react-native-svg";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
+import FloatingLabelInput from "../../components/common/FloatingLabelInput";
 import pushNotificationService from "../../services/pushNotificationService";
 import { persistAuthSession } from "../../lib/authStorage";
 
@@ -401,46 +402,41 @@ export default function LoginScreen({ navigation }) {
                   <Text style={styles.cardSub}>Please sign in to continue</Text>
 
                   {/* Username */}
-                  <View style={styles.inputWrap}>
-                    <View style={styles.inputIconWrap}>
-                      <UserIcon size={20} color="#9CA3AF" />
-                    </View>
-                    <TextInput
-                      value={email}
-                      onChangeText={setEmail}
-                      placeholder="Username"
-                      placeholderTextColor="#B0B8C4"
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      style={styles.input}
-                    />
-                  </View>
+                  <FloatingLabelInput
+                    label="Email or Phone"
+                    value={email}
+                    onChangeText={setEmail}
+                    inactivePlaceholder="Email or Phone"
+                    activePlaceholder="Eg: 0751234567"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    leftIcon={<UserIcon size={20} color="#9CA3AF" />}
+                  />
 
                   {/* Password */}
-                  <View style={[styles.inputWrap, { marginTop: 14 }]}>
-                    <View style={styles.inputIconWrap}>
-                      <LockIcon size={20} color="#9CA3AF" />
-                    </View>
-                    <TextInput
-                      value={password}
-                      onChangeText={setPassword}
-                      placeholder="Password"
-                      placeholderTextColor="#B0B8C4"
-                      secureTextEntry={!showPassword}
-                      style={[styles.input, { paddingRight: 52 }]}
-                    />
-                    <Pressable
-                      onPress={() => setShowPassword((v) => !v)}
-                      style={styles.eyeBtn}
-                      hitSlop={10}
-                    >
-                      {showPassword ? (
-                        <EyeOffIcon size={22} color="#9CA3AF" />
-                      ) : (
-                        <EyeIcon size={22} color="#9CA3AF" />
-                      )}
-                    </Pressable>
-                  </View>
+                  <FloatingLabelInput
+                    label="Password"
+                    value={password}
+                    onChangeText={setPassword}
+                    inactivePlaceholder="Password"
+                    activePlaceholder="Enter your password"
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    leftIcon={<LockIcon size={20} color="#9CA3AF" />}
+                    rightAccessory={
+                      <Pressable
+                        onPress={() => setShowPassword((v) => !v)}
+                        style={styles.passwordEyeBtn}
+                        hitSlop={10}
+                      >
+                        {showPassword ? (
+                          <EyeOffIcon size={22} color="#9CA3AF" />
+                        ) : (
+                          <EyeIcon size={22} color="#9CA3AF" />
+                        )}
+                      </Pressable>
+                    }
+                  />
 
                   {/* Login Button */}
                   <Pressable
@@ -624,35 +620,7 @@ const styles = StyleSheet.create({
     fontWeight: "400",
   },
 
-  /* Input fields */
-  inputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: "#E8ECF0",
-    backgroundColor: "#F7F8FA",
-    height: 56,
-    paddingHorizontal: 14,
-  },
-  inputIconWrap: {
-    width: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 4,
-  },
-  input: {
-    flex: 1,
-    color: "#111827",
-    fontSize: 15,
-    paddingHorizontal: 8,
-    fontWeight: "500",
-  },
-
-  eyeBtn: {
-    position: "absolute",
-    right: 14,
-    height: "100%",
+  passwordEyeBtn: {
     justifyContent: "center",
     alignItems: "center",
   },

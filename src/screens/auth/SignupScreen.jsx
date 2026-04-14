@@ -11,12 +11,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import MeezoLogo from "../../components/common/MeezoLogo";
+import FloatingLabelInput from "../../components/common/FloatingLabelInput";
 import supabase from "../../lib/supabaseClient";
 import { normalizeSriLankaPhone } from "../../utils/phone";
 
@@ -144,7 +144,9 @@ export default function SignupScreen({ navigation }) {
               <View style={styles.bgCircle2} />
               <View style={styles.logoWrap}>
                 <MeezoLogo size={IS_WEB ? 350 : 280} />
-                <Text style={styles.appSubtitle}>Your favorite food, fast.</Text>
+                <Text style={styles.appSubtitle}>
+                  Your favorite food, fast.
+                </Text>
               </View>
             </LinearGradient>
 
@@ -162,25 +164,25 @@ export default function SignupScreen({ navigation }) {
               </Svg>
             </View>
 
-            <View style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}>
+            <View
+              style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}
+            >
               <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
                 <Text style={styles.cardTitle}>Create Account</Text>
-                <Text style={styles.cardSub}>Enter mobile number to get OTP</Text>
+                <Text style={styles.cardSub}>
+                  Enter mobile number to get OTP
+                </Text>
 
-                <View style={styles.inputWrap}>
-                  <View style={styles.inputIconWrap}>
-                    <PhoneIcon size={20} color="#9CA3AF" />
-                  </View>
-                  <TextInput
-                    value={phone}
-                    onChangeText={setPhone}
-                    placeholder="0771234567"
-                    placeholderTextColor="#B0B8C4"
-                    keyboardType="phone-pad"
-                    autoCapitalize="none"
-                    style={styles.input}
-                  />
-                </View>
+                <FloatingLabelInput
+                  label="Phone"
+                  value={phone}
+                  onChangeText={setPhone}
+                  inactivePlaceholder="Phone"
+                  activePlaceholder="Eg: 0751234567"
+                  keyboardType="phone-pad"
+                  autoCapitalize="none"
+                  leftIcon={<PhoneIcon size={20} color="#9CA3AF" />}
+                />
 
                 <Pressable
                   onPress={handleSignup}
@@ -211,7 +213,9 @@ export default function SignupScreen({ navigation }) {
                 </Pressable>
 
                 <View style={styles.footerRow}>
-                  <Text style={styles.footerText}>Already have an account? </Text>
+                  <Text style={styles.footerText}>
+                    Already have an account?{" "}
+                  </Text>
                   <Pressable onPress={() => navigation.navigate("Login")}>
                     <Text style={styles.footerLink}>Log in</Text>
                   </Pressable>
@@ -326,29 +330,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 28,
     fontWeight: "400",
-  },
-  inputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: "#E8ECF0",
-    backgroundColor: "#F7F8FA",
-    height: 56,
-    paddingHorizontal: 14,
-  },
-  inputIconWrap: {
-    width: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 4,
-  },
-  input: {
-    flex: 1,
-    color: "#111827",
-    fontSize: 15,
-    paddingHorizontal: 8,
-    fontWeight: "500",
   },
   loginBtn: {
     marginTop: 24,

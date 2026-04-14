@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
     zIndex: 40,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: "#06C168",
     padding: 24,
   },
   successCircle: {
