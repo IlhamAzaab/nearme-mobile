@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -17,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../../components/common/OptimizedImage";
 import { API_URL } from "../../../config/env";
 
 const ProcessDriverPaymentScreen = ({ navigation, route }) => {
@@ -183,8 +183,8 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
           <View style={styles.profileWrap}>
             <View style={styles.avatarWrap}>
               {driver.profile_photo_url ? (
-                <Image
-                  source={{ uri: driver.profile_photo_url }}
+                <OptimizedImage
+                  uri={driver.profile_photo_url}
                   style={styles.avatar}
                 />
               ) : (
@@ -290,10 +290,7 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
               <View style={styles.filePreviewCard}>
                 <View style={styles.fileRow}>
                   {file.mimeType?.startsWith("image/") ? (
-                    <Image
-                      source={{ uri: file.uri }}
-                      style={styles.fileThumb}
-                    />
+                    <OptimizedImage uri={file.uri} style={styles.fileThumb} />
                   ) : (
                     <View
                       style={[

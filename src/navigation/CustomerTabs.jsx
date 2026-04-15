@@ -323,7 +323,7 @@ function UberEatsTabBar({ state, descriptors, navigation, insets }) {
       style={[
         styles.tabShell,
         {
-          paddingBottom: Math.max(insets.bottom, 10),
+          paddingBottom: Math.max(insets.bottom, 0),
         },
       ]}
       pointerEvents="box-none"
@@ -483,14 +483,14 @@ const styles = StyleSheet.create({
     height: 170,
   },
   tabBarContainer: {
-    minHeight: 50,
+    minHeight: 56,
     borderRadius: 0,
     backgroundColor: "transparent",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-evenly",
     paddingHorizontal: 2,
-    paddingVertical: 6,
+    paddingVertical: 2,
     borderWidth: 1,
     borderColor: "transparent",
     shadowColor: "#000",
@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 72,
+    minHeight: 56,
   },
   tabIconContainer: {
     width: 62,

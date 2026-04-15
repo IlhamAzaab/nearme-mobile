@@ -4,7 +4,6 @@ import { useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import ManagerDrawer from "../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../components/manager/ManagerHeader";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import { API_URL } from "../../config/env";
 
 const SRI_LANKA_TIME_ZONE = "Asia/Colombo";
@@ -498,8 +498,8 @@ export default function ManagerDepositsScreen() {
                 <View style={styles.depositActions}>
                   <View style={styles.proofThumb}>
                     {deposit.proof_url ? (
-                      <Image
-                        source={{ uri: getPreviewUrl(deposit) }}
+                      <OptimizedImage
+                        uri={getPreviewUrl(deposit)}
                         style={styles.proofImage}
                         resizeMode="cover"
                       />

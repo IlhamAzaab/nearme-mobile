@@ -21,7 +21,6 @@ import {
   Alert,
   Animated,
   AppState,
-  Image,
   Modal,
   Pressable,
   RefreshControl,
@@ -33,8 +32,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AnimatedAlert from "../../components/common/AnimatedAlert";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import DriverScreenSection from "../../components/driver/DriverScreenSection";
-import { DriverDashboardLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
@@ -42,6 +41,7 @@ import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNoti
 import { useSocket } from "../../context/SocketContext";
 import { approximateDistanceMeters } from "../../utils/osrmClient";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
+import SplashScreen from "../SplashScreen";
 
 // Working time display labels
 const WORKING_TIME_LABELS = {
@@ -1435,11 +1435,7 @@ export default function DashboardScreen({ navigation }) {
   // ============================================================================
 
   if (loading && !hasDashboardSnapshot && !hasVisitedDriverDashboardScreen) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <DriverDashboardLoadingSkeleton />
-      </SafeAreaView>
-    );
+    return <SplashScreen />;
   }
 
   return (
@@ -1561,8 +1557,8 @@ export default function DashboardScreen({ navigation }) {
               >
                 <View style={styles.avatarContainer}>
                   {driverProfile?.profile_picture ? (
-                    <Image
-                      source={{ uri: driverProfile.profile_picture }}
+                    <OptimizedImage
+                      uri={driverProfile.profile_picture}
                       style={styles.avatar}
                     />
                   ) : (

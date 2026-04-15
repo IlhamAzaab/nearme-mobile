@@ -1,10 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import {
-  ActivityIndicator,
   Alert,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,122 +11,68 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
-import DriverScreenSection from "../../components/driver/DriverScreenSection";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import { DriverProfileLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
-import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
 
-const PROFILE_ENDPOINTS = ["/driver/profile", "/driver/me"];
 const DRIVER_PRIVACY_POLICY_URL = "https://radiant-melba-e986f5.netlify.app";
 const DRIVER_TERMS_URL = "https://glittering-banoffee-2a68ab.netlify.app";
 const DRIVER_CODE_OF_CONDUCT_URL = "https://gleeful-dasik-6183d2.netlify.app";
 const DRIVER_HELP_SUPPORT_URL = "https://brilliant-druid-8aaa8f.netlify.app";
 
-function getFirstValue(obj, keys) {
+function pickFirstValue(source, keys, fallback = "-") {
   for (const key of keys) {
-    const value = obj?.[key];
+    const value = source?.[key];
     if (value !== undefined && value !== null && String(value).trim() !== "") {
-      return value;
+      return String(value).trim();
     }
   }
-  return "";
+  return fallback;
 }
 
-function maskLast4(value) {
-  const clean = String(value || "")
-    .replace(/\s+/g, "")
-    .trim();
-  if (!clean) return "-";
-  if (clean.length <= 4) return clean;
-  return clean.slice(-4);
-}
-
-function formatJoinedDate(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function normalizeDriverProfile(payload) {
+function normalizeDriverSummary(payload) {
   const source = payload?.driver || payload?.data || payload || {};
-  const vehicleSource =
-    source?.vehicle ||
-    source?.vehicle_details ||
-    source?.vehicleLicense ||
-    source?.vehicle_license ||
-    payload?.vehicleLicense ||
-    payload?.vehicle_license ||
-    payload?.vehicle ||
-    {};
-  const profilePhoto = getFirstValue(source, [
-    "profile_picture",
-    "profile_photo",
-    "avatar_url",
-  ]);
-  const onboardingCompletedDate = getFirstValue(source, [
-    "onboarding_completed_at",
-    "onboarding_completed_date",
-    "onboarding_completed_on",
-    "onboarding_finished_at",
-    "onboarding_done_at",
-    "onboarding_updated_at",
-  ]);
-  const fallbackJoinedDate = getFirstValue(source, [
-    "joined_date",
-    "joined_at",
-    "created_at",
-  ]);
 
   return {
-    raw: source,
-    driverName:
-      getFirstValue(source, [
-        "full_name",
-        "driver_name",
-        "name",
-        "user_name",
-        "username",
-      ]) || "-",
-    driverId:
-      getFirstValue(source, ["driver_id", "id", "user_id", "driver_code"]) ||
-      "-",
-    profilePhoto,
-    phoneNumber:
-      getFirstValue(source, ["phone_number", "phone", "mobile_number"]) || "-",
-    email: getFirstValue(source, ["email"]) || "-",
-    nicLast4: maskLast4(
-      getFirstValue(source, ["nic_number", "nic", "national_id", "id_number"]),
+    fullName: pickFirstValue(source, ["full_name", "name", "driver_name"]),
+    profilePhotoUrl: pickFirstValue(
+      source,
+      [
+        "profile_photo_url",
+        "profile_photo",
+        "profile_picture",
+        "avatar_url",
+        "photo_url",
+      ],
+      "",
     ),
-    vehicleType:
-      getFirstValue(source, ["vehicle_type", "vehicle_category"]) ||
-      getFirstValue(vehicleSource, [
-        "vehicle_type",
-        "vehicle_category",
-        "type",
-      ]) ||
-      "-",
-    vehicleNumber:
-      getFirstValue(source, [
-        "vehicle_number",
-        "vehicle_no",
-        "vehicle_registration_number",
-      ]) ||
-      getFirstValue(vehicleSource, [
-        "vehicle_number",
-        "vehicle_no",
-        "vehicle_registration_number",
-        "registration_number",
-        "plate_number",
-      ]) ||
-      "-",
-    joinedDate: formatJoinedDate(onboardingCompletedDate || fallbackJoinedDate),
+    email: pickFirstValue(source, ["email"]),
+    phone: pickFirstValue(source, ["phone", "phone_number", "mobile_number"]),
   };
+}
+
+function SectionRow({ icon, title, subtitle, onPress, isLast = false }) {
+  return (
+    <TouchableOpacity
+      style={[styles.sectionRow, isLast && styles.sectionRowLast]}
+      activeOpacity={0.82}
+      onPress={onPress}
+    >
+      <View style={styles.sectionRowLeft}>
+        <View style={styles.sectionIconWrap}>
+          <Ionicons name={icon} size={18} color="#0F172A" />
+        </View>
+
+        <View style={styles.sectionTextWrap}>
+          <Text style={styles.sectionTitle}>{title}</Text>
+          {!!subtitle && <Text style={styles.sectionSubtitle}>{subtitle}</Text>}
+        </View>
+      </View>
+
+      <Ionicons name="chevron-forward" size={20} color="#94A3B8" />
+    </TouchableOpacity>
+  );
 }
 
 export default function DriverAccountProfileScreen({ navigation }) {
@@ -159,8 +103,8 @@ export default function DriverAccountProfileScreen({ navigation }) {
     refetchOnWindowFocus: false,
   });
 
-  const profile = profileQuery.data || null;
-  const loading = profileQuery.isLoading && !profile;
+  const summary = normalizeDriverSummary(profileQuery.data || {});
+  const loading = profileQuery.isLoading && !profileQuery.data;
 
   useEffect(() => {
     if (!profileQuery.isError) return;
@@ -170,7 +114,7 @@ export default function DriverAccountProfileScreen({ navigation }) {
     );
   }, [profileQuery.isError, profileQuery.error]);
 
-  const handleLogout = () => {
+  const onLogoutPress = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -192,92 +136,68 @@ export default function DriverAccountProfileScreen({ navigation }) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.bgOrbOne} />
-      <View style={styles.bgOrbTwo} />
-
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroCard}>
-          <View style={styles.heroAvatar}>
-            {profile?.profilePhoto ? (
-              <Image
-                source={{ uri: profile.profilePhoto }}
-                style={styles.heroPhoto}
+        <View style={styles.profileCard}>
+          <View style={styles.profilePhotoWrap}>
+            {summary.profilePhotoUrl ? (
+              <OptimizedImage
+                uri={summary.profilePhotoUrl}
+                style={styles.profilePhoto}
               />
             ) : (
-              <Ionicons name="person" size={26} color="#fff" />
+              <Text style={styles.profilePhotoFallback}>
+                {String(summary.fullName || "D")
+                  .charAt(0)
+                  .toUpperCase()}
+              </Text>
             )}
           </View>
-          <View style={styles.heroContent}>
-            <Text style={styles.heroKicker}>Driver Profile</Text>
-            <Text style={styles.heroName}>
-              {profile?.driverName || "Driver"}
+
+          <View style={styles.profileMeta}>
+            <Text style={styles.profileMetaLabel}>Driver</Text>
+            <Text style={styles.profileName} numberOfLines={1}>
+              {summary.fullName || "Driver"}
             </Text>
-            <Text style={styles.heroUsername}>
-              Driver ID: {profile?.driverId || "-"}
+            <Text style={styles.profileSub} numberOfLines={1}>
+              {summary.email}
             </Text>
-          </View>
-          <View style={styles.joinedPill}>
-            <Ionicons name="calendar-outline" size={12} color="#0F766E" />
-            <Text style={styles.joinedText}>{profile?.joinedDate || "-"}</Text>
           </View>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Personal Details</Text>
-          <InfoRow
-            label="Driver Name"
-            value={profile?.driverName}
-            icon="person-outline"
+        <View style={styles.menuCard}>
+          <SectionRow
+            icon="person-circle-outline"
+            title="Personal Info"
+            subtitle="Email, phone, name, NIC and address"
+            onPress={() => navigation.navigate("DriverPersonalInfo")}
           />
-          <InfoRow
-            label="Driver ID"
-            value={profile?.driverId}
-            icon="id-card-outline"
-          />
-          <InfoRow
-            label="Phone Number"
-            value={profile?.phoneNumber}
-            icon="call-outline"
-          />
-          <InfoRow label="Email" value={profile?.email} icon="mail-outline" />
-          <InfoRow
-            label="NIC / ID (Last 4)"
-            value={profile?.nicLast4}
-            icon="card-outline"
-          />
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Vehicle Details</Text>
-          <InfoRow
-            label="Vehicle Type"
-            value={profile?.vehicleType}
+          <SectionRow
             icon="car-outline"
+            title="Vehicle Details"
+            subtitle="Vehicle and license information"
+            onPress={() => navigation.navigate("DriverVehicleDetails")}
           />
-          <InfoRow
-            label="Vehicle Number"
-            value={profile?.vehicleNumber}
-            icon="bicycle-outline"
+          <SectionRow
+            icon="card-outline"
+            title="Bank Account Details"
+            subtitle="Payout account information"
+            onPress={() => navigation.navigate("DriverBankDetails")}
           />
-          <InfoRow
-            label="Joined Date"
-            value={profile?.joinedDate}
-            icon="calendar-outline"
+          <SectionRow
+            icon="document-text-outline"
+            title="Contract"
+            subtitle="Accepted driver contract"
+            onPress={() => navigation.navigate("DriverContract")}
           />
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Legal & Support</Text>
-
-          <ActionButton
-            label="Privacy Policy"
-            icon="document-lock-outline"
-            iconBg="#E0F2FE"
-            iconColor="#0369A1"
+          <SectionRow
+            icon="shield-checkmark-outline"
+            title="Privacy Policy"
+            subtitle="How we use your information"
             onPress={() =>
               navigation.navigate("WebView", {
                 title: "Privacy Policy",
@@ -285,12 +205,10 @@ export default function DriverAccountProfileScreen({ navigation }) {
               })
             }
           />
-
-          <ActionButton
-            label="Terms & Conditions"
-            icon="document-text-outline"
-            iconBg="#DCFCE7"
-            iconColor="#166534"
+          <SectionRow
+            icon="reader-outline"
+            title="Terms & Conditions"
+            subtitle="Platform usage agreement"
             onPress={() =>
               navigation.navigate("WebView", {
                 title: "Terms & Conditions",
@@ -298,12 +216,10 @@ export default function DriverAccountProfileScreen({ navigation }) {
               })
             }
           />
-
-          <ActionButton
-            label="Code of Conduct"
-            icon="shield-checkmark-outline"
-            iconBg="#EDE9FE"
-            iconColor="#5B21B6"
+          <SectionRow
+            icon="document-text-outline"
+            title="Code of Conduct"
+            subtitle="Driver behavior and standards"
             onPress={() =>
               navigation.navigate("WebView", {
                 title: "Code of Conduct",
@@ -311,12 +227,10 @@ export default function DriverAccountProfileScreen({ navigation }) {
               })
             }
           />
-
-          <ActionButton
-            label="Help & Support"
+          <SectionRow
             icon="help-buoy-outline"
-            iconBg="#FEE2E2"
-            iconColor="#B91C1C"
+            title="Help & Support"
+            subtitle="Need help with your account?"
             onPress={() =>
               navigation.navigate("WebView", {
                 title: "Help & Support",
@@ -326,218 +240,148 @@ export default function DriverAccountProfileScreen({ navigation }) {
             isLast
           />
         </View>
-
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color="#fff" />
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
       </ScrollView>
+
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={styles.logoutButton}
+          activeOpacity={0.85}
+          onPress={onLogoutPress}
+        >
+          <Text style={styles.logoutButtonText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
 
-function InfoRow({ label, value, icon }) {
-  return (
-    <View style={styles.infoRow}>
-      <View style={styles.infoLeft}>
-        <View style={styles.infoIconWrap}>
-          <Ionicons name={icon} size={16} color="#06C168" />
-        </View>
-        <View style={styles.infoTextWrap}>
-          <Text style={styles.infoLabel}>{label}</Text>
-          <Text style={styles.infoValue}>{value || "-"}</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-function ActionButton({
-  label,
-  icon,
-  iconBg,
-  iconColor,
-  onPress,
-  isLast = false,
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.actionRow, isLast ? styles.actionRowLast : null]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <View style={[styles.actionIconWrap, { backgroundColor: iconBg }]}>
-        <Ionicons name={icon} size={17} color={iconColor} />
-      </View>
-      <Text style={styles.actionText}>{label}</Text>
-      <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
-    </TouchableOpacity>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5FBF8" },
-  bgOrbOne: {
-    position: "absolute",
-    top: -40,
-    right: -30,
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: "#D1FAE5",
+  container: {
+    flex: 1,
+    backgroundColor: "#F5F7FA",
   },
-  bgOrbTwo: {
-    position: "absolute",
-    top: 120,
-    left: -60,
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: "#E0F2FE",
+  scrollView: {
+    flex: 1,
   },
-  loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  scroll: { padding: 16, paddingTop: 8, paddingBottom: 40 },
-  heroCard: {
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 14,
+    gap: 14,
+  },
+  profileCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E6EAF0",
+    padding: 14,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 22,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#DDEEE6",
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    elevation: 5,
   },
-  heroAvatar: {
+  profilePhotoWrap: {
     width: 64,
     height: 64,
-    borderRadius: 32,
+    borderRadius: 14,
+    backgroundColor: "#E2E8F0",
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#059669",
-    marginRight: 14,
   },
-  heroPhoto: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+  profilePhoto: {
+    width: "100%",
+    height: "100%",
   },
-  heroContent: { flex: 1 },
-  heroKicker: {
+  profilePhotoFallback: {
+    fontSize: 26,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  profileMeta: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  profileMetaLabel: {
     fontSize: 12,
-    fontWeight: "800",
-    color: "#0F766E",
-    textTransform: "uppercase",
-    letterSpacing: 0.7,
-  },
-  heroName: { fontSize: 22, fontWeight: "800", color: "#0F172A", marginTop: 4 },
-  heroUsername: {
-    fontSize: 13,
-    color: "#475569",
-    marginTop: 3,
+    color: "#64748B",
     fontWeight: "600",
   },
-  joinedPill: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#99F6E4",
-    backgroundColor: "#ECFEFF",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  joinedText: { fontSize: 11, fontWeight: "700", color: "#0F766E" },
-  card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  cardTitle: {
+  profileName: {
+    marginTop: 2,
     fontSize: 19,
     fontWeight: "800",
     color: "#0F172A",
-    marginBottom: 10,
   },
-  infoRow: {
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#D7DEE7",
-  },
-  infoLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  infoIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    backgroundColor: "#ECFDF5",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 11,
-  },
-  infoTextWrap: { flex: 1 },
-  infoLabel: { fontSize: 12, color: "#64748B", fontWeight: "600" },
-  infoValue: {
+  profileSub: {
+    marginTop: 4,
     fontSize: 14,
-    fontWeight: "700",
-    color: "#0F172A",
-    marginTop: 2,
+    fontWeight: "500",
+    color: "#475569",
   },
-  actionRow: {
+  menuCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E6EAF0",
+    overflow: "hidden",
+  },
+  sectionRow: {
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F7",
     flexDirection: "row",
     alignItems: "center",
-    minHeight: 50,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#D7DEE7",
-    paddingVertical: 10,
+    justifyContent: "space-between",
   },
-  actionRowLast: {
+  sectionRowLast: {
     borderBottomWidth: 0,
-    paddingBottom: 0,
   },
-  actionIconWrap: {
+  sectionRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginRight: 8,
+  },
+  sectionIconWrap: {
     width: 34,
     height: 34,
-    borderRadius: 12,
+    borderRadius: 9,
+    backgroundColor: "#F2F4F7",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 10,
   },
-  actionText: {
+  sectionTextWrap: {
     flex: 1,
-    color: "#0F172A",
-    fontSize: 14,
-    fontWeight: "700",
+    marginLeft: 10,
   },
-  logoutBtn: {
-    marginTop: 2,
-    backgroundColor: "#EF233C",
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  sectionSubtitle: {
+    marginTop: 3,
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "500",
+  },
+  footer: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 4,
+    backgroundColor: "#F5F7FA",
+  },
+  logoutButton: {
+    backgroundColor: "#111827",
     borderRadius: 14,
-    height: 50,
+    minHeight: 50,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    flexDirection: "row",
-    shadowColor: "#EF233C",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    elevation: 4,
   },
-  logoutText: { color: "#fff", fontSize: 17, fontWeight: "800" },
+  logoutButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
 });

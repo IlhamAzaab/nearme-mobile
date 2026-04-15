@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../../components/common/OptimizedImage";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
 import { API_URL } from "../../../config/env";
@@ -96,8 +96,8 @@ const DriverPaymentsScreen = () => {
         {/* Avatar */}
         <View style={styles.avatarWrap}>
           {item.profile_photo_url ? (
-            <Image
-              source={{ uri: item.profile_photo_url }}
+            <OptimizedImage
+              uri={item.profile_photo_url}
               style={styles.avatar}
             />
           ) : (

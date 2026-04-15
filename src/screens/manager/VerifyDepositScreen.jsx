@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  Image,
   Linking,
   Modal,
   ScrollView,
@@ -17,6 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import OptimizedImage from "../../components/common/OptimizedImage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SRI_LANKA_TIME_ZONE = "Asia/Colombo";
@@ -257,10 +257,10 @@ const VerifyDepositScreen = ({ navigation, route }) => {
             onPress={() => setShowImageModal(true)}
             activeOpacity={0.8}
           >
-            <Image
-              source={{ uri: getPreviewUrl() }}
+            <OptimizedImage
+              uri={getPreviewUrl()}
               style={styles.receiptImage}
-              resizeMode="cover"
+              contentFit="cover"
             />
             <View style={styles.receiptBadge}>
               <Ionicons
@@ -441,10 +441,10 @@ const VerifyDepositScreen = ({ navigation, route }) => {
               <Text style={styles.modalOpenPdfText}>Open Original PDF</Text>
             </TouchableOpacity>
           )}
-          <Image
-            source={{ uri: getPreviewUrl() }}
+          <OptimizedImage
+            uri={getPreviewUrl()}
             style={styles.modalImage}
-            resizeMode="contain"
+            contentFit="contain"
           />
         </View>
       </Modal>

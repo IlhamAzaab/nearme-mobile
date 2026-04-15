@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -19,6 +18,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../../config/env";
 import { getAccessToken } from "../../../lib/authStorage";
+import OptimizedImage from "../../../components/common/OptimizedImage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -415,7 +415,7 @@ export default function Step1() {
         >
           {imageUrl ? (
             <View style={styles.imagePreviewContainer}>
-              <Image source={{ uri: imageUrl }} style={styles.imagePreview} />
+              <OptimizedImage uri={imageUrl} style={styles.imagePreview} />
               <View style={styles.imageOverlay}>
                 <Text style={styles.changeText}>Tap to change</Text>
               </View>

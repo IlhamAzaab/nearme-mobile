@@ -3,7 +3,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Linking,
   RefreshControl,
   ScrollView,
@@ -15,6 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import OptimizedImage from "../../components/common/OptimizedImage";
 
 export default function PendingDeliveriesScreen() {
   const [loading, setLoading] = useState(true);
@@ -509,8 +509,8 @@ export default function PendingDeliveriesScreen() {
                     {items.map((item) => (
                       <View key={item.id} style={styles.itemRow}>
                         {item.food_image_url ? (
-                          <Image
-                            source={{ uri: item.food_image_url }}
+                          <OptimizedImage
+                            uri={item.food_image_url}
                             style={styles.itemImage}
                           />
                         ) : (

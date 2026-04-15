@@ -298,7 +298,7 @@ export function DriverDeliveryNotificationProvider({ children }) {
       }
       return [{ ...enriched, notifiedAt: Date.now() }, ...prev];
     });
-    showPushNotification(enriched);
+    // Keep delivery events flowing, but skip the in-app popup for now.
     return enriched;
   }, []);
 

@@ -4,13 +4,13 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { API_BASE_URL } from "../../constants/api";
+import OptimizedImage from "../common/OptimizedImage";
 
 export default function DeliveryProofUpload({
   deliveryId,
@@ -87,7 +87,7 @@ export default function DeliveryProofUpload({
       </View>
 
       {proofUrl ? (
-        <Image source={{ uri: proofUrl }} style={styles.preview} />
+        <OptimizedImage uri={proofUrl} style={styles.preview} />
       ) : (
         <View style={styles.placeholder}>
           <Text style={styles.placeholderText}>No photo uploaded</Text>

@@ -12,7 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
-import { DriverListLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
+import { DriverHistoryFullScreenSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
 
@@ -153,11 +153,7 @@ export default function DeliveryHistoryScreen({ navigation }) {
   };
 
   if (historyQuery.isLoading && deliveries.length === 0) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <DriverListLoadingSkeleton count={6} />
-      </SafeAreaView>
-    );
+    return <DriverHistoryFullScreenSkeleton />;
   }
 
   return (

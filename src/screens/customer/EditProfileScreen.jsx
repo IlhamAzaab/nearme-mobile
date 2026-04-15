@@ -5,7 +5,6 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,30 +17,42 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
+import OptimizedImage from "../../components/common/OptimizedImage";
 
-export default function EditProfileScreen({ navigation }) {
-  const { user } = useAuth();
+export default function EditProfileScreen({ navigation, route }) {
+  const { user, refreshAuthState } = useAuth();
+  const prefill = route?.params?.prefill || {};
 
-  const [name, setName] = useState(user?.name || "");
-  const [profilePic, setProfilePic] = useState(null);
+  const [name, setName] = useState(prefill?.name || user?.name || "");
+  const [email, setEmail] = useState(prefill?.email || user?.email || "");
+  const [phone, setPhone] = useState(prefill?.phone || "");
+  const [profilePic, setProfilePic] = useState(prefill?.profilePic || null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
         const pic = await AsyncStorage.getItem("@profile_pic");
+        const ph = await AsyncStorage.getItem("@profile_phone");
         const nm = await AsyncStorage.getItem("userName");
+        const em = await AsyncStorage.getItem("userEmail");
         if (pic) setProfilePic(pic);
         if (nm) setName(nm);
+        if (ph) setPhone(ph);
+        if (em) setEmail(em);
       } catch {}
     })();
   }, []);
 
   const pickImage = useCallback(async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert("Permission needed", "Please allow access to your photos to change your profile picture.");
+        Alert.alert(
+          "Permission needed",
+          "Please allow access to your photos to change your profile picture.",
+        );
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -67,6 +78,7 @@ export default function EditProfileScreen({ navigation }) {
     try {
       await AsyncStorage.setItem("userName", name.trim());
       if (profilePic) await AsyncStorage.setItem("@profile_pic", profilePic);
+      await refreshAuthState();
 
       Alert.alert("Saved", "Your profile has been updated.", [
         { text: "OK", onPress: () => navigation.goBack() },
@@ -76,7 +88,7 @@ export default function EditProfileScreen({ navigation }) {
     } finally {
       setSaving(false);
     }
-  }, [name, profilePic, navigation]);
+  }, [name, profilePic, navigation, refreshAuthState]);
 
   const initial = (name || "U").charAt(0).toUpperCase();
 
@@ -106,7 +118,7 @@ export default function EditProfileScreen({ navigation }) {
           <View style={st.avatarSection}>
             <Pressable onPress={pickImage} style={st.avatarPress}>
               {profilePic ? (
-                <Image source={{ uri: profilePic }} style={st.avatarImg} />
+                <OptimizedImage uri={profilePic} style={st.avatarImg} />
               ) : (
                 <View style={st.avatarFallback}>
                   <Text style={st.avatarInitial}>{initial}</Text>
@@ -127,6 +139,19 @@ export default function EditProfileScreen({ navigation }) {
               value={name}
               onChangeText={setName}
               placeholder="Enter your name"
+              autoCapitalize="words"
+            />
+            <View style={st.divider} />
+            <ReadOnlyFieldRow
+              icon="mail-outline"
+              label="Email"
+              value={email || "Not available"}
+            />
+            <View style={st.divider} />
+            <ReadOnlyFieldRow
+              icon="call-outline"
+              label="Phone Number"
+              value={phone || "Not available"}
             />
           </View>
 
@@ -148,8 +173,37 @@ export default function EditProfileScreen({ navigation }) {
   );
 }
 
+function ReadOnlyFieldRow({ icon, label, value }) {
+  return (
+    <View style={st.fieldRow}>
+      <View style={st.fieldIconWrap}>
+        <Ionicons name={icon} size={18} color="#06C168" />
+      </View>
+      <View style={{ flex: 1 }}>
+        <View style={st.readOnlyLabelRow}>
+          <Text style={st.fieldLabel}>{label}</Text>
+          <View style={st.verifiedChip}>
+            <Ionicons name="checkmark-circle" size={12} color="#06C168" />
+            <Text style={st.verifiedChipText}>Verified</Text>
+          </View>
+        </View>
+        <Text style={st.readOnlyValue}>{value}</Text>
+      </View>
+      <Ionicons name="lock-closed" size={14} color="#9CA3AF" />
+    </View>
+  );
+}
+
 /* ─── Field Row ─── */
-function FieldRow({ icon, label, value, onChangeText, placeholder, keyboardType, autoCapitalize }) {
+function FieldRow({
+  icon,
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  keyboardType,
+  autoCapitalize,
+}) {
   return (
     <View style={st.fieldRow}>
       <View style={st.fieldIconWrap}>
@@ -269,6 +323,31 @@ const st = StyleSheet.create({
     fontWeight: "500",
     color: "#111827",
     padding: 0,
+  },
+  readOnlyLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 2,
+  },
+  readOnlyValue: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: "#6B7280",
+  },
+  verifiedChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#E6F9EE",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  verifiedChipText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#06C168",
   },
   divider: {
     height: 1,

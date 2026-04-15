@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   Modal,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../../components/common/OptimizedImage";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
 import { API_URL } from "../../../config/env";
@@ -171,10 +171,7 @@ const RestaurantManagementScreen = () => {
               })
             }
           >
-            <Image
-              source={{ uri: r.cover_image_url }}
-              style={styles.coverImg}
-            />
+            <OptimizedImage uri={r.cover_image_url} style={styles.coverImg} />
           </TouchableOpacity>
         )}
 
@@ -254,7 +251,7 @@ const RestaurantManagementScreen = () => {
               })
             }
           >
-            <Image source={{ uri: item.logo_url }} style={styles.cardLogo} />
+            <OptimizedImage uri={item.logo_url} style={styles.cardLogo} />
           </TouchableOpacity>
         ) : (
           <View style={styles.cardLogoPlaceholder}>
@@ -386,10 +383,10 @@ const RestaurantManagementScreen = () => {
             </TouchableOpacity>
             {showImageModal && (
               <>
-                <Image
-                  source={{ uri: showImageModal.url }}
+                <OptimizedImage
+                  uri={showImageModal.url}
                   style={styles.imgModalImage}
-                  resizeMode="contain"
+                  contentFit="contain"
                 />
                 <Text style={styles.imgModalTitle}>{showImageModal.title}</Text>
               </>

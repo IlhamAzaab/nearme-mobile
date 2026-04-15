@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Modal,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../../components/common/OptimizedImage";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
 import { API_URL } from "../../../config/env";
@@ -524,8 +524,8 @@ const DriverVerificationScreen = () => {
               centerContent
             >
               {activeDocument?.document_url ? (
-                <Image
-                  source={{ uri: activeDocument.document_url }}
+                <OptimizedImage
+                  uri={activeDocument.document_url}
                   style={[
                     styles.viewerImage,
                     { transform: [{ scale: documentZoom }] },

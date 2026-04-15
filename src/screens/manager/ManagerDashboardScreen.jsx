@@ -4,7 +4,6 @@ import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Dimensions,
   RefreshControl,
   ScrollView,
@@ -16,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import ManagerHeader from "../../components/manager/ManagerHeader";
 import { API_URL } from "../../config/env";
+import SplashScreen from "../SplashScreen";
 
 const screenWidth = Dimensions.get("window").width;
 
@@ -133,14 +133,7 @@ export default function ManagerDashboardScreen() {
     })}`;
 
   if (loading) {
-    return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
-        <ManagerHeader title="Dashboard" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#06C168" />
-        </View>
-      </SafeAreaView>
-    );
+    return <SplashScreen />;
   }
 
   return (
@@ -473,7 +466,6 @@ export default function ManagerDashboardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9FAFB" },
   scrollContent: { padding: 16, paddingBottom: 30 },
-  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   // Hero
   heroCard: {

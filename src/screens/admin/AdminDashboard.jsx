@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
-  Image,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -16,6 +15,7 @@ import {
 } from "react-native";
 import { LineChart } from "react-native-chart-kit";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_URL } from "../../config/env";
 import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
@@ -190,7 +190,12 @@ function SkeletonLoader({ opacity }) {
         <Animated.View style={[styles.skeletonBigCard, { opacity }]} />
 
         <View style={styles.skeletonSectionTitle} />
-        <Animated.View style={[styles.skeletonMenuCard, { opacity }]} />
+        <View style={styles.skeletonGrid2}>
+          <Animated.View style={[styles.skeletonMenuCard, { opacity }]} />
+          <Animated.View style={[styles.skeletonMenuCard, { opacity }]} />
+          <Animated.View style={[styles.skeletonMenuCard, { opacity }]} />
+          <Animated.View style={[styles.skeletonMenuCard, { opacity }]} />
+        </View>
 
         <Animated.View style={[styles.skeletonChartCard, { opacity }]}>
           <View
@@ -202,7 +207,7 @@ function SkeletonLoader({ opacity }) {
           <View
             style={[
               styles.skeletonLine,
-              { width: "100%", height: 210, borderRadius: 14 },
+              { width: "100%", height: 220, borderRadius: 14 },
             ]}
           />
         </Animated.View>
@@ -574,8 +579,8 @@ export default function AdminDashboard() {
             <View style={styles.headerRow}>
               <View style={styles.restaurantInfoRow}>
                 {restaurant?.logo_url ? (
-                  <Image
-                    source={{ uri: restaurant.logo_url }}
+                  <OptimizedImage
+                    uri={restaurant.logo_url}
                     style={styles.restaurantLogo}
                   />
                 ) : (
@@ -1524,20 +1529,24 @@ const styles = StyleSheet.create({
   skeletonGrid2: {
     flexDirection: "row",
     gap: 12,
+    marginBottom: 12,
   },
   skeletonCard: {
     flex: 1,
-    height: 112,
+    height: 128,
     borderRadius: 16,
     backgroundColor: "#e5e7eb",
+    marginBottom: 12,
   },
   skeletonBigCard: {
-    height: 138,
+    height: 156,
     borderRadius: 16,
     backgroundColor: "#e5e7eb",
+    marginBottom: 12,
   },
   skeletonMenuCard: {
-    height: 102,
+    flex: 1,
+    height: 120,
     borderRadius: 16,
     backgroundColor: "#e5e7eb",
   },

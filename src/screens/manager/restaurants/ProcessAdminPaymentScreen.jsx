@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Linking,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../../components/common/OptimizedImage";
 import { API_URL } from "../../../config/env";
 
 const parseStoredLocalDate = (dateStr) => {
@@ -233,7 +233,7 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
         {/* Restaurant Profile */}
         <View style={styles.profileCard}>
           {restaurant.logo_url ? (
-            <Image source={{ uri: restaurant.logo_url }} style={styles.logo} />
+            <OptimizedImage uri={restaurant.logo_url} style={styles.logo} />
           ) : (
             <View style={styles.logoPlaceholder}>
               <Text style={styles.logoText}>
@@ -321,7 +321,7 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
           </Text>
 
           {file && file.mimeType?.startsWith("image/") && (
-            <Image source={{ uri: file.uri }} style={styles.previewImg} />
+            <OptimizedImage uri={file.uri} style={styles.previewImg} />
           )}
           {file && file.mimeType === "application/pdf" && (
             <View style={styles.pdfWrap}>

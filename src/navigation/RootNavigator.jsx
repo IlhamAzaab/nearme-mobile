@@ -7,9 +7,17 @@ import AdminNavigator from "./AdminNavigator";
 import SplashScreen from "../screens/SplashScreen";
 import { useAuth } from "../app/providers/AuthProvider";
 import { API_BASE_URL } from "../constants/api";
-import { preloadAllAppImages } from "../services/ImagePreloader";
+import { fetchJsonWithCache } from "../lib/publicDataCache";
+import { startBackgroundCacheRefresher } from "../services/CacheRefresher";
+import {
+  getCachedFoodItems,
+  getCachedRestaurants,
+  preloadAllAppImages,
+} from "../services/ImagePreloader";
 
 const SPLASH_MIN_MS = 900; // shorter splash for faster startup on low-end devices
+const RESTAURANTS_CACHE_KEY = "public:restaurants";
+const FOODS_CACHE_KEY = "public:foods";
 
 export default function RootNavigator() {
   const {
@@ -22,8 +30,11 @@ export default function RootNavigator() {
     clearAuthTransitionMode,
   } = useAuth();
   const didPreloadCustomerImagesRef = useRef(false);
+  const cacheRefreshCleanupRef = useRef(null);
 
   const [showSplash, setShowSplash] = useState(true);
+  const [customerImagePreloadReady, setCustomerImagePreloadReady] =
+    useState(true);
   const normalizedRole = String(userRole || "")
     .trim()
     .toLowerCase();
@@ -50,22 +61,42 @@ export default function RootNavigator() {
   }, [isAuthenticated, authTransitionMode, clearAuthTransitionMode]);
 
   useEffect(() => {
-    if (!isAuthenticated || effectiveRole !== "customer") return;
+    if (!isAuthenticated || effectiveRole !== "customer") {
+      didPreloadCustomerImagesRef.current = false;
+      setCustomerImagePreloadReady(true);
+
+      if (cacheRefreshCleanupRef.current) {
+        cacheRefreshCleanupRef.current();
+        cacheRefreshCleanupRef.current = null;
+      }
+
+      return;
+    }
     if (didPreloadCustomerImagesRef.current) return;
 
     didPreloadCustomerImagesRef.current = true;
+    setCustomerImagePreloadReady(false);
 
     let cancelled = false;
     (async () => {
       try {
-        const [restaurantsRes, foodsRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/public/restaurants`),
-          fetch(`${API_BASE_URL}/public/foods`),
-        ]);
-
         const [restaurantsPayload, foodsPayload] = await Promise.all([
-          restaurantsRes.json().catch(() => ({})),
-          foodsRes.json().catch(() => ({})),
+          fetchJsonWithCache(
+            RESTAURANTS_CACHE_KEY,
+            async () => {
+              const res = await fetch(`${API_BASE_URL}/public/restaurants`);
+              return res.json().catch(() => ({}));
+            },
+            { ttlMs: 180000 },
+          ),
+          fetchJsonWithCache(
+            FOODS_CACHE_KEY,
+            async () => {
+              const res = await fetch(`${API_BASE_URL}/public/foods`);
+              return res.json().catch(() => ({}));
+            },
+            { ttlMs: 180000 },
+          ),
         ]);
 
         if (cancelled) return;
@@ -77,11 +108,22 @@ export default function RootNavigator() {
         const foods = foodsPayload?.foods || foodsPayload?.data?.foods || [];
 
         await preloadAllAppImages(restaurants, foods);
+
+        if (!cacheRefreshCleanupRef.current) {
+          cacheRefreshCleanupRef.current = startBackgroundCacheRefresher(
+            getCachedRestaurants,
+            getCachedFoodItems,
+          );
+        }
       } catch (error) {
         console.warn(
           "[RootNavigator] Customer image preload failed:",
           error?.message || error,
         );
+      } finally {
+        if (!cancelled) {
+          setCustomerImagePreloadReady(true);
+        }
       }
     })();
 
@@ -90,10 +132,24 @@ export default function RootNavigator() {
     };
   }, [isAuthenticated, effectiveRole]);
 
+  useEffect(() => {
+    return () => {
+      if (cacheRefreshCleanupRef.current) {
+        cacheRefreshCleanupRef.current();
+      }
+    };
+  }, []);
+
+  const shouldHoldForCustomerImageWarmup =
+    isAuthenticated &&
+    effectiveRole === "customer" &&
+    !customerImagePreloadReady;
+
   if (
     isLoading ||
     (showSplash && !skipSplashOnAuth) ||
-    (isAuthenticated && authTransitionMode === "post-login")
+    (isAuthenticated && authTransitionMode === "post-login") ||
+    shouldHoldForCustomerImageWarmup
   ) {
     return <SplashScreen />;
   }

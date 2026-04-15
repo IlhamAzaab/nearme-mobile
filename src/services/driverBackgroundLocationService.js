@@ -1,8 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
-import * as TaskManager from "expo-task-manager";
 import { API_BASE_URL } from "../constants/api";
 import { getAccessToken } from "../lib/authStorage";
+
+let TaskManager = null;
+try {
+  TaskManager = require("expo-task-manager");
+} catch {
+  TaskManager = null;
+}
 
 export const DRIVER_BACKGROUND_LOCATION_TASK =
   "driver-live-location-background-task";
@@ -10,6 +16,19 @@ export const DRIVER_BACKGROUND_LOCATION_TASK =
 const BACKGROUND_SYNC_MIN_INTERVAL_MS = 5000;
 const LAST_SYNC_AT_KEY = "@driver_bg_last_sync_at";
 const AVAILABLE_CACHE_KEY = "available_deliveries_cache";
+
+function getTaskManagerApi() {
+  if (!TaskManager) return null;
+
+  if (
+    typeof TaskManager.isTaskDefined !== "function" ||
+    typeof TaskManager.defineTask !== "function"
+  ) {
+    return null;
+  }
+
+  return TaskManager;
+}
 
 function isValidCoordinatePair(latitude, longitude) {
   const lat = Number(latitude);
@@ -130,8 +149,13 @@ async function syncLocationToBackend(location) {
   );
 }
 
-if (!TaskManager.isTaskDefined(DRIVER_BACKGROUND_LOCATION_TASK)) {
-  TaskManager.defineTask(
+const taskManagerApi = getTaskManagerApi();
+
+if (
+  taskManagerApi &&
+  !taskManagerApi.isTaskDefined(DRIVER_BACKGROUND_LOCATION_TASK)
+) {
+  taskManagerApi.defineTask(
     DRIVER_BACKGROUND_LOCATION_TASK,
     async ({ data, error }) => {
       if (error) {
@@ -155,6 +179,10 @@ if (!TaskManager.isTaskDefined(DRIVER_BACKGROUND_LOCATION_TASK)) {
 }
 
 export async function startDriverBackgroundLocationTracking() {
+  if (!getTaskManagerApi()) {
+    return { ok: false, reason: "task_manager_unavailable" };
+  }
+
   const foregroundPermission =
     await Location.requestForegroundPermissionsAsync();
 
@@ -195,6 +223,10 @@ export async function startDriverBackgroundLocationTracking() {
 }
 
 export async function stopDriverBackgroundLocationTracking() {
+  if (!getTaskManagerApi()) {
+    return;
+  }
+
   const started = await Location.hasStartedLocationUpdatesAsync(
     DRIVER_BACKGROUND_LOCATION_TASK,
   );

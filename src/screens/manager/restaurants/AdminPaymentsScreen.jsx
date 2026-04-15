@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../../components/common/OptimizedImage";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
 import { API_URL } from "../../../config/env";
@@ -111,7 +111,7 @@ const AdminPaymentsScreen = () => {
         {/* Logo */}
         <View style={styles.logoWrap}>
           {item.logo_url ? (
-            <Image source={{ uri: item.logo_url }} style={styles.logo} />
+            <OptimizedImage uri={item.logo_url} style={styles.logo} />
           ) : (
             <View style={styles.logoPlaceholder}>
               <Text style={styles.logoText}>

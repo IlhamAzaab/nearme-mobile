@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   StyleSheet,
   Text,
   TextInput,
@@ -14,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../../components/common/OptimizedImage";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
 import { API_URL } from "../../../config/env";
@@ -127,8 +127,8 @@ const AdminManagementScreen = () => {
           {/* Avatar */}
           <View style={styles.avatarWrap}>
             {item.restaurants?.logo_url ? (
-              <Image
-                source={{ uri: item.restaurants.logo_url }}
+              <OptimizedImage
+                uri={item.restaurants.logo_url}
                 style={styles.logoImg}
               />
             ) : null}

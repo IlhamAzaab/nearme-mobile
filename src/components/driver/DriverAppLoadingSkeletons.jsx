@@ -1,5 +1,94 @@
+import { SafeAreaView } from "react-native-safe-area-context";
 import { StyleSheet, View } from "react-native";
 import SkeletonBlock from "../common/SkeletonBlock";
+import DriverScreenSection from "./DriverScreenSection";
+import DriverScreenHeader from "./DriverScreenHeader";
+
+export function DriverHistoryFullScreenSkeleton() {
+  return (
+    <SafeAreaView style={[styles.container, { flex: 1 }]}>
+      <View style={{ flex: 1 }}>
+        <DriverScreenSection screenKey="DeliveryHistory" sectionIndex={0}>
+          <DriverScreenHeader title="Delivery History" />
+        </DriverScreenSection>
+
+        <DriverScreenSection
+          screenKey="DeliveryHistory"
+          sectionIndex={1}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.listWrap}>
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <View key={`history-skeleton-${i}`} style={styles.simpleListCard}>
+                <View style={styles.listRow}>
+                  <SkeletonBlock width={40} height={40} borderRadius={20} />
+                  <View style={styles.flex1}>
+                    <SkeletonBlock width={140} height={14} borderRadius={6} />
+                    <SkeletonBlock
+                      width="100%"
+                      height={12}
+                      borderRadius={6}
+                      style={styles.mt6}
+                    />
+                    <SkeletonBlock
+                      width="70%"
+                      height={12}
+                      borderRadius={6}
+                      style={styles.mt6}
+                    />
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        </DriverScreenSection>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+export function DriverNotificationsFullScreenSkeleton() {
+  return (
+    <SafeAreaView style={[styles.container, { flex: 1 }]}>
+      <View style={{ flex: 1 }}>
+        <DriverScreenSection screenKey="DriverNotifications" sectionIndex={0}>
+          <DriverScreenHeader title="Notifications" />
+        </DriverScreenSection>
+
+        <DriverScreenSection
+          screenKey="DriverNotifications"
+          sectionIndex={1}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.listWrap}>
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <View key={`notif-skeleton-${i}`} style={styles.simpleListCard}>
+                <View style={styles.listRow}>
+                  <SkeletonBlock width={40} height={40} borderRadius={20} />
+                  <View style={styles.flex1}>
+                    <SkeletonBlock width={140} height={14} borderRadius={6} />
+                    <SkeletonBlock
+                      width="100%"
+                      height={12}
+                      borderRadius={6}
+                      style={styles.mt6}
+                    />
+                    <SkeletonBlock
+                      width="70%"
+                      height={12}
+                      borderRadius={6}
+                      style={styles.mt6}
+                    />
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        </DriverScreenSection>
+      </View>
+    </SafeAreaView>
+  );
+}
 
 export function DriverDashboardLoadingSkeleton() {
   return (
@@ -215,6 +304,9 @@ export function DriverProfileLoadingSkeleton() {
 }
 
 const styles = StyleSheet.create({
+  container: {
+    backgroundColor: "#F8FAFC",
+  },
   dashboardWrap: {
     flex: 1,
     backgroundColor: "#F8FAFC",

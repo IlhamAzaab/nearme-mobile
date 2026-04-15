@@ -25,7 +25,6 @@ import {
   Animated,
   Dimensions,
   Easing,
-  Image,
   Linking,
   PanResponder,
   Platform,
@@ -45,6 +44,7 @@ import Svg, { Circle, Ellipse, Path, Rect } from "react-native-svg";
 import OSMMapView from "../../components/maps/OSMMapView";
 import LiveDriverMap from "../../components/maps/LiveDriverMap";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import OrderPlacedBackground from "../../components/customer/OrderPlacedBackground";
 import { API_BASE_URL } from "../../constants/api";
 import { fetchOSRMRoute } from "../../utils/osrmClient";
@@ -654,10 +654,10 @@ const RestaurantCard = React.memo(({ data }) => {
     <View style={st.restaurantCard}>
       <View style={st.restaurantLogoWrap}>
         {logoUri && !logoError ? (
-          <Image
-            source={{ uri: logoUri }}
+          <OptimizedImage
+            uri={logoUri}
             style={st.restaurantLogoImg}
-            resizeMode="cover"
+            contentFit="cover"
             onError={() => setLogoError(true)}
           />
         ) : (
@@ -725,10 +725,10 @@ const OrderSummaryCard = React.memo(({ data, expanded, onToggle }) => {
       <View style={st.summaryRestaurantSection}>
         <View style={st.summaryRestaurantLogoWrap}>
           {logoUri && !logoError ? (
-            <Image
-              source={{ uri: logoUri }}
+            <OptimizedImage
+              uri={logoUri}
               style={st.summaryRestaurantLogo}
-              resizeMode="cover"
+              contentFit="cover"
               onError={() => setLogoError(true)}
             />
           ) : (
@@ -1231,7 +1231,7 @@ const DriverCard = React.memo(({ driver }) => {
     <View style={st.driverCard}>
       <View style={st.driverAvatarWrap}>
         {driver.photo_url ? (
-          <Image source={{ uri: driver.photo_url }} style={st.driverAvatar} />
+          <OptimizedImage uri={driver.photo_url} style={st.driverAvatar} />
         ) : (
           <View style={st.driverAvatarFallback}>
             <Ionicons name="person" size={20} color="#06C168" />

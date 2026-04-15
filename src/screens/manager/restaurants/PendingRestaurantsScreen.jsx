@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Linking,
   Modal,
   ScrollView,
@@ -16,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../../components/common/OptimizedImage";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
 import { API_URL } from "../../../config/env";
@@ -234,8 +234,8 @@ const PendingRestaurantsScreen = () => {
                   }
                 >
                   <Text style={styles.imageLabel}>Profile Photo</Text>
-                  <Image
-                    source={{ uri: admin.profile_photo_url }}
+                  <OptimizedImage
+                    uri={admin.profile_photo_url}
                     style={styles.docImage}
                   />
                 </TouchableOpacity>
@@ -248,8 +248,8 @@ const PendingRestaurantsScreen = () => {
                   }
                 >
                   <Text style={styles.imageLabel}>NIC Front</Text>
-                  <Image
-                    source={{ uri: admin.nic_front }}
+                  <OptimizedImage
+                    uri={admin.nic_front}
                     style={styles.docImage}
                   />
                 </TouchableOpacity>
@@ -262,8 +262,8 @@ const PendingRestaurantsScreen = () => {
                   }
                 >
                   <Text style={styles.imageLabel}>NIC Back</Text>
-                  <Image
-                    source={{ uri: admin.nic_back }}
+                  <OptimizedImage
+                    uri={admin.nic_back}
                     style={styles.docImage}
                   />
                 </TouchableOpacity>
@@ -326,10 +326,7 @@ const PendingRestaurantsScreen = () => {
                   }
                 >
                   <Text style={styles.imageLabel}>Logo</Text>
-                  <Image
-                    source={{ uri: rest.logo_url }}
-                    style={styles.docImage}
-                  />
+                  <OptimizedImage uri={rest.logo_url} style={styles.docImage} />
                 </TouchableOpacity>
               )}
               {rest.cover_image_url && (
@@ -343,8 +340,8 @@ const PendingRestaurantsScreen = () => {
                   }
                 >
                   <Text style={styles.imageLabel}>Cover Image</Text>
-                  <Image
-                    source={{ uri: rest.cover_image_url }}
+                  <OptimizedImage
+                    uri={rest.cover_image_url}
                     style={styles.docImage}
                   />
                 </TouchableOpacity>
@@ -471,10 +468,10 @@ const PendingRestaurantsScreen = () => {
               </TouchableOpacity>
             </View>
             {selectedImage && (
-              <Image
-                source={{ uri: selectedImage.src }}
+              <OptimizedImage
+                uri={selectedImage.src}
                 style={styles.imgModalImage}
-                resizeMode="contain"
+                contentFit="contain"
               />
             )}
           </View>

@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   ScrollView,
   StatusBar,
@@ -14,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
+import OptimizedImage from "../../components/common/OptimizedImage";
 
 /* ─────────────────────── PROFILE SCREEN ─────────────────────── */
 
@@ -90,7 +90,7 @@ export default function ProfileScreen({ navigation }) {
         <View style={st.profileCard}>
           <View style={st.avatarWrap}>
             {profilePic ? (
-              <Image source={{ uri: profilePic }} style={st.avatarImg} />
+              <OptimizedImage uri={profilePic} style={st.avatarImg} />
             ) : (
               <View style={st.avatarFallback}>
                 <Text style={st.avatarInitial}>{initial}</Text>
@@ -104,7 +104,16 @@ export default function ProfileScreen({ navigation }) {
           </Text>
           <Pressable
             style={st.editBtn}
-            onPress={() => navigation.navigate("EditProfile")}
+            onPress={() =>
+              navigation.navigate("EditProfile", {
+                prefill: {
+                  name: user?.name || "",
+                  email: user?.email || "",
+                  phone: phone || "",
+                  profilePic: profilePic || null,
+                },
+              })
+            }
           >
             <Ionicons name="create-outline" size={16} color="#fff" />
             <Text style={st.editBtnTxt}>Edit Profile</Text>
@@ -147,26 +156,32 @@ export default function ProfileScreen({ navigation }) {
           <MenuItem
             icon="help-circle-outline"
             label="Help & Support"
-            onPress={() => navigation.navigate("WebView", {
-              url: "https://shimmering-sunshine-63d746.netlify.app",
-              title: "Help & Support"
-            })}
+            onPress={() =>
+              navigation.navigate("WebView", {
+                url: "https://shimmering-sunshine-63d746.netlify.app",
+                title: "Help & Support",
+              })
+            }
           />
           <MenuItem
             icon="document-text-outline"
             label="Terms of Service"
-            onPress={() => navigation.navigate("WebView", {
-              url: "https://lucent-bombolone-2fa396.netlify.app",
-              title: "Terms of Service"
-            })}
+            onPress={() =>
+              navigation.navigate("WebView", {
+                url: "https://lucent-bombolone-2fa396.netlify.app",
+                title: "Terms of Service",
+              })
+            }
           />
           <MenuItem
             icon="shield-checkmark-outline"
             label="Privacy Policy"
-            onPress={() => navigation.navigate("WebView", {
-              url: "https://melodious-klepon-a7c816.netlify.app",
-              title: "Privacy Policy"
-            })}
+            onPress={() =>
+              navigation.navigate("WebView", {
+                url: "https://melodious-klepon-a7c816.netlify.app",
+                title: "Privacy Policy",
+              })
+            }
           />
         </View>
 

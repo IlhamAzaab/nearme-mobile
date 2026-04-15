@@ -1,10 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
+  Animated,
   FlatList,
-  Image,
   Keyboard,
   Modal,
   Pressable,
@@ -40,6 +46,7 @@ const LAUNCH_PROMO_DEFAULTS = {
 
 const RESTAURANTS_CACHE_KEY = "public:restaurants";
 const FOODS_CACHE_KEY = "public:foods";
+const HOME_FIRST_ENTER_ANIMATED_KEY = "@home_first_enter_animated";
 
 function getCachedRestaurantsList() {
   const cached = getCachedJson(RESTAURANTS_CACHE_KEY, 120000);
@@ -252,10 +259,10 @@ const CategoryIcon = ({ type }) => {
   }
 
   return (
-    <Image
-      source={{ uri }}
+    <OptimizedImage
+      uri={uri}
       style={styles.catImage}
-      resizeMode="cover"
+      contentFit="cover"
       onError={() => setFailed(true)}
     />
   );
@@ -308,6 +315,8 @@ const CategorySection = React.memo(function CategorySection({
 
 export default function HomeScreen({ navigation }) {
   const randomSortSeed = useMemo(() => `${Date.now()}-${Math.random()}`, []);
+  const enterTranslateY = useRef(new Animated.Value(0)).current;
+  const enterOpacity = useRef(new Animated.Value(1)).current;
 
   // Full data from API (not filtered)
   const [allRestaurants, setAllRestaurants] = useState(() =>
@@ -354,6 +363,48 @@ export default function HomeScreen({ navigation }) {
     ],
     [],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const runEnterAnimation = async () => {
+      try {
+        const hasAnimated = await AsyncStorage.getItem(
+          HOME_FIRST_ENTER_ANIMATED_KEY,
+        );
+
+        if (cancelled || hasAnimated) {
+          return;
+        }
+
+        enterTranslateY.setValue(50);
+        enterOpacity.setValue(0);
+
+        Animated.parallel([
+          Animated.timing(enterTranslateY, {
+            toValue: 0,
+            duration: 350,
+            useNativeDriver: true,
+          }),
+          Animated.timing(enterOpacity, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start();
+
+        await AsyncStorage.setItem(HOME_FIRST_ENTER_ANIMATED_KEY, "1");
+      } catch {
+        // Non-blocking: screen should render even if animation persistence fails.
+      }
+    };
+
+    runEnterAnimation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enterOpacity, enterTranslateY]);
 
   useEffect(() => {
     prefetchImageUrls(Object.values(CATEGORY_IMAGES));
@@ -1072,289 +1123,314 @@ export default function HomeScreen({ navigation }) {
     <SafeAreaView style={styles.page} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      <Modal
-        visible={showLaunchPromoModal}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: enterOpacity,
+          transform: [{ translateY: enterTranslateY }],
+        }}
       >
-        <View style={styles.promoBackdrop}>
-          <View style={styles.promoCard}>
-            <View style={styles.promoHeader}>
-              <Text style={styles.promoKicker}>Launch Offer</Text>
-              <Text style={styles.promoTitle}>Welcome to Meezo</Text>
-              <Text style={styles.promoSubtitle}>
-                Your first delivery gets a special offer.
-              </Text>
-            </View>
-
-            <View style={styles.promoBody}>
-              <View style={styles.promoPriceCard}>
-                <Text style={styles.promoPriceMain}>Only 1 rupees per km</Text>
-                <Text style={styles.promoPriceSub}>Up to 5km</Text>
-              </View>
-
-              <Text style={styles.promoNote}>
-                This offer applies only to your first order for this account.
-              </Text>
-
-              <Pressable
-                onPress={handleLaunchPromoOk}
-                disabled={acknowledgingPromo}
-                style={({ pressed }) => [
-                  styles.promoOkBtn,
-                  acknowledgingPromo && styles.promoOkBtnDisabled,
-                  pressed && !acknowledgingPromo ? { opacity: 0.9 } : null,
-                ]}
-              >
-                <Text style={styles.promoOkText}>
-                  {acknowledgingPromo ? "Saving..." : "OK"}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Header - Glass Morphism */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          {/* Logo & Delivery Info */}
-          <View style={styles.logoSection}>
-            <View style={styles.logoBox}>
-              <Svg width={40} height={40} viewBox="1650 1600 2750 2050">
-                <G transform="translate(0,6000) scale(1,-1)" stroke="none">
-                  <Path
-                    fill="#000000"
-                    d="M2392 3486 c-24 -6 -40 -15 -36 -19 4 -4 2 -7 -3 -7 -18 0 -78 -63 -92 -98 -7 -17 -18 -32 -23 -32 -5 0 -7 -4 -4 -9 4 -5 1 -11 -4 -13 -6 -2 -12 -10 -13 -18 -1 -8 -22 -51 -46 -95 -25 -44 -44 -82 -43 -85 0 -3 -5 -12 -12 -20 -7 -8 -24 -37 -37 -65 -13 -27 -27 -52 -31 -55 -4 -3 -32 -53 -61 -110 -88 -170 -131 -252 -160 -301 -25 -43 -26 -47 -10 -53 10 -4 92 -6 183 -5 161 2 260 17 260 39 0 6 7 10 17 10 9 0 14 2 11 6 -3 3 8 20 26 38 17 19 51 73 76 121 54 104 61 117 80 141 13 16 13 17 0 9 -8 -4 -6 2 6 16 11 13 33 51 49 84 32 67 69 105 102 105 25 0 93 -37 93 -52 0 -5 4 -7 9 -4 5 3 11 -1 15 -9 3 -8 12 -15 21 -15 8 0 15 -3 15 -8 0 -4 18 -18 39 -32 22 -13 37 -29 34 -34 -4 -6 -3 -8 1 -4 5 4 25 -4 46 -17 27 -17 40 -21 48 -13 6 6 19 12 29 13 18 2 74 25 83 35 3 3 21 13 40 22 59 29 195 91 200 92 3 1 31 15 64 31 53 27 110 74 112 93 2 14 18 47 41 84 13 21 23 45 23 53 0 9 5 13 10 10 6 -3 10 1 10 9 0 8 11 35 24 60 l24 46 -26 -7 c-15 -3 -64 -25 -109 -48 -45 -23 -93 -45 -107 -49 -14 -3 -26 -11 -26 -17 0 -6 -4 -7 -10 -4 -5 3 -10 2 -10 -3 0 -5 -24 -17 -54 -26 -30 -10 -60 -24 -67 -32 -6 -8 -18 -14 -27 -14 -8 0 -39 -13 -68 -30 -50 -28 -54 -29 -83 -14 -17 9 -28 20 -25 26 4 6 -2 8 -16 3 -15 -5 -20 -4 -16 3 4 6 -21 30 -56 53 -35 24 -69 49 -76 56 -7 7 -17 13 -21 13 -4 0 -17 8 -29 18 -54 45 -63 52 -71 52 -4 0 -16 9 -26 20 -10 11 -21 17 -25 15 -5 -3 -10 -2 -12 2 -17 40 -169 63 -256 39z"
-                  />
-                  <Path
-                    fill="#000000"
-                    d="M3768 3488 c-16 -5 -28 -14 -28 -19 0 -5 -6 -9 -13 -9 -7 0 -18 -12 -24 -27 -16 -37 -104 -197 -112 -203 -3 -3 -33 -58 -65 -123 -33 -66 -70 -134 -83 -153 -12 -19 -23 -41 -23 -49 0 -8 -4 -15 -9 -15 -5 0 -13 -10 -17 -22 -3 -13 -14 -32 -23 -42 -11 -13 -12 -17 -2 -11 8 4 1 -12 -16 -36 -17 -24 -38 -62 -49 -84 -10 -22 -23 -43 -28 -47 -6 -4 -7 -8 -2 -8 5 0 2 -8 -6 -17 -24 -29 -59 -104 -53 -113 3 -5 87 -8 188 -7 171 2 185 4 232 27 47 23 95 61 95 76 0 3 10 20 22 37 12 17 23 37 24 44 1 6 13 27 27 45 36 49 43 63 26 53 -11 -7 -11 -5 1 9 18 23 82 138 146 264 26 50 51 92 57 92 6 0 8 3 4 6 -3 4 5 27 20 53 42 76 71 128 100 179 31 52 38 92 20 104 -17 11 -376 8 -409 -4z"
-                  />
-                </G>
-              </Svg>
-            </View>
-          </View>
-
-          {/* Search */}
-          <View style={styles.searchWrap}>
-            <Ionicons
-              name="search"
-              size={26}
-              color="#94A3B8"
-              style={styles.searchIcon}
-            />
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Search..."
-              placeholderTextColor="#94A3B8"
-              style={styles.searchInput}
-            />
-            {searchQuery.trim().length > 0 && (
-              <Pressable
-                onPress={handleClearSearch}
-                style={styles.searchClearBtn}
-                hitSlop={8}
-              >
-                <Ionicons name="close-circle" size={20} color="#94A3B8" />
-              </Pressable>
-            )}
-          </View>
-
-          {/* Notifications */}
-          <Pressable
-            onPress={() => {
-              navigation.navigate("Notifications");
-            }}
-            style={({ pressed }) => [
-              styles.bellBtn,
-              pressed && { opacity: 0.85 },
-            ]}
-          >
-            <Ionicons name="notifications" size={32} color="#06C168" />
-            {unreadCount > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </Text>
-              </View>
-            )}
-          </Pressable>
-        </View>
-      </View>
-
-      {shouldShowSkeleton ? (
-        <ScrollView
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-          decelerationRate="fast"
-          disableIntervalMomentum
+        <Modal
+          visible={showLaunchPromoModal}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
         >
-          {renderDiscoveryHeader()}
-          {activeTab === "food" ? (
-            <View style={{ gap: 12 }}>
-              {[1, 2, 3].map((row) => (
-                <View key={row} style={{ flexDirection: "row", gap: 12 }}>
-                  {[1, 2].map((col) => (
-                    <View
-                      key={`${row}-${col}`}
-                      style={{
-                        flex: 1,
-                        backgroundColor: "#fff",
-                        borderRadius: 16,
-                        borderWidth: 1,
-                        borderColor: "#F1F5F9",
-                        overflow: "hidden",
-                        height: 242,
-                      }}
-                    >
-                      <SkeletonBlock
-                        width="100%"
-                        height={130}
-                        borderRadius={0}
-                      />
-                      <View style={{ padding: 10, gap: 6 }}>
+          <View style={styles.promoBackdrop}>
+            <View style={styles.promoCard}>
+              <View style={styles.promoHeader}>
+                <Text style={styles.promoKicker}>Launch Offer</Text>
+                <Text style={styles.promoTitle}>Welcome to Meezo</Text>
+                <Text style={styles.promoSubtitle}>
+                  Your first delivery gets a special offer.
+                </Text>
+              </View>
+
+              <View style={styles.promoBody}>
+                <View style={styles.promoPriceCard}>
+                  <Text style={styles.promoPriceMain}>
+                    Only 1 rupees per km
+                  </Text>
+                  <Text style={styles.promoPriceSub}>Up to 5km</Text>
+                </View>
+
+                <Text style={styles.promoNote}>
+                  This offer applies only to your first order for this account.
+                </Text>
+
+                <Pressable
+                  onPress={handleLaunchPromoOk}
+                  disabled={acknowledgingPromo}
+                  style={({ pressed }) => [
+                    styles.promoOkBtn,
+                    acknowledgingPromo && styles.promoOkBtnDisabled,
+                    pressed && !acknowledgingPromo ? { opacity: 0.9 } : null,
+                  ]}
+                >
+                  <Text style={styles.promoOkText}>
+                    {acknowledgingPromo ? "Saving..." : "OK"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Header - Glass Morphism */}
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            {/* Logo & Delivery Info */}
+            <View style={styles.logoSection}>
+              <View style={styles.logoBox}>
+                <Svg width={40} height={40} viewBox="1650 1600 2750 2050">
+                  <G transform="translate(0,6000) scale(1,-1)" stroke="none">
+                    <Path
+                      fill="#000000"
+                      d="M2392 3486 c-24 -6 -40 -15 -36 -19 4 -4 2 -7 -3 -7 -18 0 -78 -63 -92 -98 -7 -17 -18 -32 -23 -32 -5 0 -7 -4 -4 -9 4 -5 1 -11 -4 -13 -6 -2 -12 -10 -13 -18 -1 -8 -22 -51 -46 -95 -25 -44 -44 -82 -43 -85 0 -3 -5 -12 -12 -20 -7 -8 -24 -37 -37 -65 -13 -27 -27 -52 -31 -55 -4 -3 -32 -53 -61 -110 -88 -170 -131 -252 -160 -301 -25 -43 -26 -47 -10 -53 10 -4 92 -6 183 -5 161 2 260 17 260 39 0 6 7 10 17 10 9 0 14 2 11 6 -3 3 8 20 26 38 17 19 51 73 76 121 54 104 61 117 80 141 13 16 13 17 0 9 -8 -4 -6 2 6 16 11 13 33 51 49 84 32 67 69 105 102 105 25 0 93 -37 93 -52 0 -5 4 -7 9 -4 5 3 11 -1 15 -9 3 -8 12 -15 21 -15 8 0 15 -3 15 -8 0 -4 18 -18 39 -32 22 -13 37 -29 34 -34 -4 -6 -3 -8 1 -4 5 4 25 -4 46 -17 27 -17 40 -21 48 -13 6 6 19 12 29 13 18 2 74 25 83 35 3 3 21 13 40 22 59 29 195 91 200 92 3 1 31 15 64 31 53 27 110 74 112 93 2 14 18 47 41 84 13 21 23 45 23 53 0 9 5 13 10 10 6 -3 10 1 10 9 0 8 11 35 24 60 l24 46 -26 -7 c-15 -3 -64 -25 -109 -48 -45 -23 -93 -45 -107 -49 -14 -3 -26 -11 -26 -17 0 -6 -4 -7 -10 -4 -5 3 -10 2 -10 -3 0 -5 -24 -17 -54 -26 -30 -10 -60 -24 -67 -32 -6 -8 -18 -14 -27 -14 -8 0 -39 -13 -68 -30 -50 -28 -54 -29 -83 -14 -17 9 -28 20 -25 26 4 6 -2 8 -16 3 -15 -5 -20 -4 -16 3 4 6 -21 30 -56 53 -35 24 -69 49 -76 56 -7 7 -17 13 -21 13 -4 0 -17 8 -29 18 -54 45 -63 52 -71 52 -4 0 -16 9 -26 20 -10 11 -21 17 -25 15 -5 -3 -10 -2 -12 2 -17 40 -169 63 -256 39z"
+                    />
+                    <Path
+                      fill="#000000"
+                      d="M3768 3488 c-16 -5 -28 -14 -28 -19 0 -5 -6 -9 -13 -9 -7 0 -18 -12 -24 -27 -16 -37 -104 -197 -112 -203 -3 -3 -33 -58 -65 -123 -33 -66 -70 -134 -83 -153 -12 -19 -23 -41 -23 -49 0 -8 -4 -15 -9 -15 -5 0 -13 -10 -17 -22 -3 -13 -14 -32 -23 -42 -11 -13 -12 -17 -2 -11 8 4 1 -12 -16 -36 -17 -24 -38 -62 -49 -84 -10 -22 -23 -43 -28 -47 -6 -4 -7 -8 -2 -8 5 0 2 -8 -6 -17 -24 -29 -59 -104 -53 -113 3 -5 87 -8 188 -7 171 2 185 4 232 27 47 23 95 61 95 76 0 3 10 20 22 37 12 17 23 37 24 44 1 6 13 27 27 45 36 49 43 63 26 53 -11 -7 -11 -5 1 9 18 23 82 138 146 264 26 50 51 92 57 92 6 0 8 3 4 6 -3 4 5 27 20 53 42 76 71 128 100 179 31 52 38 92 20 104 -17 11 -376 8 -409 -4z"
+                    />
+                  </G>
+                </Svg>
+              </View>
+            </View>
+
+            {/* Search */}
+            <View style={styles.searchWrap}>
+              <Ionicons
+                name="search"
+                size={26}
+                color="#94A3B8"
+                style={styles.searchIcon}
+              />
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search..."
+                placeholderTextColor="#94A3B8"
+                style={styles.searchInput}
+              />
+              {searchQuery.trim().length > 0 && (
+                <Pressable
+                  onPress={handleClearSearch}
+                  style={styles.searchClearBtn}
+                  hitSlop={8}
+                >
+                  <Ionicons name="close-circle" size={20} color="#94A3B8" />
+                </Pressable>
+              )}
+            </View>
+
+            {/* Notifications */}
+            <Pressable
+              onPress={() => {
+                navigation.navigate("Notifications");
+              }}
+              style={({ pressed }) => [
+                styles.bellBtn,
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <Ionicons name="notifications" size={32} color="#06C168" />
+              {unreadCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
+        </View>
+
+        {shouldShowSkeleton ? (
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            decelerationRate="fast"
+            disableIntervalMomentum
+          >
+            {renderDiscoveryHeader()}
+            {activeTab === "food" ? (
+              <View style={{ gap: 12 }}>
+                {[1, 2, 3].map((row) => (
+                  <View key={row} style={{ flexDirection: "row", gap: 12 }}>
+                    {[1, 2].map((col) => (
+                      <View
+                        key={`${row}-${col}`}
+                        style={{
+                          flex: 1,
+                          backgroundColor: "#fff",
+                          borderRadius: 16,
+                          borderWidth: 1,
+                          borderColor: "#F1F5F9",
+                          overflow: "hidden",
+                          height: 242,
+                        }}
+                      >
                         <SkeletonBlock
-                          width="70%"
-                          height={14}
-                          borderRadius={6}
+                          width="100%"
+                          height={130}
+                          borderRadius={0}
                         />
-                        <SkeletonBlock
-                          width="45%"
-                          height={11}
-                          borderRadius={6}
-                        />
-                        <SkeletonBlock
-                          width="90%"
-                          height={11}
-                          borderRadius={6}
-                        />
-                        <SkeletonBlock
-                          width="75%"
-                          height={11}
-                          borderRadius={6}
-                        />
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            marginTop: 8,
-                          }}
-                        >
+                        <View style={{ padding: 10, gap: 6 }}>
                           <SkeletonBlock
-                            width="48%"
+                            width="70%"
                             height={14}
                             borderRadius={6}
                           />
                           <SkeletonBlock
-                            width="28%"
-                            height={12}
+                            width="45%"
+                            height={11}
                             borderRadius={6}
                           />
+                          <SkeletonBlock
+                            width="90%"
+                            height={11}
+                            borderRadius={6}
+                          />
+                          <SkeletonBlock
+                            width="75%"
+                            height={11}
+                            borderRadius={6}
+                          />
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              marginTop: 8,
+                            }}
+                          >
+                            <SkeletonBlock
+                              width="48%"
+                              height={14}
+                              borderRadius={6}
+                            />
+                            <SkeletonBlock
+                              width="28%"
+                              height={12}
+                              borderRadius={6}
+                            />
+                          </View>
                         </View>
                       </View>
-                    </View>
-                  ))}
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={{ gap: 20 }}>
-              {[1, 2, 3].map((i) => (
-                <View
-                  key={i}
-                  style={{
-                    backgroundColor: "#fff",
-                    borderRadius: 16,
-                    overflow: "hidden",
-                  }}
-                >
-                  <SkeletonBlock width="100%" height={180} borderRadius={0} />
+                    ))}
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={{ gap: 20 }}>
+                {[1, 2, 3].map((i) => (
                   <View
+                    key={i}
                     style={{
-                      padding: 12,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
+                      backgroundColor: "#fff",
+                      borderRadius: 16,
+                      overflow: "hidden",
                     }}
                   >
-                    <SkeletonBlock width={44} height={44} borderRadius={22} />
-                    <View style={{ flex: 1, gap: 8 }}>
-                      <SkeletonBlock width="65%" height={16} borderRadius={8} />
-                      <SkeletonBlock width="40%" height={12} borderRadius={6} />
-                      <SkeletonBlock width="50%" height={10} borderRadius={5} />
+                    <SkeletonBlock width="100%" height={180} borderRadius={0} />
+                    <View
+                      style={{
+                        padding: 12,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 10,
+                      }}
+                    >
+                      <SkeletonBlock width={44} height={44} borderRadius={22} />
+                      <View style={{ flex: 1, gap: 8 }}>
+                        <SkeletonBlock
+                          width="65%"
+                          height={16}
+                          borderRadius={8}
+                        />
+                        <SkeletonBlock
+                          width="40%"
+                          height={12}
+                          borderRadius={6}
+                        />
+                        <SkeletonBlock
+                          width="50%"
+                          height={10}
+                          borderRadius={5}
+                        />
+                      </View>
                     </View>
                   </View>
-                </View>
-              ))}
-            </View>
-          )}
-          <View style={{ height: 90 }} />
-        </ScrollView>
-      ) : activeTab === "restaurant" ? (
-        <FlatList
-          key="restaurantList"
-          data={restaurants}
-          keyExtractor={(item, index) =>
-            String(getRestaurantId(item) ?? `restaurant-${index}`)
-          }
-          ListHeaderComponent={renderDiscoveryHeader}
-          ListEmptyComponent={EmptyState}
-          ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
-          renderItem={renderRestaurantItem}
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-          initialNumToRender={6}
-          maxToRenderPerBatch={6}
-          updateCellsBatchingPeriod={40}
-          windowSize={5}
-          removeClippedSubviews
-          getItemLayout={(_, index) => ({
-            length: RESTAURANT_CARD_ESTIMATED_HEIGHT,
-            offset: RESTAURANT_CARD_ESTIMATED_HEIGHT * index,
-            index,
-          })}
-          decelerationRate="fast"
-          disableIntervalMomentum
-          ListFooterComponent={<View style={{ height: 90 }} />}
-        />
-      ) : (
-        <FlatList
-          key="foodList"
-          data={allFoods}
-          keyExtractor={(item) => String(item.id)}
-          numColumns={2}
-          ListHeaderComponent={renderDiscoveryHeader}
-          ListEmptyComponent={EmptyState}
-          renderItem={renderFoodItem}
-          columnWrapperStyle={{ gap: 12 }}
-          contentContainerStyle={[styles.content, { gap: 12 }]}
-          showsVerticalScrollIndicator={false}
-          initialNumToRender={10}
-          maxToRenderPerBatch={12}
-          updateCellsBatchingPeriod={24}
-          windowSize={6}
-          removeClippedSubviews
-          decelerationRate="fast"
-          disableIntervalMomentum
-          ListFooterComponent={<View style={{ height: 90 }} />}
-        />
-      )}
+                ))}
+              </View>
+            )}
+            <View style={{ height: 90 }} />
+          </ScrollView>
+        ) : activeTab === "restaurant" ? (
+          <FlatList
+            key="restaurantList"
+            data={restaurants}
+            keyExtractor={(item, index) =>
+              String(getRestaurantId(item) ?? `restaurant-${index}`)
+            }
+            ListHeaderComponent={renderDiscoveryHeader}
+            ListEmptyComponent={EmptyState}
+            ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
+            renderItem={renderRestaurantItem}
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            initialNumToRender={6}
+            maxToRenderPerBatch={6}
+            updateCellsBatchingPeriod={40}
+            windowSize={5}
+            removeClippedSubviews
+            getItemLayout={(_, index) => ({
+              length: RESTAURANT_CARD_ESTIMATED_HEIGHT,
+              offset: RESTAURANT_CARD_ESTIMATED_HEIGHT * index,
+              index,
+            })}
+            decelerationRate="fast"
+            disableIntervalMomentum
+            ListFooterComponent={<View style={{ height: 90 }} />}
+          />
+        ) : (
+          <FlatList
+            key="foodList"
+            data={allFoods}
+            keyExtractor={(item) => String(item.id)}
+            numColumns={2}
+            ListHeaderComponent={renderDiscoveryHeader}
+            ListEmptyComponent={EmptyState}
+            renderItem={renderFoodItem}
+            columnWrapperStyle={{ gap: 12 }}
+            contentContainerStyle={[styles.content, { gap: 12 }]}
+            showsVerticalScrollIndicator={false}
+            initialNumToRender={10}
+            maxToRenderPerBatch={12}
+            updateCellsBatchingPeriod={24}
+            windowSize={6}
+            removeClippedSubviews
+            decelerationRate="fast"
+            disableIntervalMomentum
+            ListFooterComponent={<View style={{ height: 90 }} />}
+          />
+        )}
 
-      {/* Floating Cart */}
-      {cartCount > 0 && (
-        <Pressable
-          onPress={() => navigation.navigate("Cart")}
-          style={({ pressed }) => [styles.fabCart, pressed && { opacity: 0.9 }]}
-        >
-          <Text style={styles.fabText}>
-            🛒 {cartCount} item{cartCount !== 1 ? "s" : ""} →
-          </Text>
-        </Pressable>
-      )}
+        {/* Floating Cart */}
+        {cartCount > 0 && (
+          <Pressable
+            onPress={() => navigation.navigate("Cart")}
+            style={({ pressed }) => [
+              styles.fabCart,
+              pressed && { opacity: 0.9 },
+            ]}
+          >
+            <Text style={styles.fabText}>
+              🛒 {cartCount} item{cartCount !== 1 ? "s" : ""} →
+            </Text>
+          </Pressable>
+        )}
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -1491,7 +1567,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 100,
-    backgroundColor: "#fffffff",
+    backgroundColor: "#06C168",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
