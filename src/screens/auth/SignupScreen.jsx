@@ -1,5 +1,6 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -19,6 +20,10 @@ import MeezoLogo from "../../components/common/MeezoLogo";
 import FloatingLabelInput from "../../components/common/FloatingLabelInput";
 import supabase from "../../lib/supabaseClient";
 import { normalizeSriLankaPhone } from "../../utils/phone";
+import {
+  buildSignupFlowState,
+  SIGNUP_FLOW_STATE_KEY,
+} from "../../constants/signupFlowState";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
@@ -37,6 +42,13 @@ export default function SignupScreen({ navigation }) {
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const shakeX = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    AsyncStorage.setItem(
+      SIGNUP_FLOW_STATE_KEY,
+      JSON.stringify(buildSignupFlowState("Signup")),
+    ).catch(() => {});
+  }, []);
 
   const triggerShake = () => {
     shakeX.setValue(0);
@@ -99,11 +111,18 @@ export default function SignupScreen({ navigation }) {
         return;
       }
 
-      navigation.navigate("VerifyOtp", {
+      const verifyOtpParams = {
         prefillPhone: normalizedPhone,
         phone: normalizedPhone,
         nextScreen: "CompleteProfile",
-      });
+      };
+
+      await AsyncStorage.setItem(
+        SIGNUP_FLOW_STATE_KEY,
+        JSON.stringify(buildSignupFlowState("VerifyOtp", verifyOtpParams)),
+      );
+
+      navigation.navigate("VerifyOtp", verifyOtpParams);
     } catch (error) {
       console.error("Signup error:", error);
       Alert.alert("Network error", "Please try again.");
@@ -216,7 +235,12 @@ export default function SignupScreen({ navigation }) {
                   <Text style={styles.footerText}>
                     Already have an account?{" "}
                   </Text>
-                  <Pressable onPress={() => navigation.navigate("Login")}>
+                  <Pressable
+                    onPress={async () => {
+                      await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
+                      navigation.navigate("Login");
+                    }}
+                  >
                     <Text style={styles.footerLink}>Log in</Text>
                   </Pressable>
                 </View>

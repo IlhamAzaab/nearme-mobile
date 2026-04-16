@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
 } from "react-native";
 import * as Location from "expo-location";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import {
   SafeAreaView,
@@ -274,19 +273,29 @@ export default function AddressPickerScreen({ navigation }) {
           });
         } catch (liveError) {
           console.warn(
-            "Live location on entry failed, trying saved pin:",
+            "Live location on entry failed, trying profile pin:",
             liveError,
           );
-          const savedAddressStr = await AsyncStorage.getItem("@saved_address");
-          if (savedAddressStr) {
-            const savedAddress = JSON.parse(savedAddressStr);
-            if (savedAddress?.latitude && savedAddress?.longitude) {
+          const token = await getAccessToken();
+          if (token) {
+            const profileRes = await fetch(
+              `${API_BASE_URL}/cart/customer-profile`,
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              },
+            );
+            const profileJson = await profileRes.json().catch(() => ({}));
+            const customer = profileJson?.customer || {};
+            const savedLat = Number(customer?.latitude);
+            const savedLng = Number(customer?.longitude);
+
+            if (Number.isFinite(savedLat) && Number.isFinite(savedLng)) {
               startLocation = {
-                latitude: savedAddress.latitude,
-                longitude: savedAddress.longitude,
+                latitude: savedLat,
+                longitude: savedLng,
               };
-              if (savedAddress.label) setAddressLabel(savedAddress.label);
-              if (savedAddress.city) setAddressCity(savedAddress.city);
+              if (customer?.address) setAddressLabel(String(customer.address));
+              if (customer?.city) setAddressCity(String(customer.city));
             }
           }
 
@@ -358,48 +367,35 @@ export default function AddressPickerScreen({ navigation }) {
     setSaving(true);
     try {
       const token = await getAccessToken();
+      if (!token) {
+        throw new Error("Session expired");
+      }
 
-      const addressData = {
-        latitude: currentCoordinate.latitude,
-        longitude: currentCoordinate.longitude,
-        label: addressLabel,
-        city: addressCity,
-      };
-      await AsyncStorage.setItem("@saved_address", JSON.stringify(addressData));
+      const profileRes = await fetch(`${API_BASE_URL}/cart/customer-profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const profileJson = await profileRes.json().catch(() => ({}));
+      const existingAddress = String(
+        profileJson?.customer?.address || "",
+      ).trim();
+      const existingCity = String(profileJson?.customer?.city || "").trim();
 
-      // Persist only coordinates with existing profile address (not reverse-geocoded map address).
-      if (token) {
-        try {
-          const profileRes = await fetch(
-            `${API_BASE_URL}/cart/customer-profile`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            },
-          );
-          const profileJson = await profileRes.json().catch(() => ({}));
-          const existingAddress = String(
-            profileJson?.customer?.address || "",
-          ).trim();
-          const existingCity = String(profileJson?.customer?.city || "").trim();
-
-          if (existingAddress) {
-            await fetch(`${API_BASE_URL}/customer/address`, {
-              method: "PUT",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({
-                address: existingAddress,
-                city: existingCity,
-                latitude: currentCoordinate.latitude,
-                longitude: currentCoordinate.longitude,
-              }),
-            });
-          }
-        } catch (persistError) {
-          console.warn("Coordinate sync failed:", persistError);
-        }
+      const saveRes = await fetch(`${API_BASE_URL}/customer/address`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          address: existingAddress || null,
+          city: existingCity || null,
+          latitude: currentCoordinate.latitude,
+          longitude: currentCoordinate.longitude,
+        }),
+      });
+      const saveJson = await saveRes.json().catch(() => ({}));
+      if (!saveRes.ok) {
+        throw new Error(saveJson?.message || "Failed to save location pin");
       }
 
       navigation.goBack();

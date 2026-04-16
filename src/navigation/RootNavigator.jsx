@@ -26,6 +26,8 @@ export default function RootNavigator() {
     isLoading,
     authTransitionMode,
     authInitialRoute,
+    authInitialParams,
+    profileCompleted,
     skipSplashOnAuth,
     clearAuthTransitionMode,
   } = useAuth();
@@ -158,6 +160,14 @@ export default function RootNavigator() {
   if (isAuthenticated) {
     switch (effectiveRole) {
       case "customer":
+        if (!profileCompleted) {
+          return (
+            <AuthNavigator
+              initialRouteName="CompleteProfile"
+              initialRouteParams={authInitialParams}
+            />
+          );
+        }
         return <CustomerStack />;
       case "driver":
         return <DriverNavigator />;
@@ -167,10 +177,20 @@ export default function RootNavigator() {
         return <AdminNavigator />;
       default:
         // If role is unknown but authenticated, default to Auth or a generic error
-        return <AuthNavigator initialRouteName={authInitialRoute} />;
+        return (
+          <AuthNavigator
+            initialRouteName={authInitialRoute}
+            initialRouteParams={authInitialParams}
+          />
+        );
     }
   }
 
   // Otherwise show Auth screens
-  return <AuthNavigator initialRouteName={authInitialRoute} />;
+  return (
+    <AuthNavigator
+      initialRouteName={authInitialRoute}
+      initialRouteParams={authInitialParams}
+    />
+  );
 }

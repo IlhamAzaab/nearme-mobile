@@ -1,4 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -21,6 +22,11 @@ import supabase from "../../lib/supabaseClient";
 import pushNotificationService from "../../services/pushNotificationService";
 import { persistAuthSession } from "../../lib/authStorage";
 import { normalizeSriLankaPhone } from "../../utils/phone";
+import { API_BASE_URL } from "../../constants/api";
+import {
+  buildSignupFlowState,
+  SIGNUP_FLOW_STATE_KEY,
+} from "../../constants/signupFlowState";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
@@ -88,9 +94,30 @@ export default function VerifyOtpScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!normalizedPhone) {
+      AsyncStorage.setItem(
+        SIGNUP_FLOW_STATE_KEY,
+        JSON.stringify(buildSignupFlowState("Signup")),
+      ).catch(() => {});
       navigation.navigate("Signup");
     }
   }, [navigation, normalizedPhone]);
+
+  useEffect(() => {
+    if (!normalizedPhone) return;
+
+    AsyncStorage.setItem(
+      SIGNUP_FLOW_STATE_KEY,
+      JSON.stringify(
+        buildSignupFlowState("VerifyOtp", {
+          userId,
+          phone: normalizedPhone,
+          prefillPhone: normalizedPhone,
+          accessToken,
+          nextScreen: nextScreen || "CompleteProfile",
+        }),
+      ),
+    ).catch(() => {});
+  }, [accessToken, nextScreen, normalizedPhone, userId]);
 
   const handleOtpDigitChange = (index, value) => {
     const onlyDigits = String(value || "").replace(/\D/g, "");
@@ -168,61 +195,120 @@ export default function VerifyOtpScreen({ navigation, route }) {
         return;
       }
 
-      const resolvedToken = data?.session?.access_token || accessToken;
+      const supabaseAccessToken = data?.session?.access_token || accessToken;
       const authUser = data?.user || null;
-      const role = authUser?.user_metadata?.role || "customer";
-      const profileCompleted = Boolean(
+      const fallbackRole = authUser?.user_metadata?.role || "customer";
+      const fallbackProfileCompleted = Boolean(
         authUser?.user_metadata?.profile_completed,
       );
-      const resolvedUserId = authUser?.id || userId || null;
-      const userName =
+      const fallbackUserId = authUser?.id || userId || null;
+      const fallbackUserName =
         authUser?.user_metadata?.username ||
         authUser?.user_metadata?.name ||
         null;
 
-      if (!resolvedToken || !resolvedUserId) {
+      if (!supabaseAccessToken || !fallbackUserId) {
         setError("Verification succeeded, but session is incomplete.");
         setLoading(false);
         return;
       }
 
+      let appAccessToken = supabaseAccessToken;
+      let resolvedRole = fallbackRole;
+      let resolvedProfileCompleted = fallbackProfileCompleted;
+      let resolvedUserId = fallbackUserId;
+      let resolvedUserName = fallbackUserName;
+
+      try {
+        const exchangeRes = await fetch(`${API_BASE_URL}/auth/session/exchange`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${supabaseAccessToken}`,
+            "Content-Type": "application/json",
+            "x-client-platform": "react-native",
+          },
+          body: JSON.stringify({}),
+        });
+
+        const exchangeData = await exchangeRes.json().catch(() => ({}));
+        if (exchangeRes.ok) {
+          const exchangedToken = exchangeData?.data?.token;
+          const exchangedUser = exchangeData?.data?.user || null;
+
+          if (exchangedToken) {
+            appAccessToken = exchangedToken;
+          }
+          if (exchangedUser?.role) {
+            resolvedRole = exchangedUser.role;
+          }
+          if (typeof exchangedUser?.profileCompleted === "boolean") {
+            resolvedProfileCompleted = exchangedUser.profileCompleted;
+          }
+          if (exchangedUser?.id) {
+            resolvedUserId = exchangedUser.id;
+          }
+          if (exchangedUser?.name) {
+            resolvedUserName = exchangedUser.name;
+          }
+        } else {
+          console.warn(
+            "Session exchange failed, continuing with temporary token:",
+            exchangeData?.message || exchangeRes.status,
+          );
+        }
+      } catch (exchangeError) {
+        console.warn("Session exchange request failed:", exchangeError?.message);
+      }
+
       await persistAuthSession(
         {
-          token: resolvedToken,
-          role,
+          token: appAccessToken,
+          role: resolvedRole,
           userId: resolvedUserId,
-          userName,
+          userName: resolvedUserName,
         },
         {
           userEmail: authUser?.email || null,
-          profileCompleted,
+          profileCompleted: resolvedProfileCompleted,
         },
       );
 
-      if (resolvedToken) {
-        pushNotificationService.initialize(resolvedToken).catch((err) => {
+      const shouldRouteToProfile =
+        resolvedRole === "customer"
+          ? !resolvedProfileCompleted
+          : nextScreen === "CompleteProfile";
+
+      // Push registration requires backend JWT. Avoid registering in the
+      // incomplete customer profile state to prevent transient 401 noise.
+      if (appAccessToken && !shouldRouteToProfile) {
+        pushNotificationService.initialize(appAccessToken).catch((err) => {
           console.warn("Push notification init error:", err);
         });
       }
-
-      const shouldRouteToProfile =
-        role === "customer"
-          ? !profileCompleted
-          : nextScreen === "CompleteProfile";
 
       setLoading(false);
       setIsTransitioning(true);
 
       setTimeout(async () => {
         if (shouldRouteToProfile) {
-          navigation.replace("CompleteProfile", {
+          const completeProfileParams = {
             userId: resolvedUserId,
-            accessToken: resolvedToken,
+            accessToken: appAccessToken,
             prefillPhone: normalizedPhone,
-          });
+          };
+
+          await AsyncStorage.setItem(
+            SIGNUP_FLOW_STATE_KEY,
+            JSON.stringify(
+              buildSignupFlowState("CompleteProfile", completeProfileParams),
+            ),
+          );
+
+          navigation.replace("CompleteProfile", completeProfileParams);
           return;
         }
 
+        await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
         await refreshAuthState();
       }, 1200);
     } catch (err) {

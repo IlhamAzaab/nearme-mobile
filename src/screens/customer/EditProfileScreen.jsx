@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
+import { useFocusEffect } from "@react-navigation/native";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,6 +19,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
 import OptimizedImage from "../../components/common/OptimizedImage";
+import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 
 export default function EditProfileScreen({ navigation, route }) {
   const { user, refreshAuthState } = useAuth();
@@ -29,20 +32,35 @@ export default function EditProfileScreen({ navigation, route }) {
   const [profilePic, setProfilePic] = useState(prefill?.profilePic || null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const pic = await AsyncStorage.getItem("@profile_pic");
-        const ph = await AsyncStorage.getItem("@profile_phone");
-        const nm = await AsyncStorage.getItem("userName");
-        const em = await AsyncStorage.getItem("userEmail");
-        if (pic) setProfilePic(pic);
-        if (nm) setName(nm);
-        if (ph) setPhone(ph);
-        if (em) setEmail(em);
-      } catch {}
-    })();
-  }, []);
+  const fetchCustomerProfile = useCallback(async () => {
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/cart/customer-profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      const customer = data?.customer || {};
+
+      setPhone(String(customer?.phone || "").trim());
+      setEmail(String(customer?.email || user?.email || "").trim());
+
+      const fetchedProfilePic =
+        customer?.profile_picture || customer?.profile_pic || null;
+      if (fetchedProfilePic) {
+        setProfilePic(fetchedProfilePic);
+      }
+    } catch (error) {
+      console.error("Failed to load customer profile details:", error);
+    }
+  }, [user?.email]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchCustomerProfile();
+    }, [fetchCustomerProfile]),
+  );
 
   const pickImage = useCallback(async () => {
     try {

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,6 +14,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
 import OptimizedImage from "../../components/common/OptimizedImage";
+import { API_BASE_URL } from "../../constants/api";
+import { getAccessToken } from "../../lib/authStorage";
 
 /* ─────────────────────── PROFILE SCREEN ─────────────────────── */
 
@@ -21,37 +23,72 @@ export default function ProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
   const [profilePic, setProfilePic] = useState(null);
   const [phone, setPhone] = useState(null);
-  const [savedAddress, setSavedAddress] = useState(null);
+  const [email, setEmail] = useState("");
+  const [savedAddress, setSavedAddress] = useState({
+    address: "",
+    city: "",
+    latitude: null,
+    longitude: null,
+  });
+  const [profileLoading, setProfileLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  // Load persisted profile data
-  useEffect(() => {
-    (async () => {
-      try {
-        const pic = await AsyncStorage.getItem("@profile_pic");
-        const ph = await AsyncStorage.getItem("@profile_phone");
-        const addr = await AsyncStorage.getItem("@saved_address");
-        if (pic) setProfilePic(pic);
-        if (ph) setPhone(ph);
-        if (addr) setSavedAddress(JSON.parse(addr));
-      } catch {}
-    })();
-  }, []);
+  const hasDeliveryPin =
+    Number.isFinite(Number(savedAddress?.latitude)) &&
+    Number.isFinite(Number(savedAddress?.longitude));
 
-  // Refresh when coming back from edit / address screens
-  useEffect(() => {
-    const unsubscribe = navigation?.addListener?.("focus", async () => {
-      try {
-        const pic = await AsyncStorage.getItem("@profile_pic");
-        const ph = await AsyncStorage.getItem("@profile_phone");
-        const addr = await AsyncStorage.getItem("@saved_address");
-        if (pic) setProfilePic(pic);
-        if (ph) setPhone(ph);
-        if (addr) setSavedAddress(JSON.parse(addr));
-      } catch {}
-    });
-    return unsubscribe;
-  }, [navigation]);
+  const fetchProfile = useCallback(async () => {
+    setProfileLoading(true);
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        setPhone("");
+        setEmail("");
+        setSavedAddress({
+          address: "",
+          city: "",
+          latitude: null,
+          longitude: null,
+        });
+        return;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/cart/customer-profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      const customer = data?.customer || {};
+
+      const resolvedProfilePic =
+        customer?.profile_picture || customer?.profile_pic || null;
+      const resolvedPhone = String(customer?.phone || "").trim();
+      const resolvedEmail = String(customer?.email || user?.email || "").trim();
+      const resolvedAddress = String(customer?.address || "").trim();
+      const resolvedCity = String(customer?.city || "").trim();
+      const lat = Number(customer?.latitude);
+      const lng = Number(customer?.longitude);
+
+      setProfilePic(resolvedProfilePic);
+      setPhone(resolvedPhone);
+      setEmail(resolvedEmail);
+      setSavedAddress({
+        address: resolvedAddress,
+        city: resolvedCity,
+        latitude: Number.isFinite(lat) ? lat : null,
+        longitude: Number.isFinite(lng) ? lng : null,
+      });
+    } catch (error) {
+      console.error("Failed to load customer profile:", error);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [user?.email]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+    }, [fetchProfile]),
+  );
 
   const handleLogout = useCallback(() => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
@@ -100,7 +137,7 @@ export default function ProfileScreen({ navigation }) {
           </View>
           <Text style={st.userName}>{user?.name || "User"}</Text>
           <Text style={st.userSub}>
-            {phone || user?.email || "user@example.com"}
+            {profileLoading ? "Loading..." : phone || email || "Not provided"}
           </Text>
           <Pressable
             style={st.editBtn}
@@ -108,7 +145,7 @@ export default function ProfileScreen({ navigation }) {
               navigation.navigate("EditProfile", {
                 prefill: {
                   name: user?.name || "",
-                  email: user?.email || "",
+                  email: email || "",
                   phone: phone || "",
                   profilePic: profilePic || null,
                 },
@@ -129,7 +166,32 @@ export default function ProfileScreen({ navigation }) {
             <View style={{ flex: 1 }}>
               <Text style={st.sectionTitle}>Saved Address</Text>
               <Text style={st.sectionSubtitle} numberOfLines={2}>
-                {savedAddress?.label || "No address saved yet"}
+                {savedAddress?.address
+                  ? `${savedAddress.address}${savedAddress?.city ? `, ${savedAddress.city}` : ""}`
+                  : "Not provided"}
+              </Text>
+            </View>
+            <Pressable
+              style={st.sectionAction}
+              onPress={() => navigation.navigate("EditAddressDetails")}
+            >
+              <Text style={st.sectionActionTxt}>
+                {savedAddress?.address ? "Change" : "Add"}
+              </Text>
+              <Ionicons name="chevron-forward" size={14} color="#06C168" />
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={st.sectionCard}>
+          <View style={st.sectionHeader}>
+            <View style={st.sectionIconWrap}>
+              <Ionicons name="navigate" size={18} color="#06C168" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={st.sectionTitle}>Delivery Location</Text>
+              <Text style={st.sectionSubtitle} numberOfLines={2}>
+                {hasDeliveryPin ? "Location pin set" : "Not provided"}
               </Text>
             </View>
             <Pressable
@@ -137,7 +199,7 @@ export default function ProfileScreen({ navigation }) {
               onPress={() => navigation.navigate("AddressPicker")}
             >
               <Text style={st.sectionActionTxt}>
-                {savedAddress ? "Change" : "Add"}
+                {hasDeliveryPin ? "Change" : "Add"}
               </Text>
               <Ionicons name="chevron-forward" size={14} color="#06C168" />
             </Pressable>
@@ -165,11 +227,11 @@ export default function ProfileScreen({ navigation }) {
           />
           <MenuItem
             icon="document-text-outline"
-            label="Terms of Service"
+            label="Terms & Conditions"
             onPress={() =>
               navigation.navigate("WebView", {
-                url: "https://lucent-bombolone-2fa396.netlify.app",
-                title: "Terms of Service",
+                url: "https://glittering-daifuku-7a1eea.netlify.app/",
+                title: "Terms & Conditions",
               })
             }
           />

@@ -29,6 +29,7 @@ import OrdersScreen from "../screens/customer/OrdersScreen";
 import PastOrderDetailsScreen from "../screens/customer/PastOrderDetailsScreen";
 import ProfileScreen from "../screens/customer/ProfileScreen";
 import EditProfileScreen from "../screens/customer/EditProfileScreen";
+import EditAddressDetailsScreen from "../screens/customer/EditAddressDetailsScreen";
 import AddressPickerScreen from "../screens/customer/AddressPickerScreen";
 import FavouritesScreen from "../screens/customer/FavouritesScreen";
 import RestaurantFoodsScreen from "../screens/customer/RestaurantFoodsScreen";
@@ -61,6 +62,9 @@ const PastOrderDetailsScreenAnimated = wrapCustomerScreen(
 );
 const NotificationsScreenAnimated = wrapCustomerScreen(NotificationsScreen);
 const EditProfileScreenAnimated = wrapCustomerScreen(EditProfileScreen);
+const EditAddressDetailsScreenAnimated = wrapCustomerScreen(
+  EditAddressDetailsScreen,
+);
 const AddressPickerScreenAnimated = wrapCustomerScreen(AddressPickerScreen);
 const FavouritesScreenAnimated = wrapCustomerScreen(FavouritesScreen);
 const WebViewScreenAnimated = wrapCustomerScreen(WebViewScreen);
@@ -232,6 +236,10 @@ function ProfileStackScreen() {
       <ProfileStack.Screen
         name="EditProfile"
         component={EditProfileScreenAnimated}
+      />
+      <ProfileStack.Screen
+        name="EditAddressDetails"
+        component={EditAddressDetailsScreenAnimated}
       />
       <ProfileStack.Screen
         name="AddressPicker"
@@ -470,7 +478,7 @@ export default function CustomerTabs() {
 
 const styles = StyleSheet.create({
   tabShell: {
-    backgroundColor: "#transparent",
+    backgroundColor: "#ffff",
     paddingHorizontal: 10,
     paddingTop: 0,
     position: "relative",
@@ -480,7 +488,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: 170,
+    height: 110,
   },
   tabBarContainer: {
     minHeight: 56,
@@ -490,7 +498,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-evenly",
     paddingHorizontal: 2,
-    paddingVertical: 2,
+    paddingVertical: 7,
     borderWidth: 1,
     borderColor: "transparent",
     shadowColor: "#000",

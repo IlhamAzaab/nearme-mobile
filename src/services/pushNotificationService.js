@@ -643,8 +643,9 @@ class PushNotificationService {
             return false;
           }
 
-          // Non-retryable errors (401/403/404 etc) should not be suppressed.
-          console.error("[Push] Register failed:", response.status, err);
+          // Non-retryable errors (401/403/404 etc) are expected when
+          // a temporary token is used before session exchange.
+          console.warn("[Push] Register failed:", response.status, err);
           return false;
         } catch (endpointError) {
           const isAbort = endpointError?.name === "AbortError";

@@ -50,10 +50,7 @@ const CHECKOUT_ADDRESS_PIN_HTML =
   "<circle cx='12' cy='9' r='3' fill='#FFFFFF'/>" +
   "</svg>" +
   "</div>";
-const DEFAULT_CHECKOUT_POSITION = {
-  latitude: 7.8731,
-  longitude: 80.7718,
-};
+const PIN_REQUIRED_ALERT_MESSAGE = "Pin your delivery location on the map.";
 
 function hasValidCoordinates(latitude, longitude) {
   const lat = Number(latitude);
@@ -140,6 +137,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { cartId } = route.params || {};
   const mapRef = useRef(null);
+  const hasShownMissingPinAlertRef = useRef(false);
 
   // Cart + profile
   const [cart, setCart] = useState(null);
@@ -151,9 +149,10 @@ export default function CheckoutScreen({ route, navigation }) {
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
 
-  const [position, setPosition] = useState(DEFAULT_CHECKOUT_POSITION);
+  const [position, setPosition] = useState(null);
   const [hasExplicitDeliveryLocation, setHasExplicitDeliveryLocation] =
     useState(false);
+  const [isProfilePinMissing, setIsProfilePinMissing] = useState(false);
 
   const [isMapEditMode, setIsMapEditMode] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
@@ -169,6 +168,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const [routeLoading, setRouteLoading] = useState(false);
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false);
   const [feeConfig, setFeeConfig] = useState(null);
+  const [launchPromoStatus, setLaunchPromoStatus] = useState(null);
 
   // Payment
   const [paymentMethod] = useState("cash");
@@ -189,8 +189,39 @@ export default function CheckoutScreen({ route, navigation }) {
     return calculateServiceFeeFromConfig(subtotal, feeConfig || undefined);
   };
 
-  const calculateDeliveryFee = (distanceKm) => {
+  const calculateStandardDeliveryFee = (distanceKm) => {
     return calculateDeliveryFeeFromConfig(distanceKm, feeConfig || undefined);
+  };
+
+  const calculateLaunchPromoDeliveryFee = (distanceKm, promo) => {
+    if (distanceKm === null || distanceKm === undefined || !promo) return null;
+
+    const distance = Math.max(0, Number(distanceKm));
+    const maxKm = Math.max(0, Number(promo.max_km || 0));
+    const firstKmRate = Math.max(0, Number(promo.first_km_rate || 0));
+    const beyondRate = Math.max(0, Number(promo.beyond_km_rate || 0));
+
+    if (distance <= maxKm) {
+      return distance * firstKmRate;
+    }
+
+    return maxKm * firstKmRate + (distance - maxKm) * beyondRate;
+  };
+
+  const calculateDeliveryFee = (distanceKm) => {
+    const standardFee = calculateStandardDeliveryFee(distanceKm);
+    const promo = launchPromoStatus?.promotion;
+    const canApplyPromo =
+      Boolean(promo?.enabled) &&
+      Boolean(launchPromoStatus?.has_acknowledged) &&
+      Boolean(launchPromoStatus?.is_eligible_for_first_order);
+
+    if (!canApplyPromo) return standardFee;
+
+    const promoFee = calculateLaunchPromoDeliveryFee(distanceKm, promo);
+    if (promoFee === null || !Number.isFinite(promoFee)) return standardFee;
+
+    return Number(promoFee.toFixed(2));
   };
 
   const formatPrice = (p) => {
@@ -211,46 +242,60 @@ export default function CheckoutScreen({ route, navigation }) {
   // Sync address changes automatically when screen focuses
   useFocusEffect(
     useCallback(() => {
-      const checkSavedAddress = async () => {
+      // Re-arm alert on every screen visit; if DB pin is still missing, show again.
+      hasShownMissingPinAlertRef.current = false;
+
+      const syncCustomerProfileAddress = async () => {
         try {
-          const savedStr = await AsyncStorage.getItem("@saved_address");
-          if (savedStr) {
-            const saved = JSON.parse(savedStr);
-            if (hasValidCoordinates(saved.latitude, saved.longitude)) {
-              setPosition({
-                latitude: Number(saved.latitude),
-                longitude: Number(saved.longitude),
+          const token = await getAccessToken();
+          if (!token) return;
+
+          const profileRes = await fetch(
+            `${API_BASE_URL}/cart/customer-profile`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
+          const profileData = await profileRes.json().catch(() => ({}));
+          const customer = profileData?.customer || {};
+
+          const profileAddress = String(customer?.address || "").trim();
+          const profileCity = String(customer?.city || "").trim();
+          const profileLat = Number(customer?.latitude);
+          const profileLng = Number(customer?.longitude);
+
+          setAddress(profileAddress);
+          setCity(profileCity);
+
+          if (hasValidCoordinates(profileLat, profileLng)) {
+            setPosition({
+              latitude: profileLat,
+              longitude: profileLng,
+            });
+            setHasExplicitDeliveryLocation(true);
+            setIsProfilePinMissing(false);
+            // Animate map to new saved pin location
+            if (mapRef.current?.animateToRegion) {
+              mapRef.current.animateToRegion({
+                latitude: profileLat,
+                longitude: profileLng,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
               });
-              setHasExplicitDeliveryLocation(true);
-              if (saved.label) {
-                setAddress(String(saved.label));
-              }
-              if (saved.city) {
-                setCity(String(saved.city));
-              }
-              // Animate map to new saved pin location
-              if (mapRef.current?.animateToRegion) {
-                mapRef.current.animateToRegion({
-                  latitude: Number(saved.latitude),
-                  longitude: Number(saved.longitude),
-                  latitudeDelta: 0.01,
-                  longitudeDelta: 0.01,
-                });
-              } else if (mapRef.current?.panTo) {
-                mapRef.current.panTo(
-                  Number(saved.latitude),
-                  Number(saved.longitude),
-                  15,
-                );
-              }
+            } else if (mapRef.current?.panTo) {
+              mapRef.current.panTo(profileLat, profileLng, 15);
             }
+          } else {
+            setPosition(null);
+            setHasExplicitDeliveryLocation(false);
+            setIsProfilePinMissing(true);
           }
         } catch (error) {
-          console.error("Error reading saved address on checkout:", error);
+          console.error("Error syncing profile address on checkout:", error);
         }
       };
 
-      checkSavedAddress();
+      syncCustomerProfileAddress();
     }, []),
   );
 
@@ -394,17 +439,27 @@ export default function CheckoutScreen({ route, navigation }) {
       }
 
       // web போல parallel calls
-      const [cartRes, profileRes] = await Promise.all([
+      const [cartRes, profileRes, promoRes] = await Promise.all([
         fetch(`${API_BASE_URL}/cart`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
         fetch(`${API_BASE_URL}/cart/customer-profile`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
+        fetch(`${API_BASE_URL}/customer/launch-promotion`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
       ]);
 
       const cartData = await cartRes.json().catch(() => ({}));
       const profileData = await profileRes.json().catch(() => ({}));
+      const promoData = await promoRes.json().catch(() => ({}));
+
+      if (promoRes.ok) {
+        setLaunchPromoStatus(promoData);
+      } else {
+        setLaunchPromoStatus(null);
+      }
 
       if (!cartRes.ok)
         throw new Error(cartData.message || "Failed to fetch cart");
@@ -431,36 +486,17 @@ export default function CheckoutScreen({ route, navigation }) {
         setPhone(profilePhone);
         setAddress(profileAddress);
         setCity(profileCity);
-        setHasExplicitDeliveryLocation(false);
-
-        // Prefer AsyncStorage saved address if user updated it
-        const savedAddressStr = await AsyncStorage.getItem("@saved_address");
-        if (savedAddressStr) {
-          const saved = JSON.parse(savedAddressStr);
-          if (saved.label && !profileAddress) {
-            setAddress(String(saved.label));
-          }
-          if (saved.city && !profileCity) {
-            setCity(String(saved.city));
-          }
-          if (hasValidCoordinates(saved.latitude, saved.longitude)) {
-            setPosition({
-              latitude: Number(saved.latitude),
-              longitude: Number(saved.longitude),
-            });
-            setHasExplicitDeliveryLocation(true);
-          } else if (hasValidCoordinates(profileLat, profileLng)) {
-            setPosition({ latitude: profileLat, longitude: profileLng });
-            setHasExplicitDeliveryLocation(true);
-          }
+        if (hasValidCoordinates(profileLat, profileLng)) {
+          setPosition({
+            latitude: profileLat,
+            longitude: profileLng,
+          });
+          setHasExplicitDeliveryLocation(true);
+          setIsProfilePinMissing(false);
         } else {
-          if (hasValidCoordinates(profileLat, profileLng)) {
-            setPosition({
-              latitude: profileLat,
-              longitude: profileLng,
-            });
-            setHasExplicitDeliveryLocation(true);
-          }
+          setPosition(null);
+          setHasExplicitDeliveryLocation(false);
+          setIsProfilePinMissing(true);
         }
       }
     } catch (e) {
@@ -500,6 +536,7 @@ export default function CheckoutScreen({ route, navigation }) {
       setCity(newCity);
       setPosition(newPosition);
       setHasExplicitDeliveryLocation(true);
+      setIsProfilePinMissing(false);
       setError("");
     } catch (e) {
       setError(e.message || "Save failed");
@@ -508,23 +545,20 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
+  useEffect(() => {
+    if (!isProfilePinMissing) {
+      hasShownMissingPinAlertRef.current = false;
+    }
+  }, [isProfilePinMissing]);
+
   const handlePlaceOrder = async () => {
     try {
-      if (!phone) throw new Error("Phone number is required");
-      if (!String(address || "").trim())
-        throw new Error("Delivery address is required");
-      if (!String(city || "").trim()) throw new Error("City is required");
-      if (!hasExplicitDeliveryLocation || !position)
-        throw new Error("Please set delivery pin before placing order");
+      if (checkoutBlockReason) {
+        return;
+      }
       if (!cart) throw new Error("Cart missing");
 
       const subtotal = Number(cart.cart_total) || 0;
-      if (!routeInfo)
-        throw new Error("Please wait for delivery fee calculation");
-      if (!isDistanceWithinLimit)
-        throw new Error(
-          `This location is outside delivery range (${maxOrderDistanceKm} km).`,
-        );
 
       const requiredMinSubtotal = resolveMinimumSubtotal(
         routeInfo.distance,
@@ -617,10 +651,27 @@ export default function CheckoutScreen({ route, navigation }) {
     () => calculateServiceFee(subtotal),
     [subtotal, feeConfig],
   );
-  const deliveryFee = useMemo(
-    () => (routeInfo ? calculateDeliveryFee(routeInfo.distance) : null),
+  const standardDeliveryFee = useMemo(
+    () => (routeInfo ? calculateStandardDeliveryFee(routeInfo.distance) : null),
     [routeInfo, feeConfig],
   );
+  const deliveryFee = useMemo(
+    () => (routeInfo ? calculateDeliveryFee(routeInfo.distance) : null),
+    [routeInfo, feeConfig, launchPromoStatus],
+  );
+  const launchPromoIsEligible =
+    Boolean(launchPromoStatus?.promotion?.enabled) &&
+    Boolean(launchPromoStatus?.has_acknowledged) &&
+    Boolean(launchPromoStatus?.is_eligible_for_first_order);
+  const isLaunchPromoApplied =
+    launchPromoIsEligible &&
+    routeInfo !== null &&
+    standardDeliveryFee !== null &&
+    deliveryFee !== null;
+  const launchPromoSavings =
+    isLaunchPromoApplied && standardDeliveryFee > deliveryFee
+      ? Number((standardDeliveryFee - deliveryFee).toFixed(2))
+      : 0;
 
   const estimatedDeliveryWindow = useMemo(() => {
     if (!routeInfo?.distance) return null;
@@ -682,18 +733,63 @@ export default function CheckoutScreen({ route, navigation }) {
       Boolean(phone) &&
       Boolean(String(address || "").trim()) &&
       Boolean(String(city || "").trim()) &&
-      hasExplicitDeliveryLocation,
-    [phone, address, city, hasExplicitDeliveryLocation],
+      hasExplicitDeliveryLocation &&
+      hasValidCoordinates(position?.latitude, position?.longitude),
+    [phone, address, city, hasExplicitDeliveryLocation, position],
   );
 
+  const checkoutBlockReason = useMemo(() => {
+    if (!phone) return "Phone number is required";
+    if (!String(address || "").trim()) return "Delivery address is required";
+    if (!String(city || "").trim()) return "City is required";
+    if (!isLocationDetailsComplete) return PIN_REQUIRED_ALERT_MESSAGE;
+    if (!routeInfo)
+      return "Location not provided. Pin your delivery location on the map.";
+    if (!isDistanceWithinLimit)
+      return `Delivery is not available beyond ${maxOrderDistanceKm} km.`;
+    if (!isSubtotalValid)
+      return `Minimum order amount is Rs. ${requiredMinSubtotal}.`;
+    if (deliveryFee === null)
+      return "Delivery fee is unavailable. Please verify your location pin.";
+    return "";
+  }, [
+    phone,
+    address,
+    city,
+    isLocationDetailsComplete,
+    routeInfo,
+    isDistanceWithinLimit,
+    maxOrderDistanceKm,
+    isSubtotalValid,
+    requiredMinSubtotal,
+    deliveryFee,
+  ]);
+
+  const ctaAlertMessage = useMemo(() => {
+    if (checkoutBlockReason && !routeLoading && !placing) {
+      return checkoutBlockReason;
+    }
+
+    const isStaleValidationError =
+      error === "Phone number is required" ||
+      error === "Delivery address is required" ||
+      error === "City is required" ||
+      error === PIN_REQUIRED_ALERT_MESSAGE ||
+      String(error || "").startsWith("Location not provided") ||
+      String(error || "").startsWith("Unable to calculate delivery route") ||
+      String(error || "").startsWith("Delivery is not available beyond") ||
+      String(error || "").startsWith("Minimum order amount is Rs.") ||
+      String(error || "").startsWith("Delivery fee is unavailable");
+
+    if (error && !isStaleValidationError) return error;
+
+    return "";
+  }, [error, checkoutBlockReason, routeLoading, placing]);
+
   const isPlaceOrderDisabled =
-    !isSubtotalValid ||
-    !isDistanceWithinLimit ||
-    deliveryFee === null ||
     routeLoading ||
     placing ||
-    !isLocationDetailsComplete ||
-    !routeInfo;
+    !cart;
 
   // ✅ Loading / Error
   if (loading) {
@@ -772,6 +868,30 @@ export default function CheckoutScreen({ route, navigation }) {
     );
   }
 
+  const restaurantHasLocation = hasValidCoordinates(
+    cart?.restaurant?.latitude,
+    cart?.restaurant?.longitude,
+  );
+
+  const mapInitialRegion = hasValidCoordinates(
+    position?.latitude,
+    position?.longitude,
+  )
+    ? {
+        latitude: position.latitude,
+        longitude: position.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      }
+    : restaurantHasLocation
+      ? {
+          latitude: Number(cart.restaurant.latitude),
+          longitude: Number(cart.restaurant.longitude),
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        }
+      : null;
+
   return (
     <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
       <ScrollView
@@ -781,31 +901,38 @@ export default function CheckoutScreen({ route, navigation }) {
       >
         {/* ✅ Map */}
         <View style={[styles.mapWrap, { height: 200 }]}>
-          <OSMMapView
-            ref={mapRef}
-            style={{ flex: 1 }}
-            initialRegion={{
-              latitude: position.latitude,
-              longitude: position.longitude,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
-            }}
-            scrollEnabled={true}
-            zoomEnabled={true}
-            markers={[
-              {
-                id: "delivery",
-                coordinate: position,
-                type: "customer",
-                title: "Delivery Location",
-                emoji: "",
-                customHtml: CHECKOUT_ADDRESS_PIN_HTML,
-                iconOnly: true,
-                iconSize: [44, 44],
-                iconAnchor: [22, 44],
-              },
-            ]}
-          />
+          {mapInitialRegion ? (
+            <OSMMapView
+              ref={mapRef}
+              style={{ flex: 1 }}
+              initialRegion={mapInitialRegion}
+              scrollEnabled={true}
+              zoomEnabled={true}
+              markers={
+                hasExplicitDeliveryLocation && position
+                  ? [
+                      {
+                        id: "delivery",
+                        coordinate: position,
+                        type: "customer",
+                        title: "Delivery Location",
+                        emoji: "",
+                        customHtml: CHECKOUT_ADDRESS_PIN_HTML,
+                        iconOnly: true,
+                        iconSize: [44, 44],
+                        iconAnchor: [22, 44],
+                      },
+                    ]
+                  : []
+              }
+            />
+          ) : (
+            <View style={styles.mapFallbackWrap}>
+              <Text style={styles.mapFallbackText}>
+                Location not provided. Pin your delivery location on the map.
+              </Text>
+            </View>
+          )}
 
           {/* Edit Pin Button */}
           <Pressable
@@ -867,7 +994,7 @@ export default function CheckoutScreen({ route, navigation }) {
                 {routeLoading
                   ? "Calculating..."
                   : !hasExplicitDeliveryLocation
-                    ? "Set your delivery pin"
+                    ? "Location not provided"
                     : estimatedDeliveryWindow
                       ? `${estimatedDeliveryWindow.min}-${estimatedDeliveryWindow.max} mins`
                       : "—"}
@@ -911,7 +1038,7 @@ export default function CheckoutScreen({ route, navigation }) {
                     ? `${routeInfo.distance.toFixed(1)} km away`
                     : hasExplicitDeliveryLocation
                       ? "Calculating..."
-                      : "Set pin to calculate"}
+                      : "Location not provided"}
                 </Text>
               </View>
               <Text style={[styles.muted, { fontSize: 13, marginTop: 4 }]}>
@@ -1017,6 +1144,23 @@ export default function CheckoutScreen({ route, navigation }) {
             <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
           </View>
 
+          {isLaunchPromoApplied && (
+            <View style={styles.launchPromoBadgeWrap}>
+              <View style={styles.launchPromoBadgeHeader}>
+                <View style={styles.launchPromoBadgeTitleWrap}>
+                  <Ionicons name="pricetag" size={14} color="#065F46" />
+                  <Text style={styles.launchPromoBadgeTitle}>
+                    Launch Offer Applied
+                  </Text>
+                </View>
+                
+              </View>
+              <Text style={styles.launchPromoBadgeSubText}>
+                delivery fees offer activated for this order.
+              </Text>
+            </View>
+          )}
+
           <Row label="Subtotal" value={formatPrice(subtotal)} />
           <Row
             label="Delivery fee"
@@ -1038,46 +1182,6 @@ export default function CheckoutScreen({ route, navigation }) {
           />
         </View>
 
-        {!isSubtotalValid && (
-          <View style={styles.warn}>
-            <Text style={styles.warnText}>
-              Minimum order: Rs. {requiredMinSubtotal}. Add Rs.{" "}
-              {(requiredMinSubtotal - subtotal).toFixed(0)} more.
-            </Text>
-          </View>
-        )}
-
-        {!hasExplicitDeliveryLocation && (
-          <View style={styles.warn}>
-            <Text style={styles.warnText}>
-              Set your delivery pin for first order before placing this order.
-            </Text>
-          </View>
-        )}
-
-        {hasExplicitDeliveryLocation && !String(city || "").trim() && (
-          <View style={styles.warn}>
-            <Text style={styles.warnText}>
-              City is required to place the order.
-            </Text>
-          </View>
-        )}
-
-        {routeInfo && !isDistanceWithinLimit && (
-          <View style={styles.warn}>
-            <Text style={styles.warnText}>
-              Delivery not available for this distance (
-              {routeInfo.distance.toFixed(1)}
-              km). Maximum allowed is {maxOrderDistanceKm} km.
-            </Text>
-          </View>
-        )}
-
-        {!!error && (
-          <View style={styles.errBox}>
-            <Text style={styles.errBoxText}>{error}</Text>
-          </View>
-        )}
       </ScrollView>
 
       {/* ✅ Sticky CTA */}
@@ -1087,6 +1191,12 @@ export default function CheckoutScreen({ route, navigation }) {
           { bottom: 0, paddingBottom: 14 + Math.max(0, insets.bottom) },
         ]}
       >
+        {!!ctaAlertMessage && (
+          <View style={styles.ctaAlertBox}>
+            <Ionicons name="alert-circle" size={16} color="#B91C1C" />
+            <Text style={styles.ctaAlertText}>{ctaAlertMessage}</Text>
+          </View>
+        )}
         <Pressable
           onPress={handlePlaceOrder}
           disabled={isPlaceOrderDisabled}
@@ -1103,7 +1213,7 @@ export default function CheckoutScreen({ route, navigation }) {
               : routeLoading
                 ? "Calculating..."
                 : !hasExplicitDeliveryLocation
-                  ? "Set delivery pin to continue"
+                  ? "Location not provided"
                   : !String(city || "").trim()
                     ? "Add city to continue"
                     : !isDistanceWithinLimit && routeInfo
@@ -1237,6 +1347,18 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#E5E7EB",
   },
+  mapFallbackWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    backgroundColor: "#E5E7EB",
+  },
+  mapFallbackText: {
+    color: "#475569",
+    fontWeight: "700",
+    textAlign: "center",
+  },
   locationBtn: {
     position: "absolute",
     left: 12,
@@ -1330,6 +1452,43 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 12,
     marginTop: 4,
+  },
+
+  launchPromoBadgeWrap: {
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  launchPromoBadgeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  launchPromoBadgeTitleWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  launchPromoBadgeTitle: {
+    color: "#065F46",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  launchPromoBadgeSaveText: {
+    color: "#047857",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  launchPromoBadgeSubText: {
+    marginTop: 4,
+    color: "#065F46",
+    fontSize: 12,
+    fontWeight: "600",
   },
 
   summaryToggleBtn: {
@@ -1449,6 +1608,25 @@ const styles = StyleSheet.create({
     borderTopColor: "#E5E7EB",
     padding: 12,
     paddingBottom: 18,
+  },
+  ctaAlertBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  ctaAlertText: {
+    flex: 1,
+    color: "#B91C1C",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
   },
   cta: {
     height: 54,

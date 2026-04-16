@@ -9,7 +9,15 @@ import WebViewScreen from "../screens/common/WebViewScreen";
 
 const Stack = createNativeStackNavigator();
 
-export default function AuthNavigator({ initialRouteName = "Login" }) {
+export default function AuthNavigator({
+  initialRouteName = "Login",
+  initialRouteParams = null,
+}) {
+  const verifyOtpInitialParams =
+    initialRouteName === "VerifyOtp" ? initialRouteParams : undefined;
+  const completeProfileInitialParams =
+    initialRouteName === "CompleteProfile" ? initialRouteParams : undefined;
+
   return (
     <Stack.Navigator
       initialRouteName={initialRouteName}
@@ -18,8 +26,16 @@ export default function AuthNavigator({ initialRouteName = "Login" }) {
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Signup" component={SignupScreen} />
       <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
-      <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
-      <Stack.Screen name="VerifyOtp" component={VerifyOtpScreen} />
+      <Stack.Screen
+        name="CompleteProfile"
+        component={CompleteProfileScreen}
+        initialParams={completeProfileInitialParams}
+      />
+      <Stack.Screen
+        name="VerifyOtp"
+        component={VerifyOtpScreen}
+        initialParams={verifyOtpInitialParams}
+      />
       <Stack.Screen name="WebView" component={WebViewScreen} />
     </Stack.Navigator>
   );

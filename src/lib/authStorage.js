@@ -155,5 +155,9 @@ export async function clearAuthSession() {
     USER_NAME_KEY,
     USER_EMAIL_KEY,
     PROFILE_COMPLETED_KEY,
+    "@saved_address",
+    "@profile_pic",
+    "@profile_phone",
+    "@order_display_totals",
   ]);
 }

@@ -44,6 +44,8 @@ const OperationsConfigScreen = ({ navigation }) => {
 
   // Section 1: Driver Earnings
   const [ratePerKm, setRatePerKm] = useState("40");
+  const [rtcRateBelow5Km, setRtcRateBelow5Km] = useState("40");
+  const [rtcRateAbove5Km, setRtcRateAbove5Km] = useState("40");
   const [maxDTRKm, setMaxDTRKm] = useState("1");
   const [maxDTRAmount, setMaxDTRAmount] = useState("30");
   const [maxRestProximity, setMaxRestProximity] = useState("1");
@@ -104,6 +106,12 @@ const OperationsConfigScreen = ({ navigation }) => {
       const { config } = await res.json();
 
       setRatePerKm(String(config.rate_per_km));
+      setRtcRateBelow5Km(
+        String(config.rtc_rate_below_5km ?? config.rate_per_km),
+      );
+      setRtcRateAbove5Km(
+        String(config.rtc_rate_above_5km ?? config.rate_per_km),
+      );
       setMaxDTRKm(String(config.max_driver_to_restaurant_km));
       setMaxDTRAmount(String(config.max_driver_to_restaurant_amount));
       setMaxRestProximity(String(config.max_restaurant_proximity_km));
@@ -188,6 +196,8 @@ const OperationsConfigScreen = ({ navigation }) => {
       ];
       const body = {
         rate_per_km: parseFloat(ratePerKm),
+        rtc_rate_below_5km: parseFloat(rtcRateBelow5Km),
+        rtc_rate_above_5km: parseFloat(rtcRateAbove5Km),
         max_driver_to_restaurant_km: parseFloat(maxDTRKm),
         max_driver_to_restaurant_amount: parseFloat(maxDTRAmount),
         max_restaurant_proximity_km: parseFloat(maxRestProximity),
@@ -365,16 +375,30 @@ const OperationsConfigScreen = ({ navigation }) => {
             <View style={styles.sectionBody}>
               <View style={styles.fieldRow}>
                 <Field
-                  label="Rate per KM (Rs.)"
-                  value={ratePerKm}
-                  onChangeText={setRatePerKm}
-                  hint="Paid per km for Restaurant→Customer"
+                  label="RTC Rate <= 5km (Rs./km)"
+                  value={rtcRateBelow5Km}
+                  onChangeText={setRtcRateBelow5Km}
+                  hint="Paid per km for Restaurant→Customer up to 5km"
                 />
+                <Field
+                  label="RTC Rate > 5km (Rs./km)"
+                  value={rtcRateAbove5Km}
+                  onChangeText={setRtcRateAbove5Km}
+                  hint="Paid per km for Restaurant→Customer above 5km"
+                />
+              </View>
+              <View style={styles.fieldRow}>
                 <Field
                   label="Max DTR Distance (km)"
                   value={maxDTRKm}
                   onChangeText={setMaxDTRKm}
                   hint="Max paid distance: Driver→Restaurant"
+                />
+                <Field
+                  label="Rate per KM (Rs.)"
+                  value={ratePerKm}
+                  onChangeText={setRatePerKm}
+                  hint="Used for extra-distance and legacy fallback"
                 />
               </View>
               <View style={styles.fieldRow}>

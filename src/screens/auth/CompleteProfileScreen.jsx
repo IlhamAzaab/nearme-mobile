@@ -1,5 +1,7 @@
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -15,6 +17,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken, persistAuthSession } from "../../lib/authStorage";
+import {
+  buildSignupFlowState,
+  SIGNUP_FLOW_STATE_KEY,
+} from "../../constants/signupFlowState";
 import MeezoLogo from "../../components/common/MeezoLogo";
 import FloatingLabelInput from "../../components/common/FloatingLabelInput";
 import Svg, { Path } from "react-native-svg";
@@ -22,6 +28,8 @@ import Svg, { Path } from "react-native-svg";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
 const WEB_CARD_MAX_WIDTH = 560;
+const TERMS_AND_CONDITIONS_URL =
+  "https://glittering-daifuku-7a1eea.netlify.app/";
 
 const UserIcon = ({ size = 20, color = "#9CA3AF" }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -50,18 +58,51 @@ const LockIcon = ({ size = 20, color = "#9CA3AF" }) => (
   </Svg>
 );
 
-export default function CompleteProfileScreen({ route }) {
+const EyeIcon = ({ size = 22, color = "#9CA3AF" }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"
+      fill={color}
+    />
+  </Svg>
+);
+
+const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C11.74 7.13 12.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.804 11.804 0 001 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"
+      fill={color}
+    />
+  </Svg>
+);
+
+export default function CompleteProfileScreen({ navigation, route }) {
   const { refreshAuthState, markProfileCompleted } = useAuth();
-  const { userId, accessToken } = route.params || {};
+  const { userId, accessToken, prefillPhone } = route.params || {};
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
   });
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const shakeX = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    AsyncStorage.setItem(
+      SIGNUP_FLOW_STATE_KEY,
+      JSON.stringify(
+        buildSignupFlowState("CompleteProfile", {
+          userId,
+          accessToken,
+          prefillPhone,
+        }),
+      ),
+    ).catch(() => {});
+  }, [accessToken, prefillPhone, userId]);
 
   const triggerShake = () => {
     shakeX.setValue(0);
@@ -125,6 +166,12 @@ export default function CompleteProfileScreen({ route }) {
       return;
     }
 
+    if (!termsAccepted) {
+      setError("Please accept the Terms and Conditions to continue.");
+      triggerShake();
+      return;
+    }
+
     try {
       const effectiveAccessToken = accessToken || (await getAccessToken());
       if (!effectiveAccessToken) {
@@ -177,6 +224,7 @@ export default function CompleteProfileScreen({ route }) {
       );
 
       await markProfileCompleted();
+      await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
       await refreshAuthState();
     } catch (err) {
       console.error("Profile completion error:", err);
@@ -278,16 +326,59 @@ export default function CompleteProfileScreen({ route }) {
                   inactivePlaceholder="Password"
                   activePlaceholder="Minimum 6 characters"
                   autoCapitalize="none"
-                  secureTextEntry
+                  secureTextEntry={!showPassword}
                   leftIcon={<LockIcon size={20} color="#9CA3AF" />}
+                  rightAccessory={
+                    <Pressable
+                      onPress={() => setShowPassword((v) => !v)}
+                      style={styles.passwordEyeBtn}
+                      hitSlop={10}
+                    >
+                      {showPassword ? (
+                        <EyeOffIcon size={22} color="#9CA3AF" />
+                      ) : (
+                        <EyeIcon size={22} color="#9CA3AF" />
+                      )}
+                    </Pressable>
+                  }
                 />
+
+                <View style={styles.termsRow}>
+                  <Pressable
+                    style={styles.termsToggle}
+                    onPress={() => setTermsAccepted((value) => !value)}
+                  >
+                    <View
+                      style={[
+                        styles.checkbox,
+                        termsAccepted ? styles.checkboxChecked : null,
+                      ]}
+                    >
+                      {termsAccepted ? (
+                        <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+                      ) : null}
+                    </View>
+                    <Text style={styles.termsText}>I accept</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() =>
+                      navigation.navigate("WebView", {
+                        title: "Terms of Service",
+                        url: TERMS_AND_CONDITIONS_URL,
+                      })
+                    }
+                  >
+                    <Text style={styles.termsLink}>Terms & Conditions</Text>
+                  </Pressable>
+                </View>
 
                 <Pressable
                   onPress={handleSubmit}
-                  disabled={saving}
+                  disabled={saving || !termsAccepted}
                   style={({ pressed }) => [
                     styles.primaryBtn,
-                    saving && { opacity: 0.8 },
+                    (saving || !termsAccepted) && { opacity: 0.7 },
                     pressed && styles.pressed,
                   ]}
                 >
@@ -423,6 +514,48 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   errorText: { color: "#DC2626", fontWeight: "700", fontSize: 13 },
+  termsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    gap: 2,
+    marginTop: 8,
+  },
+  termsToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexShrink: 1,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: "#C7D2FE",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxChecked: {
+    backgroundColor: "#06C168",
+    borderColor: "#06C168",
+  },
+  termsText: {
+    color: "#374151",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  termsLink: {
+    color: "#06C168",
+    fontSize: 13,
+    fontWeight: "700",
+    textDecorationLine: "underline",
+  },
+  passwordEyeBtn: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
   primaryBtn: {
     marginTop: 24,
     borderRadius: 16,

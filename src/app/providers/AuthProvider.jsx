@@ -10,6 +10,10 @@ import { API_URL } from "../../config/env";
 import orderTrackingService from "../../services/orderTrackingService";
 import pushNotificationService from "../../services/pushNotificationService";
 import { clearAuthSession, getAccessToken } from "../../lib/authStorage";
+import {
+  SIGNUP_FLOW_STATE_KEY,
+  sanitizeSignupFlowState,
+} from "../../constants/signupFlowState";
 
 const AuthContext = createContext(null);
 
@@ -27,6 +31,7 @@ export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authTransitionMode, setAuthTransitionMode] = useState("none");
   const [authInitialRoute, setAuthInitialRoute] = useState("Login");
+  const [authInitialParams, setAuthInitialParams] = useState(null);
   const [skipSplashOnAuth, setSkipSplashOnAuth] = useState(false);
   const [userRole, setUserRole] = useState(null);
   const [profileCompleted, setProfileCompleted] = useState(false);
@@ -45,28 +50,62 @@ export function AuthProvider({ children }) {
   const checkAuthState = async () => {
     try {
       const token = await getAccessToken();
+      const pendingSignupFlowRaw = await AsyncStorage.getItem(
+        SIGNUP_FLOW_STATE_KEY,
+      );
+      let pendingSignupFlow = null;
+      if (pendingSignupFlowRaw) {
+        try {
+          pendingSignupFlow = sanitizeSignupFlowState(
+            JSON.parse(pendingSignupFlowRaw),
+          );
+        } catch {
+          pendingSignupFlow = null;
+        }
+      }
       const role = await AsyncStorage.getItem("role");
       const userName = await AsyncStorage.getItem("userName");
       const userEmail = await AsyncStorage.getItem("userEmail");
       const userId = await AsyncStorage.getItem("userId");
       const profileDone = await AsyncStorage.getItem("profileCompleted");
+      const isCustomerProfileComplete = profileDone === "true";
 
       if (token && role) {
         setUser({ id: userId, email: userEmail, name: userName, role });
         setUserRole(role);
         setIsAuthenticated(true);
-        setAuthInitialRoute("Login");
+        if (String(role).toLowerCase() === "customer" && !isCustomerProfileComplete) {
+          setAuthInitialRoute("CompleteProfile");
+          setAuthInitialParams(
+            pendingSignupFlow?.routeName === "CompleteProfile"
+              ? pendingSignupFlow.params
+              : null,
+          );
+        } else {
+          setAuthInitialRoute("Login");
+          setAuthInitialParams(null);
+        }
         setSkipSplashOnAuth(false);
-        setProfileCompleted(profileDone === "true");
+        setProfileCompleted(isCustomerProfileComplete);
       } else {
         setIsAuthenticated(false);
         setUserRole(null);
         setUser(null);
         setProfileCompleted(false);
+
+        if (pendingSignupFlow) {
+          setAuthInitialRoute(pendingSignupFlow.routeName);
+          setAuthInitialParams(pendingSignupFlow.params || null);
+        } else {
+          setAuthInitialRoute("Login");
+          setAuthInitialParams(null);
+        }
       }
     } catch (error) {
       console.error("Auth check failed:", error);
       setIsAuthenticated(false);
+      setAuthInitialRoute("Login");
+      setAuthInitialParams(null);
     } finally {
       setIsLoading(false);
     }
@@ -181,8 +220,10 @@ export function AuthProvider({ children }) {
     setIsAuthenticated(false);
     setAuthTransitionMode("none");
     setAuthInitialRoute("Login");
+    setAuthInitialParams(null);
     setSkipSplashOnAuth(true);
     setProfileCompleted(false);
+    await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
     // Reset admin-specific state
     setAdminStatus(null);
     setForcePasswordChange(false);
@@ -218,6 +259,7 @@ export function AuthProvider({ children }) {
         isAuthenticated,
         authTransitionMode,
         authInitialRoute,
+        authInitialParams,
         skipSplashOnAuth,
         userRole,
         profileCompleted,

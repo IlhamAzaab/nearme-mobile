@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
 import React, {
   useCallback,
@@ -1138,38 +1139,54 @@ export default function HomeScreen({ navigation }) {
         >
           <View style={styles.promoBackdrop}>
             <View style={styles.promoCard}>
-              <View style={styles.promoHeader}>
+              <View style={styles.promoHeroWrap}>
+                <OptimizedImage
+                  uri="https://images.unsplash.com/photo-1547592166-23ac45744acd?q=80&w=1200&auto=format&fit=crop"
+                  style={styles.promoHeroImage}
+                  transition={120}
+                />
+                <View style={styles.promoHeroFade} />
+              </View>
+
+              <View style={styles.promoBody}>
                 <Text style={styles.promoKicker}>Launch Offer</Text>
                 <Text style={styles.promoTitle}>Welcome to Meezo</Text>
                 <Text style={styles.promoSubtitle}>
                   Your first delivery gets a special offer.
                 </Text>
-              </View>
 
-              <View style={styles.promoBody}>
                 <View style={styles.promoPriceCard}>
+                  <Text style={styles.promoPriceTag}>Delivery fees</Text>
+                  <Text style={styles.promoPriceTag1}>Only</Text>
                   <Text style={styles.promoPriceMain}>
-                    Only 1 rupees per km
+                    Rs.{Number(promoConfig?.first_km_rate || 1).toFixed(0)}
+                    <Text style={styles.promoPriceSuffix}> / per km</Text>
                   </Text>
-                  <Text style={styles.promoPriceSub}>Up to 5km</Text>
+                  <Text style={styles.promoPriceSub}>
+                    Up to {Number(promoConfig?.max_km || 5).toFixed(0)}km. This
+                    offer applies only to your first order.
+                  </Text>
                 </View>
-
-                <Text style={styles.promoNote}>
-                  This offer applies only to your first order for this account.
-                </Text>
 
                 <Pressable
                   onPress={handleLaunchPromoOk}
                   disabled={acknowledgingPromo}
                   style={({ pressed }) => [
-                    styles.promoOkBtn,
-                    acknowledgingPromo && styles.promoOkBtnDisabled,
-                    pressed && !acknowledgingPromo ? { opacity: 0.9 } : null,
+                    styles.promoCtaBtn,
+                    acknowledgingPromo && styles.promoCtaBtnDisabled,
+                    pressed && !acknowledgingPromo ? styles.promoCtaPressed : null,
                   ]}
                 >
-                  <Text style={styles.promoOkText}>
-                    {acknowledgingPromo ? "Saving..." : "OK"}
-                  </Text>
+                  <LinearGradient
+                    colors={["#006E20", "#06C168"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.promoCtaGradient}
+                  >
+                    <Text style={styles.promoCtaText}>
+                      {acknowledgingPromo ? "Saving..." : "Get Started"}
+                    </Text>
+                  </LinearGradient>
                 </Pressable>
               </View>
             </View>
@@ -1452,99 +1469,150 @@ const styles = StyleSheet.create({
 
   promoBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "rgba(25,28,27,0.45)",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 22,
   },
   promoCard: {
     width: "100%",
-    maxWidth: 420,
+    maxWidth: 390,
     backgroundColor: "#FFFFFF",
-    borderRadius: 28,
+    borderRadius: 24,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.25,
-    shadowRadius: 24,
-    elevation: 12,
+    shadowColor: "#0B3B1E",
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.24,
+    shadowRadius: 28,
+    elevation: 14,
   },
-  promoHeader: {
-    backgroundColor: "#06C168",
-    paddingHorizontal: 22,
-    paddingVertical: 20,
+  promoHeroWrap: {
+    width: "100%",
+    height: 250,
+    position: "relative",
+  },
+  promoHeroImage: {
+    width: "100%",
+    height: "100%",
+  },
+  promoHeroFade: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 90,
+    backgroundColor: "rgba(255,255,255,0)",
+  },
+  promoBody: {
+    paddingHorizontal: 20,
+    paddingTop: 0,
+    paddingBottom: 20,
+    marginTop: -42,
   },
   promoKicker: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "900",
-    letterSpacing: 0.8,
+    alignSelf: "flex-start",
+    color: "#1f1f1f",
+    backgroundColor: "#06C168",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
     textTransform: "uppercase",
   },
   promoTitle: {
-    marginTop: 8,
-    color: "#FFFFFF",
-    fontSize: 20,
-    lineHeight: 25,
-    fontWeight: "700",
-    letterSpacing: -0.2,
+    marginTop: 18,
+    color: "#191C1B",
+    fontSize: 31,
+    lineHeight: 36,
+    fontWeight: "800",
+    letterSpacing: -0.6,
   },
   promoSubtitle: {
     marginTop: 8,
-    color: "#ECFDF5",
-    fontSize: 34,
-    lineHeight: 39,
-    fontWeight: "800",
-    letterSpacing: -0.8,
-  },
-  promoBody: {
-    paddingHorizontal: 22,
-    paddingVertical: 20,
-    gap: 14,
-  },
-  promoPriceCard: {
-    borderWidth: 1,
-    borderColor: "#BBF7D0",
-    backgroundColor: "#ECFDF5",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  promoPriceMain: {
-    color: "#374151",
-    fontSize: 26,
-    lineHeight: 31,
-    fontWeight: "700",
-  },
-  promoPriceSub: {
-    marginTop: 6,
-    color: "#6B7280",
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: "500",
-  },
-  promoNote: {
-    color: "#6B7280",
+    color: "#526353",
     fontSize: 14,
     lineHeight: 20,
     fontWeight: "500",
   },
-  promoOkBtn: {
-    marginTop: 2,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: "#06C168",
+  promoPriceCard: {
+    marginTop: 18,
+    borderWidth: 2,
+    borderStyle: "dashed",
+    borderColor: "rgba(0,110,32,0.18)",
+    backgroundColor: "#F2F4F2",
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    alignItems: "center",
+  },
+  promoPriceTag: {
+    color: "#1f1f1f",
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  promoPriceTag1: {
+    color: "#1f1f1f",
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+
+  promoPriceMain: {
+    marginTop: 6,
+    color: "#06C168",
+    fontSize: 40,
+    lineHeight: 46,
+    fontWeight: "900",
+    letterSpacing: -1,
+  },
+  promoPriceSuffix: {
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "700",
+    color: "#06C168",
+  },
+  promoPriceSub: {
+    marginTop: 8,
+    color: "#526353",
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: "500",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    textAlign: "center",
+  },
+  promoCtaBtn: {
+    marginTop: 18,
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#06C168",
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 7,
+  },
+  promoCtaBtnDisabled: {
+    opacity: 0.65,
+  },
+  promoCtaPressed: {
+    opacity: 0.94,
+    transform: [{ scale: 0.985 }],
+  },
+  promoCtaGradient: {
+    height: 54,
     alignItems: "center",
     justifyContent: "center",
   },
-  promoOkBtnDisabled: {
-    backgroundColor: "#CBD5E1",
-  },
-  promoOkText: {
+  promoCtaText: {
     color: "#FFFFFF",
     fontSize: 18,
-    fontWeight: "900",
-    letterSpacing: 0.4,
+    fontWeight: "800",
+    letterSpacing: 0.2,
   },
 
   header: {
