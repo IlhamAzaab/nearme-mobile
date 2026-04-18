@@ -16,8 +16,8 @@ import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
 
 const PRIVACY_POLICY_URL = "https://tiny-medovik-de85ce.netlify.app";
-const TERMS_AND_CONDITIONS_URL = "https://silly-toffee-589ef6.netlify.app";
-const HELP_AND_SUPPORT_URL = "https://amazing-zabaione-f13806.netlify.app";
+const TERMS_AND_CONDITIONS_URL = "https://whimsical-sopapillas-ef4bec.netlify.app";
+const HELP_AND_SUPPORT_URL = "https://tranquil-sawine-c7257f.netlify.app";
 
 function pickFirstValue(source, keys, fallback = "-") {
   for (const key of keys) {

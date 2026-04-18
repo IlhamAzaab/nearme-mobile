@@ -1,27 +1,29 @@
 import Constants from "expo-constants";
 
 // Environment Configuration
-const RENDER_API_URL = "https://meezo-backend-d3gw.onrender.com";
-const DEV_API_URL = process.env.EXPO_PUBLIC_API_URL || RENDER_API_URL;
+const DEFAULT_API_URL = "https://api.meezo.lk";
+const DEV_API_URL = process.env.EXPO_PUBLIC_API_URL || DEFAULT_API_URL;
 
 const ENV = {
   development: {
-    // Use explicit env override when provided; otherwise default to Render backend.
+    // Use explicit env override when provided; otherwise default to the hosted backend.
     API_URL: DEV_API_URL,
     ENABLE_LOGGING: true,
   },
   staging: {
-    API_URL: RENDER_API_URL,
+    API_URL: DEFAULT_API_URL,
     ENABLE_LOGGING: true,
   },
   production: {
-    API_URL: RENDER_API_URL,
+    API_URL: DEFAULT_API_URL,
     ENABLE_LOGGING: false,
   },
 };
 
 function normalizeUrl(value) {
-  return String(value || "").trim().replace(/\/+$/, "");
+  return String(value || "")
+    .trim()
+    .replace(/\/+$/, "");
 }
 
 function parseBoolean(value, fallback) {

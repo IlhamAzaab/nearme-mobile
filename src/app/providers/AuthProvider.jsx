@@ -74,7 +74,10 @@ export function AuthProvider({ children }) {
         setUser({ id: userId, email: userEmail, name: userName, role });
         setUserRole(role);
         setIsAuthenticated(true);
-        if (String(role).toLowerCase() === "customer" && !isCustomerProfileComplete) {
+        if (
+          String(role).toLowerCase() === "customer" &&
+          !isCustomerProfileComplete
+        ) {
           setAuthInitialRoute("CompleteProfile");
           setAuthInitialParams(
             pendingSignupFlow?.routeName === "CompleteProfile"
@@ -180,14 +183,11 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     setIsLoading(true);
     try {
-      // TODO: Implement login API call
-      const mockUser = { id: 1, email, name: "User", role: "customer" };
-      await AsyncStorage.setItem("token", "mock-token");
-      await AsyncStorage.setItem("role", "customer");
-      await AsyncStorage.setItem("userEmail", email);
-      setUser(mockUser);
-      setUserRole("customer");
-      setIsAuthenticated(true);
+      void email;
+      void password;
+      throw new Error(
+        "Direct AuthProvider.login is disabled. Use the API login flow in LoginScreen.",
+      );
     } finally {
       setIsLoading(false);
     }

@@ -191,7 +191,7 @@ export default function ProfileScreen({ navigation }) {
             <View style={{ flex: 1 }}>
               <Text style={st.sectionTitle}>Delivery Location</Text>
               <Text style={st.sectionSubtitle} numberOfLines={2}>
-                {hasDeliveryPin ? "Location pin set" : "Not provided"}
+                {hasDeliveryPin ? "Location pinned" : "Not provided"}
               </Text>
             </View>
             <Pressable
@@ -220,7 +220,7 @@ export default function ProfileScreen({ navigation }) {
             label="Help & Support"
             onPress={() =>
               navigation.navigate("WebView", {
-                url: "https://shimmering-sunshine-63d746.netlify.app",
+                url: "https://jolly-sundae-255ee6.netlify.app/",
                 title: "Help & Support",
               })
             }
@@ -230,7 +230,7 @@ export default function ProfileScreen({ navigation }) {
             label="Terms & Conditions"
             onPress={() =>
               navigation.navigate("WebView", {
-                url: "https://glittering-daifuku-7a1eea.netlify.app/",
+                url: "https://tranquil-medovik-7b2e45.netlify.app/",
                 title: "Terms & Conditions",
               })
             }
@@ -240,7 +240,7 @@ export default function ProfileScreen({ navigation }) {
             label="Privacy Policy"
             onPress={() =>
               navigation.navigate("WebView", {
-                url: "https://melodious-klepon-a7c816.netlify.app",
+                url: "https://mellow-daifuku-051f2e.netlify.app/",
                 title: "Privacy Policy",
               })
             }

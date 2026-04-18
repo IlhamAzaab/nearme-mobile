@@ -1,6 +1,7 @@
 import { Image as ExpoImage } from "expo-image";
 
 let FastImage = null;
+const preloadedUrlSet = new Set();
 try {
   FastImage = require("react-native-fast-image");
 } catch {
@@ -12,6 +13,12 @@ function normalizeUrl(url) {
   if (!uri) return "";
   if (!/^https?:\/\//i.test(uri)) return "";
   return uri;
+}
+
+export function isImagePrefetched(url) {
+  const normalized = normalizeUrl(url);
+  if (!normalized) return false;
+  return preloadedUrlSet.has(normalized);
 }
 
 export async function prefetchImageUrls(urls = []) {
@@ -27,16 +34,18 @@ export async function prefetchImageUrls(urls = []) {
       typeof FastImage.preload === "function" &&
       FastImage.priority
     ) {
-      await FastImage.preload(
+      FastImage.preload(
         uniqueUrls.map((uri) => ({
           uri,
           priority: FastImage.priority.normal,
         })),
       );
+      uniqueUrls.forEach((uri) => preloadedUrlSet.add(uri));
       return;
     }
 
     await ExpoImage.prefetch(uniqueUrls, "memory-disk");
+    uniqueUrls.forEach((uri) => preloadedUrlSet.add(uri));
   } catch {
     // Prefetch should never block UI flow.
   }

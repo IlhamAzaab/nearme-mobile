@@ -12,6 +12,7 @@ import React, {
 import {
   Animated,
   FlatList,
+  Image,
   Keyboard,
   Modal,
   Pressable,
@@ -226,46 +227,58 @@ function VerifiedBadge({ size = 17 }) {
   );
 }
 
-// ✅ Circular category images with fallback
-const CATEGORY_IMAGES = {
-  kothu:
-    "https://images.unsplash.com/photo-1512058564366-18510be2db19?w=200&h=200&fit=crop",
-  friedrice:
-    "https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=200&h=200&fit=crop",
-  biryani:
-    "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=200&h=200&fit=crop",
-  parotta:
-    "https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=200&h=200&fit=crop",
-  shorteats:
-    "https://images.unsplash.com/photo-1601050690597-df0568f70950?w=200&h=200&fit=crop",
-};
-const CATEGORY_EMOJI = {
-  kothu: "🍜",
-  friedrice: "🍚",
-  biryani: "🍛",
-  parotta: "🫓",
-  shorteats: "🍢",
-};
-const CategoryIcon = ({ type }) => {
-  const [failed, setFailed] = useState(false);
-  const uri = CATEGORY_IMAGES[type] || CATEGORY_IMAGES.biryani;
-  const emoji = CATEGORY_EMOJI[type] || "🍽️";
+const CATEGORY_ORDER = [
+  "Koththu",
+  "Fried Rice",
+  "Biriyani",
+  "BBQ",
+  "parotta",
+  "rice and curry",
+  "curry",
+  "short eats",
+  "dolphin",
+  "sea food",
+  "others",
+];
 
-  if (failed) {
-    return (
-      <View style={[styles.catImage, styles.catFallback]}>
-        <Text style={{ fontSize: 32 }}>{emoji}</Text>
-      </View>
-    );
-  }
+const CATEGORY_LABEL_LOOKUP = new Map(
+  CATEGORY_ORDER.map((label) => [label.toLowerCase(), label]),
+);
+
+const CATEGORY_IMAGE_BY_KEY = {
+  koththu: require("../../assets/category-images/koththu.jpg"),
+  "fried rice": require("../../assets/category-images/fried-rice.jpg"),
+  biriyani: require("../../assets/category-images/biriyani.jpg"),
+  bbq: require("../../assets/category-images/bbq.jpg"),
+  parotta: require("../../assets/category-images/parotta.jpg"),
+  "rice and curry": require("../../assets/category-images/rice-and-curry.jpg"),
+  curry: require("../../assets/category-images/curry.jpg"),
+  "short eats": require("../../assets/category-images/short-eats.jpg"),
+  dolphin: require("../../assets/category-images/dolphin.jpg"),
+  "sea food": require("../../assets/category-images/sea-food.jpg"),
+  others: require("../../assets/category-images/others.jpg"),
+};
+
+function normalizeCategoryLabel(value) {
+  const key = String(value || "")
+    .trim()
+    .toLowerCase();
+  return CATEGORY_LABEL_LOOKUP.get(key) || "others";
+}
+
+const CategoryIcon = ({ category }) => {
+  const key = normalizeCategoryLabel(category).toLowerCase();
+  const imageSource = CATEGORY_IMAGE_BY_KEY[key] || CATEGORY_IMAGE_BY_KEY.others;
 
   return (
-    <OptimizedImage
-      uri={uri}
-      style={styles.catImage}
-      contentFit="cover"
-      onError={() => setFailed(true)}
-    />
+    <View style={styles.catIconImageWrap}>
+      <Image source={imageSource} style={styles.catImage} resizeMode="cover" />
+      <View style={styles.catImageLabelOverlay}>
+        <Text style={styles.catImageLabelText} numberOfLines={1}>
+          {category}
+        </Text>
+      </View>
+    </View>
   );
 };
 
@@ -286,7 +299,7 @@ const CategorySection = React.memo(function CategorySection({
         contentContainerStyle={styles.catRow}
       >
         {categories.map((c) => {
-          const active = selectedCategory === c.id;
+          const active = selectedCategory === c.name;
           return (
             <StaggeredFadeInUp key={c.id} delay={16 + c.id * 18}>
               <Pressable
@@ -300,7 +313,7 @@ const CategorySection = React.memo(function CategorySection({
                 <View
                   style={[styles.catIconBox, active && styles.catIconBoxActive]}
                 >
-                  <CategoryIcon type={c.type} />
+                  <CategoryIcon category={c.name} />
                 </View>
                 <Text style={[styles.catText, active && styles.catTextActive]}>
                   {c.name}
@@ -354,16 +367,23 @@ export default function HomeScreen({ navigation }) {
   const [showLaunchPromoModal, setShowLaunchPromoModal] = useState(false);
   const [acknowledgingPromo, setAcknowledgingPromo] = useState(false);
 
-  const categories = useMemo(
-    () => [
-      { id: 1, name: "Kothu", type: "kothu" },
-      { id: 2, name: "Fried Rice", type: "friedrice" },
-      { id: 3, name: "Biryani", type: "biryani" },
-      { id: 4, name: "Parotta", type: "parotta" },
-      { id: 5, name: "Short Eats", type: "shorteats" },
-    ],
-    [],
-  );
+  const categories = useMemo(() => {
+    const categorySet = new Set();
+    for (const food of allFoodsData) {
+      categorySet.add(normalizeCategoryLabel(food?.category));
+    }
+
+    return Array.from(categorySet)
+      .sort((a, b) => {
+        const aIndex = CATEGORY_ORDER.indexOf(a);
+        const bIndex = CATEGORY_ORDER.indexOf(b);
+        const safeA = aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex;
+        const safeB = bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex;
+        if (safeA !== safeB) return safeA - safeB;
+        return a.localeCompare(b);
+      })
+      .map((name, index) => ({ id: index + 1, name }));
+  }, [allFoodsData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -406,10 +426,6 @@ export default function HomeScreen({ navigation }) {
       cancelled = true;
     };
   }, [enterOpacity, enterTranslateY]);
-
-  useEffect(() => {
-    prefetchImageUrls(Object.values(CATEGORY_IMAGES));
-  }, []);
 
   const fetchLaunchPromotionStatus = useCallback(async (tokenArg) => {
     try {
@@ -756,9 +772,22 @@ export default function HomeScreen({ navigation }) {
     const t = setTimeout(() => {
       if (activeTab === "food") {
         if (searchQuery.trim()) {
-          // Apply fuzzy search
-          const filtered = fuzzySearchFoods(allFoodsData, searchQuery);
-          setAllFoods(sortFoodsForHome(filtered));
+          if (
+            selectedCategory &&
+            normalizeCategoryLabel(searchQuery) ===
+              normalizeCategoryLabel(selectedCategory)
+          ) {
+            const filteredByCategory = allFoodsData.filter(
+              (food) =>
+                normalizeCategoryLabel(food?.category) ===
+                normalizeCategoryLabel(selectedCategory),
+            );
+            setAllFoods(sortFoodsForHome(filteredByCategory));
+          } else {
+            // Search by food name + category + description + restaurant name.
+            const filtered = fuzzySearchFoods(allFoodsData, searchQuery);
+            setAllFoods(sortFoodsForHome(filtered));
+          }
         } else {
           // Show all foods when search is empty
           setAllFoods(sortFoodsForHome(allFoodsData));
@@ -781,15 +810,32 @@ export default function HomeScreen({ navigation }) {
     activeTab,
     allRestaurants,
     allFoodsData,
+    selectedCategory,
     sortFoodsForHome,
     sortRestaurantsForHome,
   ]);
 
   const onSelectCategory = useCallback((category) => {
-    setSelectedCategory(category.id);
+    const normalized = normalizeCategoryLabel(category?.name);
+    const filteredByCategory = allFoodsData.filter(
+      (food) => normalizeCategoryLabel(food?.category) === normalized,
+    );
+
+    setSelectedCategory(normalized);
     setActiveTab("food");
-    setSearchQuery(category.name);
-  }, []);
+    setSearchQuery(normalized);
+    setAllFoods(sortFoodsForHome(filteredByCategory));
+  }, [allFoodsData, sortFoodsForHome]);
+
+  const handleSearchChange = useCallback((value) => {
+    setSearchQuery(value);
+    if (
+      selectedCategory &&
+      normalizeCategoryLabel(value) !== normalizeCategoryLabel(selectedCategory)
+    ) {
+      setSelectedCategory(null);
+    }
+  }, [selectedCategory]);
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery("");
@@ -1224,7 +1270,7 @@ export default function HomeScreen({ navigation }) {
               />
               <TextInput
                 value={searchQuery}
-                onChangeText={setSearchQuery}
+                onChangeText={handleSearchChange}
                 placeholder="Search..."
                 placeholderTextColor="#94A3B8"
                 style={styles.searchInput}
@@ -1744,9 +1790,31 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
+  catIconImageWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    overflow: "hidden",
+    backgroundColor: "#F8FAFC",
+  },
   catImage: {
     width: 72,
     height: 72,
+  },
+  catImageLabelOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  catImageLabelText: {
+    fontSize: 8,
+    color: "#ffffff",
+    fontWeight: "700",
+    textAlign: "center",
   },
   catFallback: {
     alignItems: "center",

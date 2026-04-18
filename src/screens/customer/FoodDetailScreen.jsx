@@ -93,7 +93,9 @@ export default function FoodDetailScreen({ route, navigation }) {
   const cachedRestaurantData = getCachedJson(restaurantCacheKey, 180000);
   const cachedFoodData = getCachedJson(foodCacheKey, 180000);
 
-  const [restaurant, setRestaurant] = useState(() => cachedRestaurantData?.restaurant || null);
+  const [restaurant, setRestaurant] = useState(
+    () => cachedRestaurantData?.restaurant || null,
+  );
   const [food, setFood] = useState(() => cachedFoodData?.food || null);
   const [loading, setLoading] = useState(
     () => !(cachedRestaurantData?.restaurant && cachedFoodData?.food),
@@ -382,7 +384,8 @@ export default function FoodDetailScreen({ route, navigation }) {
                   <Text
                     style={[
                       styles.sizePortionText,
-                      selectedSize === "regular" && styles.sizePortionTextActive,
+                      selectedSize === "regular" &&
+                        styles.sizePortionTextActive,
                     ]}
                   >
                     portion {food.regular_portion}
@@ -394,7 +397,8 @@ export default function FoodDetailScreen({ route, navigation }) {
                       <Text
                         style={[
                           styles.sizeOldPrice,
-                          selectedSize === "regular" && styles.sizeOldPriceActive,
+                          selectedSize === "regular" &&
+                            styles.sizeOldPriceActive,
                         ]}
                       >
                         {formatPrice(food.regular_price)}
@@ -423,7 +427,11 @@ export default function FoodDetailScreen({ route, navigation }) {
                 </View>
                 {selectedSize === "regular" && (
                   <View style={styles.sizeCheck}>
-                    <Ionicons name="checkmark-circle" size={16} color="#06C168" />
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color="#06C168"
+                    />
                   </View>
                 )}
               </Pressable>
@@ -459,7 +467,8 @@ export default function FoodDetailScreen({ route, navigation }) {
                     <Text
                       style={[
                         styles.sizePortionText,
-                        selectedSize === "large" && styles.sizePortionTextActive,
+                        selectedSize === "large" &&
+                          styles.sizePortionTextActive,
                       ]}
                     >
                       portion {food.extra_portion}
@@ -471,7 +480,8 @@ export default function FoodDetailScreen({ route, navigation }) {
                         <Text
                           style={[
                             styles.sizeOldPrice,
-                            selectedSize === "large" && styles.sizeOldPriceActive,
+                            selectedSize === "large" &&
+                              styles.sizeOldPriceActive,
                           ]}
                         >
                           {formatPrice(food.extra_price)}
@@ -490,7 +500,8 @@ export default function FoodDetailScreen({ route, navigation }) {
                       <Text
                         style={[
                           styles.sizeOptionPrice,
-                          selectedSize === "large" && styles.sizeOptionPriceActive,
+                          selectedSize === "large" &&
+                            styles.sizeOptionPriceActive,
                         ]}
                       >
                         {formatPrice(food.extra_price)}
@@ -588,17 +599,14 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingBottom: 2,
-    backgroundColor: "rgba(255,255,255,0.85)",
+    paddingBottom: 10,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
   },
   closeBtn: {
     width: 40,

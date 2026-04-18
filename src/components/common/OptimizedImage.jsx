@@ -1,5 +1,6 @@
+import { Image as ExpoImage } from "expo-image";
 import { useMemo, useState } from "react";
-import { Image as ReactNativeImage } from "react-native";
+import { isImagePrefetched } from "../../lib/imageCache";
 
 let FastImage = null;
 try {
@@ -51,9 +52,11 @@ export default function OptimizedImage({
   source,
   style,
   contentFit = "cover",
-  transition,
+  transition = 140,
   fallback = null,
   onError,
+  onLoad,
+  onLoadEnd,
   ...rest
 }) {
   const [loadFailed, setLoadFailed] = useState(false);
@@ -62,6 +65,13 @@ export default function OptimizedImage({
     if (source?.uri) return normalizeUri(source.uri);
     return normalizeUri(uri);
   }, [source?.uri, uri]);
+
+  const sourceKey = useMemo(() => resolvedUri, [resolvedUri]);
+  const effectiveTransition = isImagePrefetched(resolvedUri)
+    ? 0
+    : Number.isFinite(transition)
+      ? transition
+      : 140;
 
   if (!resolvedUri || loadFailed) {
     return fallback;
@@ -75,12 +85,15 @@ export default function OptimizedImage({
   if (FastImage) {
     return (
       <FastImage
+        key={sourceKey}
         source={{
           ...normalizedSource,
           priority: FastImage?.priority?.normal,
         }}
         style={style}
         resizeMode={mapFastImageResizeMode(contentFit)}
+        onLoad={onLoad}
+        onLoadEnd={onLoadEnd}
         onError={(event) => {
           setLoadFailed(true);
           onError?.(event);
@@ -91,10 +104,15 @@ export default function OptimizedImage({
   }
 
   return (
-    <ReactNativeImage
+    <ExpoImage
+      key={sourceKey}
       source={normalizedSource}
       style={style}
-      resizeMode={mapResizeMode(contentFit)}
+      contentFit={contentFit}
+      cachePolicy="memory-disk"
+      transition={effectiveTransition}
+      onLoad={onLoad}
+      onLoadEnd={onLoadEnd}
       onError={(event) => {
         setLoadFailed(true);
         onError?.(event);

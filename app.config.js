@@ -83,7 +83,8 @@ export default {
         "expo-build-properties",
         {
           android: {
-            usesCleartextTraffic: true,
+            usesCleartextTraffic:
+              String(process.env.ALLOW_CLEARTEXT_TRAFFIC || "false") === "true",
           },
         },
       ],
@@ -99,7 +100,7 @@ export default {
       API_URL:
         process.env.API_URL ||
         process.env.EXPO_PUBLIC_API_URL ||
-        "https://meezo-backend-d3gw.onrender.com",
+        "https://api.meezo.lk",
       SUPABASE_URL:
         process.env.SUPABASE_URL ||
         process.env.EXPO_PUBLIC_SUPABASE_URL ||

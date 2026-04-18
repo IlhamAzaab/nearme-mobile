@@ -1,4 +1,5 @@
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { Platform } from "react-native";
 import CheckoutScreen from "../screens/customer/CheckoutScreen";
 import OrderTrackingScreen from "../screens/customer/OrderTrackingScreen";
 import PlacingOrderScreen from "../screens/customer/PlacingOrderScreen";
@@ -27,7 +28,7 @@ const AddressPickerScreenAnimated = wrapCustomerScreen(AddressPickerScreen);
 const customerRootStackScreenOptions = {
   headerShown: false,
   animation: "slide_from_bottom",
-  animationDuration: 70,
+  animationDuration: Platform.OS === "ios" ? 250 : 140,
   animationMatchesGesture: true,
   fullScreenGestureEnabled: true,
   gestureEnabled: true,

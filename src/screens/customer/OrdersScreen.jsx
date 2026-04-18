@@ -12,7 +12,6 @@ import {
   Dimensions,
   Easing,
   FlatList,
-  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -22,6 +21,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
 import {
   ACTIVE_STATUSES,
@@ -637,11 +637,10 @@ export default function OrdersScreen({ navigation }) {
           <View style={styles.activeCardTop}>
             {/* Restaurant Logo - Square rounded */}
             {order.restaurant_logo_url || order.restaurant_logo ? (
-              <Image
-                source={{
-                  uri: order.restaurant_logo_url || order.restaurant_logo,
-                }}
+              <OptimizedImage
+                uri={order.restaurant_logo_url || order.restaurant_logo}
                 style={styles.activeLogo}
+                transition={90}
               />
             ) : (
               <View style={[styles.activeLogo, styles.logoFallback]}>
@@ -713,11 +712,10 @@ export default function OrdersScreen({ navigation }) {
           <View style={styles.pastCardTop}>
             {/* Restaurant Logo - Square */}
             {order.restaurant_logo_url || order.restaurant_logo ? (
-              <Image
-                source={{
-                  uri: order.restaurant_logo_url || order.restaurant_logo,
-                }}
+              <OptimizedImage
+                uri={order.restaurant_logo_url || order.restaurant_logo}
                 style={styles.pastLogo}
+                transition={90}
               />
             ) : (
               <View style={[styles.pastLogo, styles.logoFallback]}>

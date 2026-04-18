@@ -7,6 +7,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import {
   DeviceEventEmitter,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -72,7 +73,7 @@ const WebViewScreenAnimated = wrapCustomerScreen(WebViewScreen);
 const customerStackScreenOptions = {
   headerShown: false,
   animation: "slide_from_bottom",
-  animationDuration: 50,
+  animationDuration: Platform.OS === "ios" ? 250 : 140,
   animationMatchesGesture: true,
   fullScreenGestureEnabled: true,
   gestureEnabled: true,
@@ -279,6 +280,9 @@ function TabIcon({ iconName, label, focused, badge = 0 }) {
 
 function UberEatsTabBar({ state, descriptors, navigation, insets }) {
   const routes = state.routes;
+  const iosBottomInset = Platform.OS === "ios" ? Math.max(insets.bottom, 0) : 0;
+  const tabBottomPadding =
+    Platform.OS === "ios" ? Math.max(iosBottomInset, 8) : 7;
 
   const renderRouteButton = (route, index) => {
     const routeIndex = state.routes.findIndex((r) => r.key === route.key);
@@ -327,15 +331,7 @@ function UberEatsTabBar({ state, descriptors, navigation, insets }) {
   };
 
   return (
-    <View
-      style={[
-        styles.tabShell,
-        {
-          paddingBottom: Math.max(insets.bottom, 0),
-        },
-      ]}
-      pointerEvents="box-none"
-    >
+    <View style={[styles.tabShell]} pointerEvents="box-none">
       <LinearGradient
         pointerEvents="none"
         colors={[
@@ -349,7 +345,16 @@ function UberEatsTabBar({ state, descriptors, navigation, insets }) {
         end={{ x: 0.5, y: 0.2 }}
         style={styles.tabShellGradient}
       />
-      <View style={styles.tabBarContainer}>
+      <View
+        style={[
+          styles.tabBarContainer,
+          {
+            paddingTop: 7,
+            paddingBottom: tabBottomPadding,
+            minHeight: 56 + iosBottomInset,
+          },
+        ]}
+      >
         {routes.map(renderRouteButton)}
       </View>
     </View>

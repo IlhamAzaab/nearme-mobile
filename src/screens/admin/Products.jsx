@@ -24,6 +24,20 @@ import { API_URL } from "../../config/env";
 import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
 import { getAccessToken } from "../../lib/authStorage";
 
+const FOOD_CATEGORIES = [
+  "Koththu",
+  "Fried Rice",
+  "Biriyani",
+  "BBQ",
+  "parotta",
+  "rice and curry",
+  "curry",
+  "short eats",
+  "dolphin",
+  "sea food",
+  "others",
+];
+
 const fetchFoods = async () => {
   const token = await getAccessToken();
   if (!token) throw new Error("No authentication token");
@@ -211,9 +225,12 @@ export default function Products() {
   };
 
   const filteredFoods = foods.filter((food) => {
-    const matchesSearch = food.name
-      .toLowerCase()
-      .includes(search.toLowerCase());
+    const safeSearch = search.toLowerCase();
+    const matchesSearch =
+      food.name.toLowerCase().includes(safeSearch) ||
+      String(food.category || "")
+        .toLowerCase()
+        .includes(safeSearch);
     const matchesAvailability =
       availabilityFilter === "all" ||
       (availabilityFilter === "available" && food.is_available) ||
@@ -285,6 +302,9 @@ export default function Products() {
               </Text>
               <Text style={styles.productDescription} numberOfLines={2}>
                 {food.description || "-"}
+              </Text>
+              <Text style={styles.productCategory} numberOfLines={1}>
+                {food.category || "others"}
               </Text>
             </View>
 
@@ -530,6 +550,7 @@ export default function Products() {
 function AddProductModal({ visible, food, onClose, onSave }) {
   const [formData, setFormData] = useState({
     name: "",
+    category: "others",
     description: "",
     image_url: "",
     available_time: [],
@@ -576,6 +597,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
     if (visible) {
       setFormData({
         name: food?.name || "",
+        category: food?.category || "others",
         description: food?.description || "",
         image_url: food?.image_url || "",
         available_time: food?.available_time || [],
@@ -659,6 +681,12 @@ function AddProductModal({ visible, food, onClose, onSave }) {
       return;
     }
 
+    if (!formData.category || !FOOD_CATEGORIES.includes(formData.category)) {
+      setError("Please select a valid category");
+      Alert.alert("Validation Error", "Please select a valid category");
+      return;
+    }
+
     if (formData.available_time.length === 0) {
       setError("Select at least one available time");
       Alert.alert("Validation Error", "Select at least one available time");
@@ -668,6 +696,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
     try {
       const payload = {
         name: formData.name.trim(),
+        category: formData.category,
         description: formData.description.trim() || null,
         image_url: formData.image_url || null,
         available_time: formData.available_time,
@@ -808,6 +837,34 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                 placeholder="e.g., Chicken Burger, Biryani"
                 placeholderTextColor="#9ca3af"
               />
+            </View>
+
+            <View style={modalStyles.section}>
+              <Text style={modalStyles.sectionLabel}>Category *</Text>
+              <View style={modalStyles.categoryOptionsRow}>
+                {FOOD_CATEGORIES.map((category) => {
+                  const selected = formData.category === category;
+                  return (
+                    <TouchableOpacity
+                      key={category}
+                      style={[
+                        modalStyles.categoryOption,
+                        selected && modalStyles.categoryOptionSelected,
+                      ]}
+                      onPress={() => handleInputChange("category", category)}
+                    >
+                      <Text
+                        style={[
+                          modalStyles.categoryOptionText,
+                          selected && modalStyles.categoryOptionTextSelected,
+                        ]}
+                      >
+                        {category}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
 
             {/* Description */}
@@ -1336,6 +1393,12 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     marginTop: 3,
   },
+  productCategory: {
+    fontSize: 11,
+    color: "#047857",
+    marginTop: 4,
+    fontWeight: "700",
+  },
   availabilityToggle: {
     flexDirection: "row",
     alignItems: "center",
@@ -1561,6 +1624,31 @@ const modalStyles = StyleSheet.create({
   textArea: {
     minHeight: 80,
     paddingTop: 10,
+  },
+  categoryOptionsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  categoryOption: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    backgroundColor: "#ffffff",
+  },
+  categoryOptionSelected: {
+    borderColor: "#06C168",
+    backgroundColor: "#ECFDF3",
+  },
+  categoryOptionText: {
+    fontSize: 12,
+    color: "#374151",
+    fontWeight: "600",
+  },
+  categoryOptionTextSelected: {
+    color: "#047857",
   },
   timeOptionsRow: {
     marginTop: 2,

@@ -35,8 +35,6 @@ export default function RootNavigator() {
   const cacheRefreshCleanupRef = useRef(null);
 
   const [showSplash, setShowSplash] = useState(true);
-  const [customerImagePreloadReady, setCustomerImagePreloadReady] =
-    useState(true);
   const normalizedRole = String(userRole || "")
     .trim()
     .toLowerCase();
@@ -65,7 +63,6 @@ export default function RootNavigator() {
   useEffect(() => {
     if (!isAuthenticated || effectiveRole !== "customer") {
       didPreloadCustomerImagesRef.current = false;
-      setCustomerImagePreloadReady(true);
 
       if (cacheRefreshCleanupRef.current) {
         cacheRefreshCleanupRef.current();
@@ -77,7 +74,6 @@ export default function RootNavigator() {
     if (didPreloadCustomerImagesRef.current) return;
 
     didPreloadCustomerImagesRef.current = true;
-    setCustomerImagePreloadReady(false);
 
     let cancelled = false;
     (async () => {
@@ -122,10 +118,6 @@ export default function RootNavigator() {
           "[RootNavigator] Customer image preload failed:",
           error?.message || error,
         );
-      } finally {
-        if (!cancelled) {
-          setCustomerImagePreloadReady(true);
-        }
       }
     })();
 
@@ -142,16 +134,10 @@ export default function RootNavigator() {
     };
   }, []);
 
-  const shouldHoldForCustomerImageWarmup =
-    isAuthenticated &&
-    effectiveRole === "customer" &&
-    !customerImagePreloadReady;
-
   if (
     isLoading ||
     (showSplash && !skipSplashOnAuth) ||
-    (isAuthenticated && authTransitionMode === "post-login") ||
-    shouldHoldForCustomerImageWarmup
+    (isAuthenticated && authTransitionMode === "post-login")
   ) {
     return <SplashScreen />;
   }
