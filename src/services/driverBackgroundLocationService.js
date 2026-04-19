@@ -13,9 +13,13 @@ try {
 export const DRIVER_BACKGROUND_LOCATION_TASK =
   "driver-live-location-background-task";
 
-const BACKGROUND_SYNC_MIN_INTERVAL_MS = 5000;
+const BACKGROUND_SYNC_MIN_INTERVAL_MS = 15000;
 const LAST_SYNC_AT_KEY = "@driver_bg_last_sync_at";
 const AVAILABLE_CACHE_KEY = "available_deliveries_cache";
+const ACTIVE_DELIVERY_CACHE_KEY = "@driver_bg_active_delivery_ids";
+const LOCATION_UPLOAD_QUEUE_KEY = "@driver_location_upload_queue";
+const ACTIVE_DELIVERY_CACHE_MAX_AGE_MS = 90000;
+const MAX_QUEUED_LOCATION_UPDATES = 60;
 
 function getTaskManagerApi() {
   if (!TaskManager) return null;
@@ -49,12 +53,124 @@ function normalizeLocation(coords) {
 
   const latitude = Number(coords.latitude);
   const longitude = Number(coords.longitude);
+  const heading = Number(coords.heading);
+  const speed = Number(coords.speed);
 
   if (!isValidCoordinatePair(latitude, longitude)) {
     return null;
   }
 
-  return { latitude, longitude };
+  return {
+    latitude,
+    longitude,
+    heading: Number.isFinite(heading) ? heading : null,
+    speed: Number.isFinite(speed) ? speed : null,
+    timestamp: Date.now(),
+  };
+}
+
+function normalizeDeliveryIds(deliveryIds) {
+  if (!Array.isArray(deliveryIds)) return [];
+
+  const seen = new Set();
+  const normalized = [];
+
+  for (const rawId of deliveryIds) {
+    const id = String(rawId || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    normalized.push(id);
+  }
+
+  return normalized;
+}
+
+async function readActiveDeliveryCache() {
+  try {
+    const raw = await AsyncStorage.getItem(ACTIVE_DELIVERY_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    return {
+      ids: normalizeDeliveryIds(parsed.ids || []),
+      updatedAt: Number(parsed.updatedAt || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeActiveDeliveryCache(deliveryIds) {
+  const normalizedIds = normalizeDeliveryIds(deliveryIds);
+
+  try {
+    await AsyncStorage.setItem(
+      ACTIVE_DELIVERY_CACHE_KEY,
+      JSON.stringify({
+        ids: normalizedIds,
+        updatedAt: Date.now(),
+      }),
+    );
+  } catch {
+    // Ignore cache writes.
+  }
+
+  return normalizedIds;
+}
+
+export async function cacheDriverActiveDeliveryIds(deliveryIds) {
+  return writeActiveDeliveryCache(deliveryIds);
+}
+
+export async function getCachedDriverActiveDeliveryIds() {
+  const cached = await readActiveDeliveryCache();
+  if (!cached) return [];
+  return cached.ids;
+}
+
+async function readQueuedLocationUpdates() {
+  try {
+    const raw = await AsyncStorage.getItem(LOCATION_UPLOAD_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeQueuedLocationUpdates(queue) {
+  try {
+    await AsyncStorage.setItem(
+      LOCATION_UPLOAD_QUEUE_KEY,
+      JSON.stringify(Array.isArray(queue) ? queue : []),
+    );
+  } catch {
+    // Ignore queue write errors.
+  }
+}
+
+async function enqueueLocationUpdate(location) {
+  try {
+    const queue = await readQueuedLocationUpdates();
+    queue.push({
+      latitude: location.latitude,
+      longitude: location.longitude,
+      heading: location.heading ?? null,
+      speed: location.speed ?? null,
+      timestamp: location.timestamp || Date.now(),
+    });
+
+    if (queue.length > MAX_QUEUED_LOCATION_UPDATES) {
+      queue.splice(0, queue.length - MAX_QUEUED_LOCATION_UPDATES);
+    }
+
+    await writeQueuedLocationUpdates(queue);
+  } catch {
+    // Ignore enqueue failures.
+  }
 }
 
 async function patchAvailableCache(location) {
@@ -102,38 +218,53 @@ async function shouldSyncNow() {
 }
 
 async function getActiveDeliveryIds(token) {
-  const response = await fetch(`${API_BASE_URL}/driver/deliveries/active`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  const cached = await readActiveDeliveryCache();
+  const now = Date.now();
 
-  if (!response.ok) return [];
+  if (
+    cached?.ids?.length &&
+    Number.isFinite(cached.updatedAt) &&
+    now - cached.updatedAt <= ACTIVE_DELIVERY_CACHE_MAX_AGE_MS
+  ) {
+    return cached.ids;
+  }
 
-  const payload = await response.json().catch(() => ({}));
-  const deliveries = Array.isArray(payload?.deliveries)
-    ? payload.deliveries
-    : [];
+  try {
+    const response = await fetch(`${API_BASE_URL}/driver/deliveries/active`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
-  return deliveries
-    .filter((item) =>
-      ["accepted", "picked_up", "on_the_way", "at_customer"].includes(
-        String(item?.status || "").toLowerCase(),
-      ),
-    )
-    .map((item) => item?.id || item?.delivery_id)
-    .filter(Boolean);
+    if (!response.ok) {
+      return cached?.ids || [];
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const deliveries = Array.isArray(payload?.deliveries)
+      ? payload.deliveries
+      : [];
+
+    const activeIds = deliveries
+      .filter((item) =>
+        ["accepted", "picked_up", "on_the_way", "at_customer"].includes(
+          String(item?.status || "").toLowerCase(),
+        ),
+      )
+      .map((item) => item?.id || item?.delivery_id)
+      .filter(Boolean);
+
+    return writeActiveDeliveryCache(activeIds);
+  } catch {
+    return cached?.ids || [];
+  }
 }
 
-async function syncLocationToBackend(location) {
-  const token = await getAccessToken();
-  if (!token) return;
+async function uploadLocationToDeliveries({ token, deliveryIds, location }) {
+  if (!token || !deliveryIds.length || !location) return false;
 
-  const activeDeliveryIds = await getActiveDeliveryIds(token);
-  if (!activeDeliveryIds.length) return;
-
-  await Promise.all(
-    activeDeliveryIds.map((deliveryId) =>
+  const results = await Promise.all(
+    deliveryIds.map((deliveryId) =>
       fetch(`${API_BASE_URL}/driver/deliveries/${deliveryId}/location`, {
         method: "PATCH",
         headers: {
@@ -143,10 +274,71 @@ async function syncLocationToBackend(location) {
         body: JSON.stringify({
           latitude: location.latitude,
           longitude: location.longitude,
+          heading: location.heading ?? null,
+          speed: location.speed ?? null,
+          timestamp: location.timestamp || Date.now(),
         }),
-      }).catch(() => null),
+      })
+        .then((response) => response.ok)
+        .catch(() => false),
     ),
   );
+
+  return results.some(Boolean);
+}
+
+export async function flushQueuedDriverLocationUpdates() {
+  const token = await getAccessToken();
+  if (!token) return;
+
+  const deliveryIds = await getActiveDeliveryIds(token);
+  if (!deliveryIds.length) return;
+
+  const queue = await readQueuedLocationUpdates();
+  if (!queue.length) return;
+
+  const pending = [...queue];
+  const failed = [];
+
+  for (const sample of pending) {
+    const ok = await uploadLocationToDeliveries({
+      token,
+      deliveryIds,
+      location: sample,
+    });
+    if (!ok) {
+      failed.push(sample);
+    }
+  }
+
+  await writeQueuedLocationUpdates(failed);
+}
+
+async function syncLocationToBackend(location) {
+  const token = await getAccessToken();
+  if (!token) {
+    await enqueueLocationUpdate(location);
+    return;
+  }
+
+  const activeDeliveryIds = await getActiveDeliveryIds(token);
+  if (!activeDeliveryIds.length) {
+    await stopDriverBackgroundLocationTracking().catch(() => {});
+    return;
+  }
+
+  const uploaded = await uploadLocationToDeliveries({
+    token,
+    deliveryIds: activeDeliveryIds,
+    location,
+  });
+
+  if (!uploaded) {
+    await enqueueLocationUpdate(location);
+    return;
+  }
+
+  await flushQueuedDriverLocationUpdates();
 }
 
 const taskManagerApi = getTaskManagerApi();
@@ -207,14 +399,14 @@ export async function startDriverBackgroundLocationTracking() {
 
   await Location.startLocationUpdatesAsync(DRIVER_BACKGROUND_LOCATION_TASK, {
     accuracy: Location.Accuracy.BestForNavigation,
-    timeInterval: 3000,
-    deferredUpdatesInterval: 3000,
-    distanceInterval: 0,
+    timeInterval: 15000,
+    deferredUpdatesInterval: 15000,
+    distanceInterval: 10,
     pausesUpdatesAutomatically: false,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: "Meezo Driver Tracking",
-      notificationBody: "Live location is active for deliveries",
+      notificationBody: "Live location is active during deliveries",
       notificationColor: "#06C168",
     },
   });
@@ -234,4 +426,10 @@ export async function stopDriverBackgroundLocationTracking() {
   if (started) {
     await Location.stopLocationUpdatesAsync(DRIVER_BACKGROUND_LOCATION_TASK);
   }
+
+  await Promise.allSettled([
+    AsyncStorage.removeItem(LAST_SYNC_AT_KEY),
+    AsyncStorage.removeItem(ACTIVE_DELIVERY_CACHE_KEY),
+    AsyncStorage.removeItem(LOCATION_UPLOAD_QUEUE_KEY),
+  ]);
 }

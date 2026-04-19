@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
   Animated,
@@ -18,8 +18,6 @@ import { API_URL } from "../../config/env";
 import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
 import { getAccessToken } from "../../lib/authStorage";
 import { supabase } from "../../services/supabaseClient";
-
-const ADMIN_UNREAD_KEY = "@admin_notifications_unread_count";
 
 const parseNotificationMetadata = (notification) => {
   try {
@@ -58,26 +56,6 @@ const fetchAdminNotifications = async () => {
   return data.notifications || [];
 };
 
-const markAdminNotificationsRead = async () => {
-  const token = await getAccessToken();
-  if (!token) throw new Error("No authentication token");
-
-  const res = await fetch(`${API_URL}/admin/notifications/mark-all-read`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data?.message || "Failed to mark notifications as read");
-  }
-
-  await AsyncStorage.setItem(ADMIN_UNREAD_KEY, "0");
-};
-
 export default function AdminNotifications() {
   const navigation = useNavigation();
   const queryClient = useQueryClient();
@@ -93,22 +71,6 @@ export default function AdminNotifications() {
     refetchInterval: 30 * 1000,
   });
 
-  const markReadMutation = useMutation({
-    mutationFn: markAdminNotificationsRead,
-    onSuccess: () => {
-      queryClient.setQueryData(["admin", "notifications"], (prev = []) =>
-        prev.map((notif) => ({
-          ...notif,
-          is_read: true,
-          read_at: notif.read_at || new Date().toISOString(),
-        })),
-      );
-    },
-    onError: (e) => {
-      console.error("Mark all read error:", e);
-    },
-  });
-
   const notifications = notificationsQuery.data || [];
   const filteredNotifications =
     filter === "all"
@@ -116,6 +78,16 @@ export default function AdminNotifications() {
       : notifications.filter((n) => {
           const metadata = parseNotificationMetadata(n);
           const notifType = metadata.type || n.type || null;
+          if (filter === "order") {
+            return notifType === "new_order" || notifType === "order_reminder";
+          }
+          if (filter === "delivery") {
+            return (
+              notifType === "new_delivery" ||
+              notifType === "driver_assigned" ||
+              notifType === "delivery_status_update"
+            );
+          }
           return notifType === filter;
         });
   const loading = notificationsQuery.isLoading && !notificationsQuery.data;
@@ -128,16 +100,6 @@ export default function AdminNotifications() {
 
     init();
   }, []);
-
-  useEffect(() => {
-    if (notifications.length === 0) return;
-    if (markReadMutation.isPending) return;
-
-    const unreadExists = notifications.some((n) => !n.is_read);
-    if (!unreadExists) return;
-
-    markReadMutation.mutate();
-  }, [notifications, markReadMutation]);
 
   // Real-time subscription for new notifications
   useEffect(() => {
@@ -393,8 +355,8 @@ export default function AdminNotifications() {
         <View style={styles.filterTabs}>
           {[
             { key: "all", label: "All" },
-            { key: "new_delivery", label: "Orders" },
-            { key: "delivery_status_update", label: "Delivery" },
+            { key: "order", label: "Orders" },
+            { key: "delivery", label: "Delivery" },
           ].map((tab) => {
             const active = filter === tab.key;
             return (

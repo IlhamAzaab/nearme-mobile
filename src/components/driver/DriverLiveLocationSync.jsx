@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
 import { useCallback, useEffect, useRef } from "react";
@@ -6,6 +7,8 @@ import { AppState } from "react-native";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
 import {
+  cacheDriverActiveDeliveryIds,
+  flushQueuedDriverLocationUpdates,
   startDriverBackgroundLocationTracking,
   stopDriverBackgroundLocationTracking,
 } from "../../services/driverBackgroundLocationService";
@@ -34,6 +37,7 @@ function normalizeLocation(coords) {
   const latitude = Number(coords.latitude);
   const longitude = Number(coords.longitude);
   const heading = Number(coords.heading);
+  const speed = Number(coords.speed);
 
   if (!isValidCoordinatePair(latitude, longitude)) return null;
 
@@ -41,6 +45,7 @@ function normalizeLocation(coords) {
     latitude,
     longitude,
     heading: Number.isFinite(heading) ? heading : 0,
+    speed: Number.isFinite(speed) ? speed : null,
   };
 }
 
@@ -82,6 +87,7 @@ export default function DriverLiveLocationSync() {
   const activeDeliveryIdsRef = useRef([]);
   const latestLocationRef = useRef(null);
   const syncInFlightRef = useRef(false);
+  const backgroundTrackingEnabledRef = useRef(false);
 
   const updateCaches = useCallback(
     async (location) => {
@@ -127,6 +133,7 @@ export default function DriverLiveLocationSync() {
 
     if (!res.ok) {
       activeDeliveryIdsRef.current = [];
+      await cacheDriverActiveDeliveryIds([]);
       return;
     }
 
@@ -146,7 +153,39 @@ export default function DriverLiveLocationSync() {
 
     activeDeliveryIdsRef.current = activeIds;
     lastActiveDeliveryFetchAtRef.current = Date.now();
+    await cacheDriverActiveDeliveryIds(activeIds);
   }, []);
+
+  const setBackgroundTrackingEnabled = useCallback(async (enabled) => {
+    if (enabled && !backgroundTrackingEnabledRef.current) {
+      const result = await startDriverBackgroundLocationTracking();
+      backgroundTrackingEnabledRef.current = Boolean(result?.ok);
+      return;
+    }
+
+    if (!enabled && backgroundTrackingEnabledRef.current) {
+      await stopDriverBackgroundLocationTracking();
+      backgroundTrackingEnabledRef.current = false;
+    }
+  }, []);
+
+  const syncTrackingLifecycle = useCallback(async () => {
+    const token = await getAccessToken();
+    if (!token) {
+      activeDeliveryIdsRef.current = [];
+      await cacheDriverActiveDeliveryIds([]);
+      await setBackgroundTrackingEnabled(false);
+      return;
+    }
+
+    await refreshActiveDeliveryIds(token);
+    const hasActiveDeliveries = activeDeliveryIdsRef.current.length > 0;
+    await setBackgroundTrackingEnabled(hasActiveDeliveries);
+
+    if (hasActiveDeliveries) {
+      await flushQueuedDriverLocationUpdates();
+    }
+  }, [refreshActiveDeliveryIds, setBackgroundTrackingEnabled]);
 
   const syncLocationToBackend = useCallback(async () => {
     const now = Date.now();
@@ -169,6 +208,9 @@ export default function DriverLiveLocationSync() {
 
       if (shouldRefreshActiveIds) {
         await refreshActiveDeliveryIds(token);
+        await setBackgroundTrackingEnabled(
+          activeDeliveryIdsRef.current.length > 0,
+        );
       }
 
       if (activeDeliveryIdsRef.current.length === 0) {
@@ -187,6 +229,9 @@ export default function DriverLiveLocationSync() {
             body: JSON.stringify({
               latitude: location.latitude,
               longitude: location.longitude,
+              heading: location.heading,
+              speed: location.speed,
+              timestamp: Date.now(),
             }),
           }).catch(() => null),
         ),
@@ -196,7 +241,7 @@ export default function DriverLiveLocationSync() {
     } finally {
       syncInFlightRef.current = false;
     }
-  }, [refreshActiveDeliveryIds]);
+  }, [refreshActiveDeliveryIds, setBackgroundTrackingEnabled]);
 
   const handleLocationUpdate = useCallback(
     async (coords) => {
@@ -212,6 +257,10 @@ export default function DriverLiveLocationSync() {
 
   const startTracking = useCallback(async () => {
     if (locationWatchRef.current) {
+      return;
+    }
+
+    if (AppState.currentState !== "active") {
       return;
     }
 
@@ -246,25 +295,49 @@ export default function DriverLiveLocationSync() {
   }, []);
 
   useEffect(() => {
-    startDriverBackgroundLocationTracking().catch(() => {});
     startTracking();
+    syncTrackingLifecycle().catch(() => {});
 
     const appStateSub = AppState.addEventListener("change", (nextAppState) => {
       const previous = appStateRef.current;
       appStateRef.current = nextAppState;
 
       if (previous.match(/inactive|background/) && nextAppState === "active") {
-        stopTracking();
         startTracking().catch(() => {});
+        syncTrackingLifecycle().catch(() => {});
+      }
+
+      if (nextAppState.match(/inactive|background/)) {
+        stopTracking();
       }
     });
 
+    const networkSub = NetInfo.addEventListener((state) => {
+      if (state?.isConnected) {
+        flushQueuedDriverLocationUpdates().catch(() => {});
+      }
+    });
+
+    const lifecycleInterval = setInterval(() => {
+      syncTrackingLifecycle().catch(() => {});
+    }, ACTIVE_DELIVERY_REFRESH_MS);
+
     return () => {
-      stopDriverBackgroundLocationTracking().catch(() => {});
       stopTracking();
       appStateSub?.remove();
+      networkSub?.();
+      clearInterval(lifecycleInterval);
+
+      if (activeDeliveryIdsRef.current.length === 0) {
+        setBackgroundTrackingEnabled(false).catch(() => {});
+      }
     };
-  }, [startTracking, stopTracking]);
+  }, [
+    setBackgroundTrackingEnabled,
+    startTracking,
+    stopTracking,
+    syncTrackingLifecycle,
+  ]);
 
   return null;
 }

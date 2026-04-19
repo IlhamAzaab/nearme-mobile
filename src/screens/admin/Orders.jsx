@@ -2,9 +2,10 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  DeviceEventEmitter,
   Image,
   Linking,
   Modal,
@@ -22,9 +23,12 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import { useSocket } from "../../context/SocketContext";
 import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
 import { getAccessToken } from "../../lib/authStorage";
 import supabaseClient from "../../services/supabaseClient";
+
+const ADMIN_ORDER_STATUS_EVENT = "admin:order_status_changed";
 
 const PERIOD_LABELS = {
   today: "Today",
@@ -275,6 +279,7 @@ export default function Orders() {
   const route = useRoute();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
+  const { on, off } = useSocket();
 
   const [orders, setOrders] = useState([]);
   const [statusFilter, setStatusFilter] = useState("pending");
@@ -395,6 +400,68 @@ export default function Orders() {
 
   const bottomSafeSpacing = insets.bottom + 12;
 
+  const applyLocalOrderStatusUpdate = useCallback(
+    ({ orderId, deliveryId, status, reason }) => {
+      const normalizedStatusRaw = String(status || "")
+        .trim()
+        .toLowerCase();
+
+      if (!normalizedStatusRaw) return;
+
+      const normalizedStatus =
+        normalizedStatusRaw === "accepted"
+          ? "pending"
+          : normalizedStatusRaw === "rejected"
+            ? "failed"
+            : normalizedStatusRaw;
+
+      const normalizedOrderId = orderId != null ? String(orderId) : null;
+      const normalizedDeliveryId =
+        deliveryId != null ? String(deliveryId) : null;
+
+      setOrders((prevOrders) =>
+        prevOrders.map((order) => {
+          const isOrderMatch =
+            normalizedOrderId && String(order?.id) === normalizedOrderId;
+
+          const deliveries = normalizeDeliveries(order?.deliveries);
+          const hasMatchingDelivery =
+            normalizedDeliveryId &&
+            deliveries.some(
+              (delivery) => String(delivery?.id) === normalizedDeliveryId,
+            );
+
+          if (!isOrderMatch && !hasMatchingDelivery) {
+            return order;
+          }
+
+          const updatedDeliveries = deliveries.map((delivery) => {
+            const shouldUpdate = normalizedDeliveryId
+              ? String(delivery?.id) === normalizedDeliveryId
+              : true;
+
+            if (!shouldUpdate) return delivery;
+
+            return {
+              ...delivery,
+              status: normalizedStatus,
+              rejection_reason:
+                normalizedStatus === "failed"
+                  ? reason || delivery?.rejection_reason || null
+                  : delivery?.rejection_reason || null,
+            };
+          });
+
+          return {
+            ...order,
+            deliveries: updatedDeliveries,
+          };
+        }),
+      );
+    },
+    [],
+  );
+
   const fetchOrdersRef = useRef(async () => {});
 
   fetchOrdersRef.current = async (silent = false) => {
@@ -407,6 +474,76 @@ export default function Orders() {
       if (!silent) setManualRefreshing(false);
     }
   };
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      ADMIN_ORDER_STATUS_EVENT,
+      (payload) => {
+        if (
+          payload?.source === "orders_screen" ||
+          payload?.source === "orders_socket"
+        ) {
+          return;
+        }
+
+        const orderId = payload?.orderId;
+        const deliveryId = payload?.deliveryId;
+        const status = payload?.status;
+
+        if (!status) return;
+
+        applyLocalOrderStatusUpdate({
+          orderId,
+          deliveryId,
+          status,
+          reason: payload?.reason || null,
+        });
+
+        fetchOrdersRef.current?.(true);
+      },
+    );
+
+    return () => {
+      subscription?.remove();
+    };
+  }, [applyLocalOrderStatusUpdate]);
+
+  useEffect(() => {
+    if (!on || !off) return;
+
+    const handleOrderStatusChanged = (payload) => {
+      const orderId = payload?.order_id || payload?.orderId;
+      const deliveryId = payload?.delivery_id || payload?.deliveryId;
+      const status = payload?.status;
+
+      if (!status) return;
+
+      applyLocalOrderStatusUpdate({
+        orderId,
+        deliveryId,
+        status,
+        reason: payload?.reason || payload?.rejection_reason || null,
+      });
+
+      if (orderId != null) {
+        DeviceEventEmitter.emit(ADMIN_ORDER_STATUS_EVENT, {
+          orderId: String(orderId),
+          deliveryId: deliveryId != null ? String(deliveryId) : null,
+          status,
+          reason: payload?.reason || payload?.rejection_reason || null,
+          source: "orders_socket",
+        });
+      }
+
+      fetchOrdersRef.current?.(true);
+    };
+
+    on("order:status_changed", handleOrderStatusChanged);
+
+    return () => {
+      off("order:status_changed", handleOrderStatusChanged);
+    };
+  }, [applyLocalOrderStatusUpdate, off, on]);
 
   useEffect(() => {
     const newDeliverySubscription = supabaseClient
@@ -556,6 +693,18 @@ export default function Orders() {
 
     try {
       await acceptOrderMutation.mutateAsync(orderId);
+
+      applyLocalOrderStatusUpdate({
+        orderId,
+        status: "pending",
+      });
+
+      DeviceEventEmitter.emit(ADMIN_ORDER_STATUS_EVENT, {
+        orderId: String(orderId),
+        status: "pending",
+        source: "orders_screen",
+      });
+
       showBanner("success", "Order accepted!");
     } catch (err) {
       console.error("Failed to accept order", err);
@@ -587,23 +736,17 @@ export default function Orders() {
         reason: rejectReason.trim(),
       });
 
-      setOrders((prevOrders) => {
-        const newOrders = prevOrders.map((order) => {
-          if (order.id === orderId) {
-            const dels = normalizeDeliveries(order.deliveries);
-            return {
-              ...order,
-              deliveries: dels.map((d) => ({
-                ...d,
-                status: "rejected",
-                rejection_reason: rejectReason.trim(),
-              })),
-            };
-          }
-          return order;
-        });
+      applyLocalOrderStatusUpdate({
+        orderId,
+        status: "failed",
+        reason: rejectReason.trim(),
+      });
 
-        return newOrders;
+      DeviceEventEmitter.emit(ADMIN_ORDER_STATUS_EVENT, {
+        orderId: String(orderId),
+        status: "failed",
+        reason: rejectReason.trim(),
+        source: "orders_screen",
       });
 
       showBanner("success", "Order rejected");
@@ -1110,7 +1253,7 @@ export default function Orders() {
                   size={34}
                   color="#9ca3af"
                 />
-                <Text style={styles.endListText}>That's all for now</Text>
+                <Text style={styles.endListText}>That is all for now</Text>
               </View>
             </>
           )}

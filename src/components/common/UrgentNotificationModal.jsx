@@ -168,6 +168,11 @@ export default function UrgentNotificationModal({
 
   const orderTitle =
     (typeof title === "string" ? title.trim() : "") || "New Order Arrived!";
+  const waitingMinutes = Number(data?.waitingMinutes);
+  const shouldShowWaitingTime =
+    data?.type === "order_reminder" &&
+    Number.isFinite(waitingMinutes) &&
+    waitingMinutes > 0;
 
   return (
     <KeyboardAvoidingView
@@ -234,10 +239,8 @@ export default function UrgentNotificationModal({
             </Text>
           )}
 
-          {data?.waitingMinutes ? (
-            <Text style={styles.waitingText}>
-              Waiting {Number(data.waitingMinutes)} min
-            </Text>
+          {shouldShowWaitingTime ? (
+            <Text style={styles.waitingText}>Waiting {waitingMinutes} min</Text>
           ) : null}
         </ScrollView>
 

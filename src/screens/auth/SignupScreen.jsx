@@ -14,7 +14,10 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import MeezoLogo from "../../components/common/MeezoLogo";
 import FloatingLabelInput from "../../components/common/FloatingLabelInput";
@@ -39,6 +42,7 @@ const PhoneIcon = ({ size = 20, color = "#9CA3AF" }) => (
 );
 
 export default function SignupScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const shakeX = useRef(new Animated.Value(0)).current;
@@ -132,7 +136,7 @@ export default function SignupScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.pageContainer} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.pageContainer} edges={["top"]}>
       <KeyboardAvoidingView
         style={styles.pageContainer}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -184,7 +188,13 @@ export default function SignupScreen({ navigation }) {
             </View>
 
             <View
-              style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}
+              style={[
+                styles.whiteSection,
+                IS_WEB && styles.whiteSectionWeb,
+                {
+                  paddingBottom: Math.max(24, insets.bottom + 16),
+                },
+              ]}
             >
               <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
                 <Text style={styles.cardTitle}>Create Account</Text>
@@ -256,7 +266,7 @@ export default function SignupScreen({ navigation }) {
 const styles = StyleSheet.create({
   pageContainer: {
     flex: 1,
-    backgroundColor: "#EEF4EF",
+    backgroundColor: "#FFFFFF",
   },
   scrollContent: { flexGrow: 1 },
   scrollContentWeb: {

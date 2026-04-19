@@ -13,7 +13,10 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken, persistAuthSession } from "../../lib/authStorage";
@@ -78,6 +81,7 @@ const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
 
 export default function CompleteProfileScreen({ navigation, route }) {
   const { refreshAuthState, markProfileCompleted } = useAuth();
+  const insets = useSafeAreaInsets();
   const { userId, accessToken, prefillPhone } = route.params || {};
   const [formData, setFormData] = useState({
     name: "",
@@ -236,7 +240,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
   };
 
   return (
-    <SafeAreaView style={styles.pageContainer} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.pageContainer} edges={["top"]}>
       <KeyboardAvoidingView
         style={styles.pageContainer}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -286,7 +290,13 @@ export default function CompleteProfileScreen({ navigation, route }) {
             </View>
 
             <View
-              style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}
+              style={[
+                styles.whiteSection,
+                IS_WEB && styles.whiteSectionWeb,
+                {
+                  paddingBottom: Math.max(24, insets.bottom + 16),
+                },
+              ]}
             >
               <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
                 <Text style={styles.cardTitle}>Profile Setup</Text>
@@ -405,7 +415,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   pageContainer: {
     flex: 1,
-    backgroundColor: "#EEF4EF",
+    backgroundColor: "#FFFFFF",
   },
   scrollContent: { flexGrow: 1 },
   scrollContentWeb: {

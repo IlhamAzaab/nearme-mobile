@@ -2,16 +2,25 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NavigationContainer } from "@react-navigation/native";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, AppState, LogBox, Platform, StatusBar } from "react-native";
+import {
+  Alert,
+  AppState,
+  DeviceEventEmitter,
+  LogBox,
+  Platform,
+  StatusBar,
+} from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import UrgentNotificationModal from "../components/common/UrgentNotificationModal";
 import DeliveryNotificationOverlay from "../components/driver/DeliveryNotificationOverlay";
 import { API_URL } from "../config/env";
 import { CustomAlertProvider } from "../context/CustomAlertContext";
-import { DriverDeliveryNotificationProvider } from "../context/DriverDeliveryNotificationContext";
+import {
+  DriverDeliveryNotificationProvider,
+  useDriverDeliveryNotifications,
+} from "../context/DriverDeliveryNotificationContext";
 import { OrderProvider } from "../context/OrderContext";
 import { SocketProvider } from "../context/SocketContext";
-import { useDriverDeliveryNotifications } from "../context/DriverDeliveryNotificationContext";
 import { initializeApiAuthFetch } from "../lib/apiAuthFetch";
 import {
   getAccessToken,
@@ -33,6 +42,72 @@ LogBox.ignoreLogs([
   "[expo-av]: Expo AV has been deprecated",
   "setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.",
 ]);
+
+const ADMIN_ORDER_STATUS_EVENT = "admin:order_status_changed";
+const DRIVER_DELIVERY_ACTION_EVENT = "driver:delivery_notification_action";
+
+const normalizeDeliveries = (deliveries) => {
+  if (!deliveries) return [];
+  if (Array.isArray(deliveries)) return deliveries;
+  return [deliveries];
+};
+
+const normalizeAdminOrderStatus = (status) => {
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "accepted") return "pending";
+  if (normalized === "rejected") return "failed";
+  return normalized;
+};
+
+const patchAdminOrdersCache = (orderId, status, reason) => {
+  const normalizedOrderId = String(orderId || "").trim();
+  const normalizedStatus = normalizeAdminOrderStatus(status);
+
+  if (!normalizedOrderId || !normalizedStatus) return;
+
+  if (typeof mobileQueryClient.setQueriesData === "function") {
+    mobileQueryClient.setQueriesData(
+      { queryKey: ["admin", "orders"] },
+      (existing) => {
+        if (!Array.isArray(existing)) return existing;
+
+        return existing.map((order) => {
+          if (String(order?.id) !== normalizedOrderId) return order;
+
+          const deliveries = normalizeDeliveries(order?.deliveries);
+          if (deliveries.length === 0) return order;
+
+          return {
+            ...order,
+            deliveries: deliveries.map((delivery) => ({
+              ...delivery,
+              status: normalizedStatus,
+              rejection_reason:
+                normalizedStatus === "failed"
+                  ? reason || delivery?.rejection_reason || null
+                  : delivery?.rejection_reason || null,
+            })),
+          };
+        });
+      },
+    );
+  }
+
+  mobileQueryClient
+    .invalidateQueries({ queryKey: ["admin", "orders"] })
+    .catch(() => {});
+};
+
+const refreshDriverDeliveryCaches = () => {
+  mobileQueryClient
+    .invalidateQueries({ queryKey: ["driver", "available-deliveries"] })
+    .catch(() => {});
+  mobileQueryClient
+    .invalidateQueries({ queryKey: ["driver", "active-deliveries"] })
+    .catch(() => {});
+};
 
 // Safe import G�� requires native rebuild to work
 let NavigationBar = null;
@@ -143,12 +218,30 @@ function DriverNotificationLayer() {
 
   const handleAccept = useCallback(async () => {
     if (!topNotification?.delivery_id) return;
-    await acceptDelivery(topNotification.delivery_id, driverLocation);
+    const result = await acceptDelivery(
+      topNotification.delivery_id,
+      driverLocation,
+    );
+
+    if (result?.success) {
+      DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+        deliveryId: String(topNotification.delivery_id),
+        action: "accepted",
+        source: "driver_overlay",
+      });
+      refreshDriverDeliveryCaches();
+    }
   }, [acceptDelivery, topNotification, driverLocation]);
 
   const handleReject = useCallback(() => {
     if (!topNotification?.delivery_id) return;
     declineDelivery(topNotification.delivery_id);
+    DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+      deliveryId: String(topNotification.delivery_id),
+      action: "declined",
+      source: "driver_overlay",
+    });
+    refreshDriverDeliveryCaches();
   }, [declineDelivery, topNotification]);
 
   if (!isDriverOnline || !topNotification) {
@@ -175,6 +268,7 @@ function DriverNotificationLayer() {
 
 export default function App() {
   const navigationRef = useRef(null);
+  const urgentNotificationRef = useRef(null);
 
   useEffect(() => {
     const diagnostics = getAuthStorageDiagnostics();
@@ -208,102 +302,101 @@ export default function App() {
   // Urgent notification modal state
   const [urgentNotification, setUrgentNotification] = useState(null);
 
-  // Handle accept action from urgent notification modal
-  const handleAcceptUrgent = useCallback(async (data) => {
-    await pushNotificationService.stopAlarm();
-    setUrgentNotification(null);
+  useEffect(() => {
+    urgentNotificationRef.current = urgentNotification;
+  }, [urgentNotification]);
 
-    // Mark order as handled (remove from displayed tracking)
-    if (data?.orderId) {
-      await orderTrackingService.markAsHandled(data.orderId);
-      await orderTrackingService.markAsHandled(
-        `order_reminder:${data.orderId}`,
-      );
-    }
+  const publishAdminOrderStatus = useCallback(
+    (orderId, status, reason, source) => {
+      const normalizedOrderId = String(orderId || "").trim();
+      if (!normalizedOrderId) return;
 
-    const token = await getAccessToken();
-    if (!token) return;
+      const normalizedStatus = normalizeAdminOrderStatus(status);
 
-    try {
-      if (
-        (data?.type === "new_order" || data?.type === "order_reminder") &&
-        data?.orderId
-      ) {
-        // Accept order (admin)
-        const response = await fetch(
-          `${API_URL}/orders/restaurant/orders/${data.orderId}/status`,
-          {
-            method: "PATCH",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ status: "accepted" }),
-          },
-        );
-        if (response.ok) {
-          Alert.alert("Success", "Order accepted!");
-        } else {
-          const body = await response.json().catch(() => ({}));
-          Alert.alert("Error", body.message || "Failed to accept order");
+      DeviceEventEmitter.emit(ADMIN_ORDER_STATUS_EVENT, {
+        orderId: normalizedOrderId,
+        status: normalizedStatus,
+        reason: reason || null,
+        source: source || "app",
+      });
+
+      patchAdminOrdersCache(normalizedOrderId, normalizedStatus, reason);
+    },
+    [],
+  );
+
+  const publishDriverDeliveryAction = useCallback(
+    (deliveryId, action, source) => {
+      const normalizedDeliveryId = String(deliveryId || "").trim();
+      if (!normalizedDeliveryId) return;
+
+      DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+        deliveryId: normalizedDeliveryId,
+        action,
+        source: source || "app",
+      });
+
+      refreshDriverDeliveryCaches();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      ADMIN_ORDER_STATUS_EVENT,
+      (payload) => {
+        const orderId = String(payload?.orderId || "").trim();
+        const status = normalizeAdminOrderStatus(payload?.status);
+        const reason = payload?.reason || null;
+
+        if (!orderId || !status) return;
+
+        patchAdminOrdersCache(orderId, status, reason);
+
+        const activeOrderId = String(
+          urgentNotificationRef.current?.data?.orderId || "",
+        ).trim();
+
+        if (activeOrderId && activeOrderId === orderId && status !== "placed") {
+          pushNotificationService.stopAlarm().catch(() => {});
+          setUrgentNotification(null);
         }
-        // Navigate to orders tab
-        if (navigationRef.current) {
-          navigationRef.current.navigate("AdminMain", { screen: "Orders" });
-        }
-      } else if (data?.type === "new_delivery" && data?.deliveryId) {
-        // Accept delivery (driver)
-        const response = await fetch(
-          `${API_URL}/driver/deliveries/${data.deliveryId}/accept`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          },
-        );
-        if (response.ok) {
-          Alert.alert("Success", "Delivery accepted!");
-        } else {
-          const body = await response.json().catch(() => ({}));
-          Alert.alert("Error", body.message || "Failed to accept delivery");
-        }
-        // Navigate to available deliveries tab
-        if (navigationRef.current) {
-          navigationRef.current.navigate("DriverTabs", { screen: "Available" });
-        }
-      }
-    } catch (err) {
-      console.error("[UrgentModal] Accept error:", err);
-      Alert.alert(
-        "Network Error",
-        "Could not process the action. Please try again.",
-      );
-    }
+
+        Promise.allSettled([
+          orderTrackingService.markAsHandled(orderId),
+          orderTrackingService.markAsHandled(`order_reminder:${orderId}`),
+        ]).catch(() => {});
+      },
+    );
+
+    return () => {
+      subscription?.remove();
+    };
   }, []);
 
-  // Handle reject/decline action from urgent notification modal
-  // reason is passed from the inline input (only for new_order)
-  const handleRejectUrgent = useCallback(async (data, reason) => {
-    await pushNotificationService.stopAlarm();
-    setUrgentNotification(null);
+  // Handle accept action from urgent notification modal
+  const handleAcceptUrgent = useCallback(
+    async (data) => {
+      await pushNotificationService.stopAlarm();
+      setUrgentNotification(null);
 
-    // Mark order as handled (remove from displayed tracking)
-    if (data?.orderId) {
-      await orderTrackingService.markAsHandled(data.orderId);
-      await orderTrackingService.markAsHandled(
-        `order_reminder:${data.orderId}`,
-      );
-    }
+      // Mark order as handled (remove from displayed tracking)
+      if (data?.orderId) {
+        await orderTrackingService.markAsHandled(data.orderId);
+        await orderTrackingService.markAsHandled(
+          `order_reminder:${data.orderId}`,
+        );
+      }
 
-    if (
-      (data?.type === "new_order" || data?.type === "order_reminder") &&
-      data?.orderId
-    ) {
       const token = await getAccessToken();
-      if (token) {
-        try {
+      if (!token) return;
+
+      try {
+        if (
+          (data?.type === "new_order" || data?.type === "order_reminder") &&
+          data?.orderId
+        ) {
+          // Accept order (admin)
           const response = await fetch(
             `${API_URL}/orders/restaurant/orders/${data.orderId}/status`,
             {
@@ -312,32 +405,138 @@ export default function App() {
                 Authorization: `Bearer ${token}`,
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify({ status: "rejected", reason }),
+              body: JSON.stringify({ status: "accepted" }),
             },
           );
           if (response.ok) {
-            Alert.alert("Order Rejected", "The order has been rejected.");
+            Alert.alert("Success", "Order accepted!");
+            publishAdminOrderStatus(
+              data.orderId,
+              "pending",
+              null,
+              "urgent_modal",
+            );
           } else {
             const body = await response.json().catch(() => ({}));
-            Alert.alert("Error", body.message || "Failed to reject order");
+            Alert.alert("Error", body.message || "Failed to accept order");
           }
-        } catch (err) {
-          console.error("[UrgentModal] Reject error:", err);
-          Alert.alert(
-            "Network Error",
-            "Could not reject the order. Please try again.",
+          // Navigate to orders tab
+          if (navigationRef.current) {
+            navigationRef.current.navigate("AdminMain", { screen: "Orders" });
+          }
+        } else if (data?.type === "new_delivery" && data?.deliveryId) {
+          // Accept delivery (driver)
+          const response = await fetch(
+            `${API_URL}/driver/deliveries/${data.deliveryId}/accept`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            },
           );
+          if (response.ok) {
+            Alert.alert("Success", "Delivery accepted!");
+            publishDriverDeliveryAction(
+              data.deliveryId,
+              "accepted",
+              "urgent_modal",
+            );
+          } else {
+            const body = await response.json().catch(() => ({}));
+            Alert.alert("Error", body.message || "Failed to accept delivery");
+          }
+          // Navigate to available deliveries tab
+          if (navigationRef.current) {
+            navigationRef.current.navigate("DriverTabs", {
+              screen: "Available",
+            });
+          }
         }
+      } catch (err) {
+        console.error("[UrgentModal] Accept error:", err);
+        Alert.alert(
+          "Network Error",
+          "Could not process the action. Please try again.",
+        );
       }
-      // Navigate to orders tab
-      if (navigationRef.current) {
-        navigationRef.current.navigate("AdminMain", { screen: "Orders" });
+    },
+    [publishAdminOrderStatus, publishDriverDeliveryAction],
+  );
+
+  // Handle reject/decline action from urgent notification modal
+  // reason is passed from the inline input (only for new_order)
+  const handleRejectUrgent = useCallback(
+    async (data, reason) => {
+      await pushNotificationService.stopAlarm();
+      setUrgentNotification(null);
+
+      // Mark order as handled (remove from displayed tracking)
+      if (data?.orderId) {
+        await orderTrackingService.markAsHandled(data.orderId);
+        await orderTrackingService.markAsHandled(
+          `order_reminder:${data.orderId}`,
+        );
       }
-    } else if (data?.type === "new_delivery") {
-      // Driver just dismisses G�� no reason needed
-      console.log("[UrgentModal] Driver declined delivery:", data?.deliveryId);
-    }
-  }, []);
+
+      if (
+        (data?.type === "new_order" || data?.type === "order_reminder") &&
+        data?.orderId
+      ) {
+        const token = await getAccessToken();
+        if (token) {
+          try {
+            const response = await fetch(
+              `${API_URL}/orders/restaurant/orders/${data.orderId}/status`,
+              {
+                method: "PATCH",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ status: "rejected", reason }),
+              },
+            );
+            if (response.ok) {
+              Alert.alert("Order Rejected", "The order has been rejected.");
+              publishAdminOrderStatus(
+                data.orderId,
+                "failed",
+                reason,
+                "urgent_modal",
+              );
+            } else {
+              const body = await response.json().catch(() => ({}));
+              Alert.alert("Error", body.message || "Failed to reject order");
+            }
+          } catch (err) {
+            console.error("[UrgentModal] Reject error:", err);
+            Alert.alert(
+              "Network Error",
+              "Could not reject the order. Please try again.",
+            );
+          }
+        }
+        // Navigate to orders tab
+        if (navigationRef.current) {
+          navigationRef.current.navigate("AdminMain", { screen: "Orders" });
+        }
+      } else if (data?.type === "new_delivery") {
+        // Driver just dismisses G�� no reason needed
+        console.log(
+          "[UrgentModal] Driver declined delivery:",
+          data?.deliveryId,
+        );
+        publishDriverDeliveryAction(
+          data?.deliveryId,
+          "declined",
+          "urgent_modal",
+        );
+      }
+    },
+    [publishAdminOrderStatus, publishDriverDeliveryAction],
+  );
 
   // Handle dismiss (X button) - stop alarm but leave order unchanged
   const handleDismissUrgent = useCallback(async () => {
@@ -481,9 +680,9 @@ export default function App() {
             setUrgentNotification({
               title:
                 pendingType === "order_reminder"
-                  ? "GŦ Order Waiting Alert"
-                  : "=��� New Order Received",
-              body: `Order #${pendingOrder.order_number || pendingOrder.id?.slice(-6)} -+ Rs. ${parseFloat(pendingOrder.subtotal || 0).toFixed(2)} -+ ${items.length} item(s)`,
+                  ? "Order Waiting Alert"
+                  : "New Order Received",
+              body: `Order #${pendingOrder.order_number || pendingOrder.id?.slice(-6)} - Rs. ${parseFloat(pendingOrder.subtotal || 0).toFixed(2)} - ${items.length} item(s)`,
               data: {
                 type: pendingType,
                 orderId: String(pendingOrder.id),
@@ -492,13 +691,14 @@ export default function App() {
                 itemsCount: String(items.length),
                 orderDate: formattedDate,
                 orderTime: formattedTime,
-                waitingMinutes: String(pendingOrder.__localWaitingMinutes || 0),
+                waitingMinutes:
+                  pendingType === "order_reminder"
+                    ? String(pendingOrder.__localWaitingMinutes || 0)
+                    : undefined,
               },
             });
             pushNotificationService.startAlarm(
-              pendingType === "order_reminder"
-                ? "GŦ Order Reminder"
-                : "=��� New Order",
+              pendingType === "order_reminder" ? "Order Reminder" : "New Order",
               `Order #${pendingOrder.order_number}`,
               { type: pendingType },
             );

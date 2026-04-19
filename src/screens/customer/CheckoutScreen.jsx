@@ -138,6 +138,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const { cartId } = route.params || {};
   const mapRef = useRef(null);
   const hasShownMissingPinAlertRef = useRef(false);
+  const latestQuoteRequestRef = useRef(0);
 
   // Cart + profile
   const [cart, setCart] = useState(null);
@@ -169,6 +170,8 @@ export default function CheckoutScreen({ route, navigation }) {
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false);
   const [feeConfig, setFeeConfig] = useState(null);
   const [launchPromoStatus, setLaunchPromoStatus] = useState(null);
+  const [orderQuote, setOrderQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
 
   // Payment
   const [paymentMethod] = useState("cash");
@@ -235,6 +238,7 @@ export default function CheckoutScreen({ route, navigation }) {
       navigation.navigate("MainTabs", { screen: "Cart" });
       return;
     }
+    setOrderQuote(null);
     fetchCheckoutData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartId]);
@@ -421,6 +425,7 @@ export default function CheckoutScreen({ route, navigation }) {
     try {
       setLoading(true);
       setError("");
+      setOrderQuote(null);
 
       const token = await getAccessToken();
       const role = await AsyncStorage.getItem("role");
@@ -506,6 +511,102 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
+  const fetchOrderQuote = useCallback(
+    async ({ silent = false } = {}) => {
+      const deliveryAddress = String(address || "").trim();
+      const deliveryCity = String(city || "").trim();
+      const hasCoords = hasValidCoordinates(
+        position?.latitude,
+        position?.longitude,
+      );
+
+      if (!cartId || !hasExplicitDeliveryLocation || !hasCoords) {
+        setOrderQuote(null);
+        return null;
+      }
+
+      if (!deliveryAddress || !deliveryCity) {
+        setOrderQuote(null);
+        return null;
+      }
+
+      const token = await getAccessToken();
+      if (!token) {
+        setOrderQuote(null);
+        return null;
+      }
+
+      const requestId = Date.now();
+      latestQuoteRequestRef.current = requestId;
+
+      if (!silent) {
+        setQuoteLoading(true);
+      }
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/orders/quote`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            cartId,
+            payment_method: paymentMethod,
+            delivery_latitude: position.latitude,
+            delivery_longitude: position.longitude,
+            delivery_address: deliveryAddress,
+            delivery_city: deliveryCity,
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (latestQuoteRequestRef.current !== requestId) {
+          return null;
+        }
+
+        if (!res.ok) {
+          const message =
+            data.message || "Unable to refresh checkout quote. Please retry.";
+          setOrderQuote(null);
+          throw new Error(message);
+        }
+
+        const nextQuote = data?.quote || null;
+        setOrderQuote(nextQuote);
+        return nextQuote;
+      } finally {
+        if (latestQuoteRequestRef.current === requestId && !silent) {
+          setQuoteLoading(false);
+        }
+      }
+    },
+    [
+      address,
+      cartId,
+      city,
+      hasExplicitDeliveryLocation,
+      paymentMethod,
+      position?.latitude,
+      position?.longitude,
+    ],
+  );
+
+  useEffect(() => {
+    if (!cart || loading) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      fetchOrderQuote().catch((quoteError) => {
+        setError(quoteError.message || "Failed to refresh checkout quote");
+      });
+    }, 250);
+
+    return () => clearTimeout(timeoutId);
+  }, [cart?.id, fetchOrderQuote, loading]);
+
   const saveAddressAndLocation = async ({
     newAddress,
     newCity,
@@ -558,20 +659,25 @@ export default function CheckoutScreen({ route, navigation }) {
       }
       if (!cart) throw new Error("Cart missing");
 
-      const subtotal = Number(cart.cart_total) || 0;
+      if (!orderQuote?.quote_token) {
+        await fetchOrderQuote();
+        throw new Error(
+          "Refreshing checkout quote. Please review the latest total and place again.",
+        );
+      }
 
-      const requiredMinSubtotal = resolveMinimumSubtotal(
-        routeInfo.distance,
-        feeConfig || undefined,
-      );
-      if (subtotal < requiredMinSubtotal)
-        throw new Error(`Minimum order amount is Rs. ${requiredMinSubtotal}`);
+      const quoteExpiresAtMs = Date.parse(orderQuote.expires_at || "");
+      if (Number.isFinite(quoteExpiresAtMs) && Date.now() > quoteExpiresAtMs) {
+        await fetchOrderQuote();
+        throw new Error(
+          "Checkout quote expired. Please review updated totals and place again.",
+        );
+      }
 
       setPlacing(true);
       setError("");
 
       const token = await getAccessToken();
-      const deliveryCity = String(city || "").trim();
 
       const res = await fetch(`${API_BASE_URL}/orders/place`, {
         method: "POST",
@@ -581,24 +687,88 @@ export default function CheckoutScreen({ route, navigation }) {
         },
         body: JSON.stringify({
           cartId,
-          delivery_latitude: position.latitude,
-          delivery_longitude: position.longitude,
-          delivery_address: address,
-          delivery_city: deliveryCity,
           payment_method: paymentMethod,
-          distance_km: routeInfo.distance,
-          estimated_duration_min:
-            estimatedDeliveryWindow?.midpoint ||
-            Math.ceil(routeInfo.duration || 0),
-          checkout_subtotal: subtotal,
-          checkout_service_fee: serviceFee,
-          checkout_delivery_fee: deliveryFee,
-          checkout_total_amount: finalTotal,
+          quote_token: orderQuote.quote_token,
         }),
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "Failed to place order");
+      if (!res.ok) {
+        if (
+          res.status === 409 &&
+          ["quote_expired", "quote_invalid", "quote_cart_changed"].includes(
+            String(data?.error_type || ""),
+          )
+        ) {
+          await fetchOrderQuote().catch(() => null);
+          throw new Error(
+            data?.message ||
+              "Checkout quote changed. Please review updated totals and place again.",
+          );
+        }
+
+        if (res.status === 409 && data?.error_type === "price_mismatch") {
+          await fetchCheckoutData();
+          await fetchOrderQuote().catch(() => null);
+          setError(
+            "Order amount changed while placing the order. Please review checkout and place again.",
+          );
+          return;
+        }
+
+        const duplicateOrderMessage = String(data?.message || "").toLowerCase();
+        if (
+          duplicateOrderMessage.includes("already") ||
+          duplicateOrderMessage.includes("completed")
+        ) {
+          const existingOrder = data?.order;
+          if (existingOrder?.id) {
+            const displayTotal = resolveOrderDisplayTotal(
+              existingOrder,
+              finalTotal,
+            );
+            await cacheOrderDisplayTotal(existingOrder.id, displayTotal);
+
+            const restaurantLogoUrl =
+              cart?.restaurant?.logo_url ||
+              cart?.restaurant?.restaurant_logo_url ||
+              cart?.restaurant?.restaurant_logo ||
+              cart?.restaurant?.image_url ||
+              existingOrder.restaurant_logo_url ||
+              existingOrder.restaurant_logo ||
+              "";
+
+            navigation.reset({
+              index: 1,
+              routes: [
+                { name: "MainTabs" },
+                {
+                  name: "PlacingOrder",
+                  params: {
+                    orderId: existingOrder.id,
+                    status: "placed",
+                    order: existingOrder,
+                    totalAmount: displayTotal,
+                    restaurantName:
+                      cart?.restaurant?.restaurant_name ||
+                      existingOrder.restaurant_name ||
+                      "Restaurant",
+                    restaurantLogoUrl,
+                    statusScreenMode: true,
+                  },
+                },
+              ],
+            });
+            return;
+          }
+
+          throw new Error(
+            "This order has already been placed. Please check your orders.",
+          );
+        }
+
+        throw new Error(data.message || "Failed to place order");
+      }
 
       // Navigate to Order Tracking — reset stack so user can't go back to checkout
       const order = data.order;
@@ -643,37 +813,86 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   };
 
-  const subtotal = useMemo(
-    () => (cart ? Number(cart.cart_total) || 0 : 0),
-    [cart],
-  );
-  const serviceFee = useMemo(
-    () => calculateServiceFee(subtotal),
-    [subtotal, feeConfig],
-  );
-  const standardDeliveryFee = useMemo(
-    () => (routeInfo ? calculateStandardDeliveryFee(routeInfo.distance) : null),
-    [routeInfo, feeConfig],
-  );
-  const deliveryFee = useMemo(
-    () => (routeInfo ? calculateDeliveryFee(routeInfo.distance) : null),
-    [routeInfo, feeConfig, launchPromoStatus],
-  );
+  const quoteSubtotal = Number(orderQuote?.pricing?.subtotal);
+  const quoteServiceFee = Number(orderQuote?.pricing?.service_fee);
+  const quoteDeliveryFee = Number(orderQuote?.pricing?.delivery_fee);
+  const quoteTotalAmount = Number(orderQuote?.pricing?.total_amount);
+  const quoteDistanceKm = Number(orderQuote?.distance_km);
+  const quoteEstimatedDurationMin = Number(orderQuote?.estimated_duration_min);
+  const quoteNormalDeliveryFee = Number(orderQuote?.launch_promo?.normal_delivery_fee);
+  const quotePromoSavings = Number(orderQuote?.launch_promo?.discount_amount);
+
+  const subtotal = useMemo(() => {
+    if (Number.isFinite(quoteSubtotal)) return quoteSubtotal;
+    return cart ? Number(cart.cart_total) || 0 : 0;
+  }, [cart, quoteSubtotal]);
+
+  const serviceFee = useMemo(() => {
+    if (Number.isFinite(quoteServiceFee)) return quoteServiceFee;
+    return calculateServiceFee(subtotal);
+  }, [quoteServiceFee, subtotal, feeConfig]);
+
+  const standardDeliveryFee = useMemo(() => {
+    if (Number.isFinite(quoteNormalDeliveryFee)) return quoteNormalDeliveryFee;
+    return routeInfo ? calculateStandardDeliveryFee(routeInfo.distance) : null;
+  }, [quoteNormalDeliveryFee, routeInfo, feeConfig]);
+
+  const deliveryFee = useMemo(() => {
+    if (Number.isFinite(quoteDeliveryFee)) return quoteDeliveryFee;
+    return routeInfo ? calculateDeliveryFee(routeInfo.distance) : null;
+  }, [quoteDeliveryFee, routeInfo, feeConfig, launchPromoStatus]);
   const launchPromoIsEligible =
     Boolean(launchPromoStatus?.promotion?.enabled) &&
     Boolean(launchPromoStatus?.has_acknowledged) &&
     Boolean(launchPromoStatus?.is_eligible_for_first_order);
-  const isLaunchPromoApplied =
-    launchPromoIsEligible &&
-    routeInfo !== null &&
-    standardDeliveryFee !== null &&
-    deliveryFee !== null;
-  const launchPromoSavings =
-    isLaunchPromoApplied && standardDeliveryFee > deliveryFee
-      ? Number((standardDeliveryFee - deliveryFee).toFixed(2))
-      : 0;
+  const isLaunchPromoApplied = useMemo(() => {
+    if (orderQuote?.launch_promo?.applied !== undefined) {
+      return Boolean(orderQuote.launch_promo.applied);
+    }
+
+    return (
+      launchPromoIsEligible &&
+      routeInfo !== null &&
+      standardDeliveryFee !== null &&
+      deliveryFee !== null
+    );
+  }, [
+    deliveryFee,
+    launchPromoIsEligible,
+    orderQuote?.launch_promo?.applied,
+    routeInfo,
+    standardDeliveryFee,
+  ]);
+
+  const launchPromoSavings = useMemo(() => {
+    if (Number.isFinite(quotePromoSavings)) {
+      return Number(quotePromoSavings.toFixed(2));
+    }
+
+    if (isLaunchPromoApplied && standardDeliveryFee > deliveryFee) {
+      return Number((standardDeliveryFee - deliveryFee).toFixed(2));
+    }
+
+    return 0;
+  }, [
+    deliveryFee,
+    isLaunchPromoApplied,
+    quotePromoSavings,
+    standardDeliveryFee,
+  ]);
 
   const estimatedDeliveryWindow = useMemo(() => {
+    if (Number.isFinite(quoteEstimatedDurationMin) && quoteEstimatedDurationMin > 0) {
+      const min = Math.max(1, Math.floor(quoteEstimatedDurationMin));
+      const max = Math.max(min, Math.ceil(quoteEstimatedDurationMin + 5));
+
+      return {
+        min,
+        max,
+        midpoint: Math.round((min + max) / 2),
+      };
+    }
+
     if (!routeInfo?.distance) return null;
 
     const distanceKm = Number(routeInfo.distance);
@@ -694,14 +913,23 @@ export default function CheckoutScreen({ route, navigation }) {
       max,
       midpoint: Math.round((min + max) / 2),
     };
-  }, [routeInfo]);
+  }, [quoteEstimatedDurationMin, routeInfo]);
+
+  const effectiveDistanceKm = useMemo(() => {
+    if (Number.isFinite(quoteDistanceKm)) {
+      return quoteDistanceKm;
+    }
+
+    const routeDistance = Number(routeInfo?.distance);
+    return Number.isFinite(routeDistance) ? routeDistance : null;
+  }, [quoteDistanceKm, routeInfo]);
 
   const requiredMinSubtotal = useMemo(
     () =>
-      routeInfo
-        ? resolveMinimumSubtotal(routeInfo.distance, feeConfig || undefined)
+      Number.isFinite(effectiveDistanceKm)
+        ? resolveMinimumSubtotal(effectiveDistanceKm, feeConfig || undefined)
         : MINIMUM_SUBTOTAL,
-    [routeInfo, feeConfig],
+    [effectiveDistanceKm, feeConfig],
   );
 
   const maxOrderDistanceKm = useMemo(() => {
@@ -710,23 +938,34 @@ export default function CheckoutScreen({ route, navigation }) {
   }, [feeConfig]);
 
   const isDistanceWithinLimit = useMemo(() => {
-    if (!routeInfo?.distance) return false;
-    const distance = Number(routeInfo.distance);
+    if (!Number.isFinite(effectiveDistanceKm)) return false;
+    const distance = Number(effectiveDistanceKm);
     return Number.isFinite(distance) && distance <= maxOrderDistanceKm;
-  }, [routeInfo, maxOrderDistanceKm]);
+  }, [effectiveDistanceKm, maxOrderDistanceKm]);
 
   const isSubtotalValid = subtotal >= requiredMinSubtotal;
 
   const totalAmount = useMemo(() => {
+    if (Number.isFinite(quoteTotalAmount)) {
+      return quoteTotalAmount;
+    }
+
     if (!isSubtotalValid || deliveryFee === null) return null;
     return subtotal + serviceFee + deliveryFee;
-  }, [subtotal, serviceFee, deliveryFee, isSubtotalValid]);
+  }, [
+    deliveryFee,
+    isSubtotalValid,
+    quoteTotalAmount,
+    serviceFee,
+    subtotal,
+  ]);
 
   const finalTotal = useMemo(() => {
+    if (Number.isFinite(quoteTotalAmount)) return quoteTotalAmount;
     if (totalAmount === null) return null;
     // keep priority off for now (you can add toggle later)
     return totalAmount;
-  }, [totalAmount]);
+  }, [quoteTotalAmount, totalAmount]);
 
   const isLocationDetailsComplete = useMemo(
     () =>
@@ -743,8 +982,10 @@ export default function CheckoutScreen({ route, navigation }) {
     if (!String(address || "").trim()) return "Delivery address is required";
     if (!String(city || "").trim()) return "City is required";
     if (!isLocationDetailsComplete) return PIN_REQUIRED_ALERT_MESSAGE;
-    if (!routeInfo)
+    if (quoteLoading) return "Refreshing checkout quote...";
+    if (!Number.isFinite(effectiveDistanceKm))
       return "Location not provided. Pin your delivery location on the map.";
+    if (!orderQuote) return "Refreshing checkout quote...";
     if (!isDistanceWithinLimit)
       return `Delivery is not available beyond ${maxOrderDistanceKm} km.`;
     if (!isSubtotalValid)
@@ -756,8 +997,10 @@ export default function CheckoutScreen({ route, navigation }) {
     phone,
     address,
     city,
+    effectiveDistanceKm,
     isLocationDetailsComplete,
-    routeInfo,
+    orderQuote,
+    quoteLoading,
     isDistanceWithinLimit,
     maxOrderDistanceKm,
     isSubtotalValid,
@@ -788,8 +1031,10 @@ export default function CheckoutScreen({ route, navigation }) {
 
   const isPlaceOrderDisabled =
     routeLoading ||
+    quoteLoading ||
     placing ||
-    !cart;
+    !cart ||
+    (isLocationDetailsComplete && !orderQuote);
 
   // ✅ Loading / Error
   if (loading) {
@@ -991,7 +1236,9 @@ export default function CheckoutScreen({ route, navigation }) {
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Estimated Delivery</Text>
               <Text style={styles.value}>
-                {routeLoading
+                {quoteLoading
+                  ? "Refreshing quote..."
+                  : routeLoading && !Number.isFinite(quoteEstimatedDurationMin)
                   ? "Calculating..."
                   : !hasExplicitDeliveryLocation
                     ? "Location not provided"
@@ -1034,8 +1281,8 @@ export default function CheckoutScreen({ route, navigation }) {
                     { fontSize: 12, marginLeft: 4, color: "#06C168" },
                   ]}
                 >
-                  {routeInfo
-                    ? `${routeInfo.distance.toFixed(1)} km away`
+                  {Number.isFinite(effectiveDistanceKm)
+                    ? `${Number(effectiveDistanceKm).toFixed(1)} km away`
                     : hasExplicitDeliveryLocation
                       ? "Calculating..."
                       : "Location not provided"}
@@ -1153,7 +1400,6 @@ export default function CheckoutScreen({ route, navigation }) {
                     Launch Offer Applied
                   </Text>
                 </View>
-                
               </View>
               <Text style={styles.launchPromoBadgeSubText}>
                 delivery fees offer activated for this order.
@@ -1165,7 +1411,7 @@ export default function CheckoutScreen({ route, navigation }) {
           <Row
             label="Delivery fee"
             value={
-              routeLoading
+              quoteLoading
                 ? "..."
                 : deliveryFee !== null
                   ? formatPrice(deliveryFee)
@@ -1181,7 +1427,6 @@ export default function CheckoutScreen({ route, navigation }) {
             isBold
           />
         </View>
-
       </ScrollView>
 
       {/* ✅ Sticky CTA */}
@@ -1210,7 +1455,9 @@ export default function CheckoutScreen({ route, navigation }) {
           >
             {placing
               ? "Placing..."
-              : routeLoading
+              : quoteLoading
+                ? "Refreshing quote..."
+                : routeLoading && !Number.isFinite(quoteDistanceKm)
                 ? "Calculating..."
                 : !hasExplicitDeliveryLocation
                   ? "Location not provided"

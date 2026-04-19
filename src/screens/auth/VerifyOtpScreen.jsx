@@ -14,7 +14,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import MeezoLogo from "../../components/common/MeezoLogo";
 import { useAuth } from "../../app/providers/AuthProvider";
@@ -39,6 +42,7 @@ function maskPhone(phone) {
 
 export default function VerifyOtpScreen({ navigation, route }) {
   const { refreshAuthState } = useAuth();
+  const insets = useSafeAreaInsets();
   const { userId, phone, prefillPhone, accessToken, nextScreen } =
     route.params || {};
   const normalizedPhone = normalizeSriLankaPhone(phone || prefillPhone || "");
@@ -220,15 +224,18 @@ export default function VerifyOtpScreen({ navigation, route }) {
       let resolvedUserName = fallbackUserName;
 
       try {
-        const exchangeRes = await fetch(`${API_BASE_URL}/auth/session/exchange`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${supabaseAccessToken}`,
-            "Content-Type": "application/json",
-            "x-client-platform": "react-native",
+        const exchangeRes = await fetch(
+          `${API_BASE_URL}/auth/session/exchange`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${supabaseAccessToken}`,
+              "Content-Type": "application/json",
+              "x-client-platform": "react-native",
+            },
+            body: JSON.stringify({}),
           },
-          body: JSON.stringify({}),
-        });
+        );
 
         const exchangeData = await exchangeRes.json().catch(() => ({}));
         if (exchangeRes.ok) {
@@ -257,7 +264,10 @@ export default function VerifyOtpScreen({ navigation, route }) {
           );
         }
       } catch (exchangeError) {
-        console.warn("Session exchange request failed:", exchangeError?.message);
+        console.warn(
+          "Session exchange request failed:",
+          exchangeError?.message,
+        );
       }
 
       await persistAuthSession(
@@ -349,7 +359,7 @@ export default function VerifyOtpScreen({ navigation, route }) {
   };
 
   return (
-    <SafeAreaView style={styles.pageContainer} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.pageContainer} edges={["top"]}>
       <KeyboardAvoidingView
         style={styles.pageContainer}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -409,7 +419,13 @@ export default function VerifyOtpScreen({ navigation, route }) {
             </View>
 
             <View
-              style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}
+              style={[
+                styles.whiteSection,
+                IS_WEB && styles.whiteSectionWeb,
+                {
+                  paddingBottom: Math.max(24, insets.bottom + 16),
+                },
+              ]}
             >
               <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
                 <Text style={styles.cardTitle}>Verify OTP</Text>
@@ -503,7 +519,7 @@ export default function VerifyOtpScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   pageContainer: {
     flex: 1,
-    backgroundColor: "#EEF4EF",
+    backgroundColor: "#FFFFFF",
   },
   scrollContent: { flexGrow: 1 },
   scrollContentWeb: {

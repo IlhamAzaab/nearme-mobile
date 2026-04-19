@@ -15,7 +15,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import Svg, { G, Path, Rect } from "react-native-svg";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { API_BASE_URL } from "../../constants/api";
@@ -68,6 +71,7 @@ const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
 
 export default function LoginScreen({ navigation }) {
   const { refreshAuthState, preparePostLoginTransition } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -291,7 +295,7 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <View style={styles.rootContainer}>
-      <SafeAreaView style={styles.pageContainer} edges={["top", "bottom"]}>
+      <SafeAreaView style={styles.pageContainer} edges={["top"]}>
         <KeyboardAvoidingView
           style={styles.pageContainer}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -394,7 +398,13 @@ export default function LoginScreen({ navigation }) {
 
               {/* ═══ WHITE BOTTOM SECTION ═══ */}
               <View
-                style={[styles.whiteSection, IS_WEB && styles.whiteSectionWeb]}
+                style={[
+                  styles.whiteSection,
+                  IS_WEB && styles.whiteSectionWeb,
+                  {
+                    paddingBottom: Math.max(24, insets.bottom + 16),
+                  },
+                ]}
               >
                 {/* Form content */}
                 <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
@@ -502,7 +512,7 @@ const styles = StyleSheet.create({
   },
   pageContainer: {
     flex: 1,
-    backgroundColor: "#EEF4EF",
+    backgroundColor: "#FFFFFF",
   },
 
   scrollContent: {

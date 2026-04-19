@@ -74,14 +74,7 @@ function getInitialRoute(adminData) {
 }
 
 export default function AdminNavigator() {
-  const {
-    fetchAdminStatus,
-    adminStatus,
-    forcePasswordChange,
-    onboardingCompleted,
-    onboardingStep,
-    adminStatusLoading,
-  } = useAuth();
+  const { fetchAdminStatus } = useAuth();
 
   const [isChecking, setIsChecking] = useState(true);
   const [initialRoute, setInitialRoute] = useState(null);
@@ -93,15 +86,6 @@ export default function AdminNavigator() {
 
       if (data) {
         const route = getInitialRoute(data);
-        setInitialRoute(route);
-      } else {
-        // If API fails, determine route from stored state
-        const route = getInitialRoute({
-          force_password_change: forcePasswordChange,
-          onboarding_completed: onboardingCompleted,
-          onboarding_step: onboardingStep,
-          admin_status: adminStatus,
-        });
         setInitialRoute(route);
       }
 

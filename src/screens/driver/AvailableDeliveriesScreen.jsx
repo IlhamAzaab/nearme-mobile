@@ -24,6 +24,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  DeviceEventEmitter,
   Dimensions,
   FlatList,
   Platform,
@@ -39,6 +40,7 @@ import FreeMapView from "../../components/maps/FreeMapView";
 import { DriverMapSheetLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import { API_BASE_URL } from "../../constants/api";
+import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNotificationContext";
 import { useSocket } from "../../context/SocketContext";
 import { approximateDistanceMeters } from "../../utils/osrmClient";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
@@ -57,6 +59,7 @@ const LIVE_DELIVERIES_REFRESH_INTERVAL_MS = 5000;
 const LOCATION_MAX_ACCURACY_METERS = 250;
 const LOCATION_MAX_RETRIES = 3;
 const LOCATION_RETRY_DELAY_MS = 1200;
+const DRIVER_DELIVERY_ACTION_EVENT = "driver:delivery_notification_action";
 
 // Default driver location (Kinniya, Sri Lanka)
 const DEFAULT_DRIVER_LOCATION = {
@@ -125,6 +128,12 @@ const toValidLocation = (lat, lng) => {
   return isValidLocation(parsed) ? parsed : null;
 };
 
+const normalizeDeliveryId = (value) => {
+  if (value == null) return null;
+  const normalized = String(value).trim();
+  return normalized || null;
+};
+
 const hasValidDeliveryCoordinates = (delivery) => {
   const restaurantPoint = toValidLocation(
     delivery?.restaurant?.latitude,
@@ -152,6 +161,7 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   );
   const queryClient = useQueryClient();
   const { on, off, isConnected } = useSocket();
+  const { declineDelivery } = useDriverDeliveryNotifications();
   const isFocusedRef = useRef(true);
   const [listViewportHeight, setListViewportHeight] = useState(0);
   const viewportHeight = useMemo(
@@ -703,8 +713,17 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       }
 
       setDeclinedIds((prev) => {
-        const availableIds = new Set(validDeliveries.map((d) => d.delivery_id));
-        return new Set([...prev].filter((id) => availableIds.has(id)));
+        const availableIds = new Set(
+          validDeliveries
+            .map((d) => normalizeDeliveryId(d.delivery_id))
+            .filter(Boolean),
+        );
+        return new Set(
+          [...prev].filter((id) => {
+            const normalizedId = normalizeDeliveryId(id);
+            return normalizedId ? availableIds.has(normalizedId) : false;
+          }),
+        );
       });
       setDeliveries(applyPrioritizedSort(validDeliveries));
 
@@ -805,10 +824,12 @@ export default function AvailableDeliveriesScreen({ navigation }) {
     };
 
     const handleDeliveryTaken = (payload) => {
-      const takenId = payload?.delivery_id;
+      const takenId = normalizeDeliveryId(payload?.delivery_id);
       if (!takenId) return;
 
-      setDeliveries((prev) => prev.filter((d) => d.delivery_id !== takenId));
+      setDeliveries((prev) =>
+        prev.filter((d) => normalizeDeliveryId(d?.delivery_id) !== takenId),
+      );
 
       setDeclinedIds((prev) => {
         if (!prev.has(takenId)) return prev;
@@ -836,6 +857,68 @@ export default function AvailableDeliveriesScreen({ navigation }) {
     driverLocation,
     fetchDeliveriesWithCurrentLocation,
   ]);
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      DRIVER_DELIVERY_ACTION_EVENT,
+      (payload) => {
+        const deliveryId = normalizeDeliveryId(payload?.deliveryId);
+        const action = String(payload?.action || "")
+          .trim()
+          .toLowerCase();
+
+        if (!deliveryId) return;
+
+        setDeliveries((prev) =>
+          prev.filter(
+            (delivery) =>
+              normalizeDeliveryId(delivery?.delivery_id) !== deliveryId,
+          ),
+        );
+
+        setDeclinedIds((prev) => {
+          if (!prev.has(deliveryId)) return prev;
+          const next = new Set(prev);
+          next.delete(deliveryId);
+          return next;
+        });
+
+        queryClient.setQueryData(deliveriesQueryKey, (existing) => {
+          if (!existing || typeof existing !== "object") return existing;
+          const existingDeliveries = Array.isArray(existing.deliveries)
+            ? existing.deliveries
+            : [];
+
+          return {
+            ...existing,
+            deliveries: existingDeliveries.filter(
+              (delivery) =>
+                normalizeDeliveryId(delivery?.delivery_id) !== deliveryId,
+            ),
+          };
+        });
+
+        if (action === "accepted" && isFocusedRef.current) {
+          const location =
+            (isValidLocation(driverLocationRef.current) &&
+              driverLocationRef.current) ||
+            lastFetchLocationRef.current;
+
+          if (isValidLocation(location)) {
+            fetchPendingDeliveriesRef.current?.(
+              location,
+              true,
+              "driver_popup_accept",
+            );
+          }
+        }
+      },
+    );
+
+    return () => {
+      subscription?.remove();
+    };
+  }, [deliveriesQueryKey, queryClient]);
 
   // ============================================================================
   // ACTIONS
@@ -893,6 +976,13 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       const data = await res.json();
 
       if (res.ok) {
+        declineDelivery(deliveryId);
+        DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+          deliveryId: String(deliveryId),
+          action: "accepted",
+          source: "available_screen",
+        });
+
         setIsLoadingAfterAccept(true);
         showToast("✅ Delivery accepted!");
         await fetchDeliveriesWithCurrentLocation(true, "delivery_accepted");
@@ -917,7 +1007,18 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   };
 
   const handleDecline = (deliveryId, cardIndex) => {
-    setDeclinedIds((prev) => new Set([...prev, deliveryId]));
+    declineDelivery(deliveryId);
+    DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+      deliveryId: String(deliveryId),
+      action: "declined",
+      source: "available_screen",
+    });
+
+    setDeclinedIds((prev) => {
+      const normalizedId = normalizeDeliveryId(deliveryId);
+      if (!normalizedId) return prev;
+      return new Set([...prev, normalizedId]);
+    });
 
     // Keep flow continuous: move declined card to bottom and focus adjacent card.
     requestAnimationFrame(() => {
@@ -981,18 +1082,27 @@ export default function AvailableDeliveriesScreen({ navigation }) {
     const deduped = [];
     const seen = new Set();
     for (const delivery of deliveries) {
-      if (!delivery?.delivery_id || seen.has(delivery.delivery_id)) continue;
-      seen.add(delivery.delivery_id);
+      const normalizedId = normalizeDeliveryId(delivery?.delivery_id);
+      if (!normalizedId || seen.has(normalizedId)) continue;
+      seen.add(normalizedId);
       deduped.push(delivery);
     }
 
     const originalIndex = new Map(
-      deduped.map((delivery, index) => [delivery.delivery_id, index]),
+      deduped
+        .map((delivery, index) => [
+          normalizeDeliveryId(delivery.delivery_id),
+          index,
+        ])
+        .filter(([id]) => Boolean(id)),
     );
 
     return [...deduped].sort((a, b) => {
-      const aDeclined = declinedIds.has(a.delivery_id);
-      const bDeclined = declinedIds.has(b.delivery_id);
+      const normalizedAId = normalizeDeliveryId(a.delivery_id);
+      const normalizedBId = normalizeDeliveryId(b.delivery_id);
+
+      const aDeclined = normalizedAId ? declinedIds.has(normalizedAId) : false;
+      const bDeclined = normalizedBId ? declinedIds.has(normalizedBId) : false;
       if (aDeclined !== bDeclined) return aDeclined ? 1 : -1;
 
       const aTip = getTipAmount(a);
@@ -1009,26 +1119,36 @@ export default function AvailableDeliveriesScreen({ navigation }) {
       const priorityB = Number(meta.get(b.delivery_id)?.priorityTs || 0);
       if (priorityA !== priorityB) return priorityB - priorityA;
 
-      return (
-        (originalIndex.get(a.delivery_id) || 0) -
-        (originalIndex.get(b.delivery_id) || 0)
-      );
+      const originalA = normalizedAId ? originalIndex.get(normalizedAId) : null;
+      const originalB = normalizedBId ? originalIndex.get(normalizedBId) : null;
+
+      return (originalA ?? 0) - (originalB ?? 0);
     });
   }, [deliveries, declinedIds, getCreatedAtTimestamp, getTipAmount]);
 
   const displayOrderById = useMemo(() => {
     const orderMap = new Map();
     sortedDeliveries.forEach((delivery, index) => {
-      orderMap.set(delivery.delivery_id, index);
+      const normalizedId = normalizeDeliveryId(delivery.delivery_id);
+      if (normalizedId) {
+        orderMap.set(normalizedId, index);
+      }
     });
     return orderMap;
   }, [sortedDeliveries]);
 
   const renderDeliveryCard = ({ item, index }) => {
-    const isDeclined = declinedIds.has(item.delivery_id);
-    const nonDeclinedBefore = sortedDeliveries
-      .slice(0, index)
-      .filter((d) => !declinedIds.has(d.delivery_id)).length;
+    const normalizedItemId = normalizeDeliveryId(item.delivery_id);
+    const isDeclined = normalizedItemId
+      ? declinedIds.has(normalizedItemId)
+      : false;
+    const displayIndex = normalizedItemId
+      ? displayOrderById.get(normalizedItemId)
+      : undefined;
+    const nonDeclinedBefore = sortedDeliveries.slice(0, index).filter((d) => {
+      const normalizedId = normalizeDeliveryId(d.delivery_id);
+      return normalizedId ? !declinedIds.has(normalizedId) : true;
+    }).length;
     const isFirstNonDeclined = !isDeclined && nonDeclinedBefore === 0;
 
     return (
@@ -1045,8 +1165,8 @@ export default function AvailableDeliveriesScreen({ navigation }) {
         hasActiveDeliveries={currentRoute.active_deliveries > 0}
         isFirstDelivery={isFirstNonDeclined}
         isDeclined={isDeclined}
-        cardIndex={displayOrderById.get(item.delivery_id) ?? index}
-        currentIndex={(displayOrderById.get(item.delivery_id) ?? index) + 1}
+        cardIndex={displayIndex ?? index}
+        currentIndex={(displayIndex ?? index) + 1}
         totalAvailable={sortedDeliveries.length || deliveries.length}
         isMapActive={Math.abs(index - currentVisibleIndex) <= 1}
         onBack={() => navigation.goBack()}

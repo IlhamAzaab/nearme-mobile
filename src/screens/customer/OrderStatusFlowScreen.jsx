@@ -21,6 +21,7 @@ import React, {
   useState,
 } from "react";
 import {
+  AppState,
   ActivityIndicator,
   Animated,
   Dimensions,
@@ -47,6 +48,7 @@ import SkeletonBlock from "../../components/common/SkeletonBlock";
 import OptimizedImage from "../../components/common/OptimizedImage";
 import OrderPlacedBackground from "../../components/customer/OrderPlacedBackground";
 import { API_BASE_URL } from "../../constants/api";
+import { useSocket } from "../../context/SocketContext";
 import { fetchOSRMRoute } from "../../utils/osrmClient";
 
 const { width: SW, height: SH } = Dimensions.get("window");
@@ -339,8 +341,9 @@ const STATUS_SVG_PATHS = {
 };
 
 const POLL_INTERVAL = 2000;
-const ON_THE_WAY_POLL_INTERVAL = 3000;
 const ON_THE_WAY_ETA_REFRESH_INTERVAL = 60000;
+const SOCKET_FALLBACK_POLL_INTERVAL = 10000;
+const SOCKET_CONNECTED_POLL_INTERVAL = 15000;
 
 function normalizeStatus(status) {
   const raw = String(status || "")
@@ -363,6 +366,10 @@ function normalizeStatus(status) {
   };
 
   return aliasMap[raw] || raw;
+}
+
+function shouldDisplayLiveDriverLocation(status) {
+  return normalizeStatus(status) === "on_the_way";
 }
 
 function formatDotClockTime(date) {
@@ -1356,6 +1363,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
   const routeName = route?.name || "PlacingOrder";
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
+  const { on, off, isConnected: isSocketConnected } = useSocket();
   const initialRouteStatus = normalizeStatus(params.status || "");
   const keepInitialPlacedUI = initialRouteStatus === "placed";
   const statusScreens = new Set([
@@ -1432,7 +1440,9 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
   /* ── refs ── */
   const prevRouteKeyRef = useRef(null);
   const pollRef = useRef(null);
+  const pollNowRef = useRef(null);
   const mapRef = useRef(null);
+  const appStateRef = useRef(AppState.currentState);
   const isProgrammaticMapMoveRef = useRef(false);
   const programmaticMoveTimerRef = useRef(null);
   const sheetDragOffset = useRef(new Animated.Value(0)).current;
@@ -1442,6 +1452,16 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
   const deliveryLocationRef = useRef(null);
   const estimatedTimeRef = useRef("");
   const lastOnTheWayEtaRefreshRef = useRef(0);
+  const orderIdRef = useRef(orderId);
+  const currentStatusRef = useRef(currentStatus);
+
+  useEffect(() => {
+    orderIdRef.current = orderId;
+  }, [orderId]);
+
+  useEffect(() => {
+    currentStatusRef.current = currentStatus;
+  }, [currentStatus]);
 
   /* ── derived ── */
   const stepIndex = STEP_INDEX[currentStatus] ?? 0;
@@ -1651,6 +1671,121 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
       lastOnTheWayEtaRefreshRef.current = 0;
     }
   }, [currentStatus]);
+
+  const applyRealtimeTrackingPayload = useCallback(
+    (payload) => {
+      const payloadOrderId = String(
+        payload?.order_id || payload?.orderId || "",
+      ).trim();
+      const activeOrderId = String(orderIdRef.current || "").trim();
+
+      if (
+        !payloadOrderId ||
+        !activeOrderId ||
+        payloadOrderId !== activeOrderId
+      ) {
+        return;
+      }
+
+      const locationPayload =
+        payload?.driver_location || payload?.driverLocation;
+      const driverLat = Number(
+        locationPayload?.latitude ?? payload?.lat ?? payload?.latitude,
+      );
+      const driverLng = Number(
+        locationPayload?.longitude ?? payload?.lng ?? payload?.longitude,
+      );
+      const driverHeading = Number(
+        locationPayload?.heading ?? payload?.heading ?? 0,
+      );
+
+      const nextStatus = normalizeStatus(
+        payload?.status ||
+          payload?.delivery_status ||
+          payload?.orderStatus ||
+          "",
+      );
+
+      const effectiveLocationStatus =
+        nextStatus || normalizeStatus(currentStatusRef.current || "");
+
+      if (
+        shouldDisplayLiveDriverLocation(effectiveLocationStatus) &&
+        Number.isFinite(driverLat) &&
+        Number.isFinite(driverLng)
+      ) {
+        setDriverLocation({
+          lat: driverLat,
+          lng: driverLng,
+          heading: Number.isFinite(driverHeading) ? driverHeading : 0,
+        });
+      } else if (!shouldDisplayLiveDriverLocation(effectiveLocationStatus)) {
+        setDriverLocation(null);
+      }
+
+      if (
+        nextStatus &&
+        nextStatus !== currentStatusRef.current &&
+        STEP_INDEX[nextStatus] !== undefined
+      ) {
+        Animated.sequence([
+          Animated.timing(statusFade, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(statusFade, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ]).start();
+        setCurrentStatus(nextStatus);
+      }
+
+      const etaPayload = payload?.eta;
+      const etaMin = Number(
+        etaPayload?.etaRangeMin ?? etaPayload?.etaMinutes ?? Number.NaN,
+      );
+      const etaMax = Number(
+        etaPayload?.etaRangeMax ?? etaPayload?.etaMinutes ?? etaMin,
+      );
+
+      if (Number.isFinite(etaMin) && Number.isFinite(etaMax)) {
+        const effectiveStatus = nextStatus || currentStatusRef.current;
+        const isOnTheWayEta =
+          effectiveStatus === "on_the_way" || effectiveStatus === "at_customer";
+
+        setEstimatedTime(
+          buildEtaDisplayText(etaMin, etaMax, {
+            isOnTheWay: isOnTheWayEta,
+          }),
+        );
+        lastOnTheWayEtaRefreshRef.current = Date.now();
+      }
+    },
+    [statusFade],
+  );
+
+  useEffect(() => {
+    if (!orderId || !on || !off) return;
+
+    const handleDriverLocationUpdate = (payload) => {
+      applyRealtimeTrackingPayload(payload);
+    };
+
+    const handleOrderStatusUpdate = (payload) => {
+      applyRealtimeTrackingPayload(payload);
+    };
+
+    on("order:driver_location", handleDriverLocationUpdate);
+    on("order:status_update", handleOrderStatusUpdate);
+
+    return () => {
+      off("order:driver_location", handleDriverLocationUpdate);
+      off("order:status_update", handleOrderStatusUpdate);
+    };
+  }, [applyRealtimeTrackingPayload, off, on, orderId]);
 
   useEffect(() => {
     let mounted = true;
@@ -1901,8 +2036,17 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
               }
             : null;
 
-        if (parsedDriverLocation) {
+        const effectiveLocationStatus = normalizeStatus(
+          newStatus || currentStatusRef.current || "",
+        );
+
+        if (
+          shouldDisplayLiveDriverLocation(effectiveLocationStatus) &&
+          parsedDriverLocation
+        ) {
           setDriverLocation(parsedDriverLocation);
+        } else if (!shouldDisplayLiveDriverLocation(effectiveLocationStatus)) {
+          setDriverLocation(null);
         }
 
         const customerLat = Number(data.customerLocation?.latitude);
@@ -2028,14 +2172,45 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
       }
     };
 
+    pollNowRef.current = poll;
+
     poll();
-    const intervalMs =
-      currentStatus === "on_the_way" || currentStatus === "at_customer"
-        ? ON_THE_WAY_POLL_INTERVAL
-        : POLL_INTERVAL;
+    const isLiveDeliveryStatus =
+      currentStatus === "on_the_way" || currentStatus === "at_customer";
+
+    const intervalMs = isLiveDeliveryStatus
+      ? isSocketConnected
+        ? SOCKET_CONNECTED_POLL_INTERVAL
+        : SOCKET_FALLBACK_POLL_INTERVAL
+      : POLL_INTERVAL;
+
     pollRef.current = setInterval(poll, intervalMs);
-    return () => clearInterval(pollRef.current);
-  }, [orderId, loading, currentStatus, getBikeEtaMinutes]);
+    return () => {
+      clearInterval(pollRef.current);
+      pollNowRef.current = null;
+    };
+  }, [orderId, loading, currentStatus, getBikeEtaMinutes, isSocketConnected]);
+
+  useEffect(() => {
+    const appStateSubscription = AppState.addEventListener(
+      "change",
+      (nextAppState) => {
+        const previousAppState = appStateRef.current;
+        appStateRef.current = nextAppState;
+
+        if (
+          previousAppState.match(/inactive|background/) &&
+          nextAppState === "active"
+        ) {
+          pollNowRef.current?.();
+        }
+      },
+    );
+
+    return () => {
+      appStateSubscription?.remove();
+    };
+  }, []);
 
   // ===========================================================================
   // LINE ROUTE for map statuses (curved for preparing stage, straight otherwise)
@@ -2409,7 +2584,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
                         {
                           id: "route-flow",
                           coordinates: [...routeCoords].reverse(),
-                          strokeColor: "#11111",
+                          strokeColor: "#06C168",
                           strokeWidth: 6,
                           strokeOpacity: 0.98,
                           dashArray: "4, 14",

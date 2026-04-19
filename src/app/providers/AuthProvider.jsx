@@ -43,6 +43,35 @@ export function AuthProvider({ children }) {
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [adminStatusLoading, setAdminStatusLoading] = useState(false);
 
+  const resetToLoggedOutState = useCallback(async () => {
+    try {
+      await clearAuthSession();
+    } catch (error) {
+      console.error("Auth clear session failed:", error);
+    }
+
+    setUser(null);
+    setUserRole(null);
+    setIsAuthenticated(false);
+    setAuthTransitionMode("none");
+    setAuthInitialRoute("Login");
+    setAuthInitialParams(null);
+    setSkipSplashOnAuth(true);
+    setProfileCompleted(false);
+
+    // Reset admin-specific state
+    setAdminStatus(null);
+    setForcePasswordChange(false);
+    setOnboardingCompleted(false);
+    setOnboardingStep(1);
+
+    try {
+      await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
+    } catch (error) {
+      console.error("Failed to clear signup flow state:", error);
+    }
+  }, []);
+
   useEffect(() => {
     checkAuthState();
   }, []);
@@ -151,6 +180,7 @@ export function AuthProvider({ children }) {
 
       if (!res.ok) {
         console.warn("Admin status check failed:", res.status);
+        await resetToLoggedOutState();
         return null;
       }
 
@@ -174,11 +204,12 @@ export function AuthProvider({ children }) {
       return data;
     } catch (error) {
       console.error("Admin status fetch error:", error);
+      await resetToLoggedOutState();
       return null;
     } finally {
       setAdminStatusLoading(false);
     }
-  }, []);
+  }, [resetToLoggedOutState]);
 
   const login = async (email, password) => {
     setIsLoading(true);
@@ -204,32 +235,20 @@ export function AuthProvider({ children }) {
   };
 
   const logout = useCallback(async () => {
-    // Unregister push notification token before logout
     const token = await getAccessToken();
+
+    // Log out locally first so navigation immediately switches to Auth screens.
+    await resetToLoggedOutState();
+
+    // Fire-and-forget cleanup tasks.
+    void orderTrackingService.clearAll();
+
+    // Unregister push notification token before logout
     if (token) {
-      await pushNotificationService.unregisterToken(token);
-      pushNotificationService.cleanup();
+      void pushNotificationService.unregisterToken(token);
     }
-
-    // Clear displayed orders tracking
-    await orderTrackingService.clearAll();
-
-    await clearAuthSession();
-    setUser(null);
-    setUserRole(null);
-    setIsAuthenticated(false);
-    setAuthTransitionMode("none");
-    setAuthInitialRoute("Login");
-    setAuthInitialParams(null);
-    setSkipSplashOnAuth(true);
-    setProfileCompleted(false);
-    await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
-    // Reset admin-specific state
-    setAdminStatus(null);
-    setForcePasswordChange(false);
-    setOnboardingCompleted(false);
-    setOnboardingStep(1);
-  }, []);
+    pushNotificationService.cleanup();
+  }, [resetToLoggedOutState]);
 
   const markProfileCompleted = async () => {
     await AsyncStorage.setItem("profileCompleted", "true");

@@ -280,9 +280,9 @@ function TabIcon({ iconName, label, focused, badge = 0 }) {
 
 function UberEatsTabBar({ state, descriptors, navigation, insets }) {
   const routes = state.routes;
-  const iosBottomInset = Platform.OS === "ios" ? Math.max(insets.bottom, 0) : 0;
-  const tabBottomPadding =
-    Platform.OS === "ios" ? Math.max(iosBottomInset, 8) : 7;
+  // Use bottom inset on both iOS and Android to avoid overlap with OS nav bar.
+  const minBottomInset = Platform.OS === "ios" ? 8 : 12;
+  const bottomInset = Math.max(insets.bottom || 0, minBottomInset);
 
   const renderRouteButton = (route, index) => {
     const routeIndex = state.routes.findIndex((r) => r.key === route.key);
@@ -350,8 +350,8 @@ function UberEatsTabBar({ state, descriptors, navigation, insets }) {
           styles.tabBarContainer,
           {
             paddingTop: 7,
-            paddingBottom: tabBottomPadding,
-            minHeight: 56 + iosBottomInset,
+            paddingBottom: bottomInset,
+            minHeight: 56 + bottomInset,
           },
         ]}
       >
