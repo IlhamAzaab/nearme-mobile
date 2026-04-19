@@ -139,6 +139,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const mapRef = useRef(null);
   const hasShownMissingPinAlertRef = useRef(false);
   const latestQuoteRequestRef = useRef(0);
+  const lastSuccessfulQuoteInputRef = useRef("");
 
   // Cart + profile
   const [cart, setCart] = useState(null);
@@ -233,12 +234,31 @@ export default function CheckoutScreen({ route, navigation }) {
     return `Rs. ${n.toFixed(2)}`;
   };
 
+  const getQuoteInputSignature = useCallback(() => {
+    const lat = Number(position?.latitude);
+    const lng = Number(position?.longitude);
+    return [
+      String(cartId || ""),
+      String(paymentMethod || "cash"),
+      String(address || "").trim(),
+      String(city || "").trim(),
+      Number.isFinite(lat) ? lat.toFixed(6) : "",
+      Number.isFinite(lng) ? lng.toFixed(6) : "",
+    ].join("|");
+  }, [
+    address,
+    cartId,
+    city,
+    paymentMethod,
+    position?.latitude,
+    position?.longitude,
+  ]);
+
   useEffect(() => {
     if (!cartId) {
       navigation.navigate("MainTabs", { screen: "Cart" });
       return;
     }
-    setOrderQuote(null);
     fetchCheckoutData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartId]);
@@ -425,7 +445,6 @@ export default function CheckoutScreen({ route, navigation }) {
     try {
       setLoading(true);
       setError("");
-      setOrderQuote(null);
 
       const token = await getAccessToken();
       const role = await AsyncStorage.getItem("role");
@@ -512,7 +531,7 @@ export default function CheckoutScreen({ route, navigation }) {
   };
 
   const fetchOrderQuote = useCallback(
-    async ({ silent = false } = {}) => {
+    async ({ silent = true } = {}) => {
       const deliveryAddress = String(address || "").trim();
       const deliveryCity = String(city || "").trim();
       const hasCoords = hasValidCoordinates(
@@ -522,22 +541,26 @@ export default function CheckoutScreen({ route, navigation }) {
 
       if (!cartId || !hasExplicitDeliveryLocation || !hasCoords) {
         setOrderQuote(null);
+        lastSuccessfulQuoteInputRef.current = "";
         return null;
       }
 
       if (!deliveryAddress || !deliveryCity) {
         setOrderQuote(null);
+        lastSuccessfulQuoteInputRef.current = "";
         return null;
       }
 
       const token = await getAccessToken();
       if (!token) {
         setOrderQuote(null);
+        lastSuccessfulQuoteInputRef.current = "";
         return null;
       }
 
-      const requestId = Date.now();
+      const requestId = latestQuoteRequestRef.current + 1;
       latestQuoteRequestRef.current = requestId;
+      const quoteInputSignature = getQuoteInputSignature();
 
       if (!silent) {
         setQuoteLoading(true);
@@ -567,15 +590,29 @@ export default function CheckoutScreen({ route, navigation }) {
         }
 
         if (!res.ok) {
-          const message =
-            data.message || "Unable to refresh checkout quote. Please retry.";
           setOrderQuote(null);
-          throw new Error(message);
+          lastSuccessfulQuoteInputRef.current = "";
+          return null;
         }
 
         const nextQuote = data?.quote || null;
+        if (!nextQuote?.quote_token) {
+          setOrderQuote(null);
+          lastSuccessfulQuoteInputRef.current = "";
+          return null;
+        }
+
         setOrderQuote(nextQuote);
+        lastSuccessfulQuoteInputRef.current = quoteInputSignature;
         return nextQuote;
+      } catch (quoteRequestError) {
+        if (latestQuoteRequestRef.current !== requestId) {
+          return null;
+        }
+
+        setOrderQuote(null);
+        lastSuccessfulQuoteInputRef.current = "";
+        return null;
       } finally {
         if (latestQuoteRequestRef.current === requestId && !silent) {
           setQuoteLoading(false);
@@ -590,22 +627,12 @@ export default function CheckoutScreen({ route, navigation }) {
       paymentMethod,
       position?.latitude,
       position?.longitude,
+      getQuoteInputSignature,
     ],
   );
 
-  useEffect(() => {
-    if (!cart || loading) {
-      return;
-    }
-
-    const timeoutId = setTimeout(() => {
-      fetchOrderQuote().catch((quoteError) => {
-        setError(quoteError.message || "Failed to refresh checkout quote");
-      });
-    }, 250);
-
-    return () => clearTimeout(timeoutId);
-  }, [cart?.id, fetchOrderQuote, loading]);
+  // Quote-token flow intentionally disabled: checkout uses stable local preview
+  // and server performs final authoritative recalculation during /orders/place.
 
   const saveAddressAndLocation = async ({
     newAddress,
@@ -659,21 +686,6 @@ export default function CheckoutScreen({ route, navigation }) {
       }
       if (!cart) throw new Error("Cart missing");
 
-      if (!orderQuote?.quote_token) {
-        await fetchOrderQuote();
-        throw new Error(
-          "Refreshing checkout quote. Please review the latest total and place again.",
-        );
-      }
-
-      const quoteExpiresAtMs = Date.parse(orderQuote.expires_at || "");
-      if (Number.isFinite(quoteExpiresAtMs) && Date.now() > quoteExpiresAtMs) {
-        await fetchOrderQuote();
-        throw new Error(
-          "Checkout quote expired. Please review updated totals and place again.",
-        );
-      }
-
       setPlacing(true);
       setError("");
 
@@ -688,28 +700,22 @@ export default function CheckoutScreen({ route, navigation }) {
         body: JSON.stringify({
           cartId,
           payment_method: paymentMethod,
-          quote_token: orderQuote.quote_token,
+          delivery_latitude: Number(position?.latitude),
+          delivery_longitude: Number(position?.longitude),
+          delivery_address: String(address || "").trim(),
+          delivery_city: String(city || "").trim(),
+          distance_km:
+            Number.isFinite(effectiveDistanceKm) && effectiveDistanceKm > 0
+              ? Number(Number(effectiveDistanceKm).toFixed(2))
+              : undefined,
+          estimated_duration_min: estimatedDeliveryWindow?.midpoint || undefined,
         }),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (
-          res.status === 409 &&
-          ["quote_expired", "quote_invalid", "quote_cart_changed"].includes(
-            String(data?.error_type || ""),
-          )
-        ) {
-          await fetchOrderQuote().catch(() => null);
-          throw new Error(
-            data?.message ||
-              "Checkout quote changed. Please review updated totals and place again.",
-          );
-        }
-
         if (res.status === 409 && data?.error_type === "price_mismatch") {
           await fetchCheckoutData();
-          await fetchOrderQuote().catch(() => null);
           setError(
             "Order amount changed while placing the order. Please review checkout and place again.",
           );
@@ -819,7 +825,9 @@ export default function CheckoutScreen({ route, navigation }) {
   const quoteTotalAmount = Number(orderQuote?.pricing?.total_amount);
   const quoteDistanceKm = Number(orderQuote?.distance_km);
   const quoteEstimatedDurationMin = Number(orderQuote?.estimated_duration_min);
-  const quoteNormalDeliveryFee = Number(orderQuote?.launch_promo?.normal_delivery_fee);
+  const quoteNormalDeliveryFee = Number(
+    orderQuote?.launch_promo?.normal_delivery_fee,
+  );
   const quotePromoSavings = Number(orderQuote?.launch_promo?.discount_amount);
 
   const subtotal = useMemo(() => {
@@ -882,7 +890,10 @@ export default function CheckoutScreen({ route, navigation }) {
   ]);
 
   const estimatedDeliveryWindow = useMemo(() => {
-    if (Number.isFinite(quoteEstimatedDurationMin) && quoteEstimatedDurationMin > 0) {
+    if (
+      Number.isFinite(quoteEstimatedDurationMin) &&
+      quoteEstimatedDurationMin > 0
+    ) {
       const min = Math.max(1, Math.floor(quoteEstimatedDurationMin));
       const max = Math.max(min, Math.ceil(quoteEstimatedDurationMin + 5));
 
@@ -982,10 +993,8 @@ export default function CheckoutScreen({ route, navigation }) {
     if (!String(address || "").trim()) return "Delivery address is required";
     if (!String(city || "").trim()) return "City is required";
     if (!isLocationDetailsComplete) return PIN_REQUIRED_ALERT_MESSAGE;
-    if (quoteLoading) return "Refreshing checkout quote...";
     if (!Number.isFinite(effectiveDistanceKm))
       return "Location not provided. Pin your delivery location on the map.";
-    if (!orderQuote) return "Refreshing checkout quote...";
     if (!isDistanceWithinLimit)
       return `Delivery is not available beyond ${maxOrderDistanceKm} km.`;
     if (!isSubtotalValid)
@@ -999,10 +1008,9 @@ export default function CheckoutScreen({ route, navigation }) {
     city,
     effectiveDistanceKm,
     isLocationDetailsComplete,
-    orderQuote,
-    quoteLoading,
     isDistanceWithinLimit,
     maxOrderDistanceKm,
+    subtotal,
     isSubtotalValid,
     requiredMinSubtotal,
     deliveryFee,
@@ -1013,28 +1021,16 @@ export default function CheckoutScreen({ route, navigation }) {
       return checkoutBlockReason;
     }
 
-    const isStaleValidationError =
-      error === "Phone number is required" ||
-      error === "Delivery address is required" ||
-      error === "City is required" ||
-      error === PIN_REQUIRED_ALERT_MESSAGE ||
-      String(error || "").startsWith("Location not provided") ||
-      String(error || "").startsWith("Unable to calculate delivery route") ||
-      String(error || "").startsWith("Delivery is not available beyond") ||
-      String(error || "").startsWith("Minimum order amount is Rs.") ||
-      String(error || "").startsWith("Delivery fee is unavailable");
-
-    if (error && !isStaleValidationError) return error;
+    if (error) return error;
 
     return "";
   }, [error, checkoutBlockReason, routeLoading, placing]);
 
   const isPlaceOrderDisabled =
     routeLoading ||
-    quoteLoading ||
     placing ||
     !cart ||
-    (isLocationDetailsComplete && !orderQuote);
+    (isLocationDetailsComplete && deliveryFee === null);
 
   // ✅ Loading / Error
   if (loading) {
@@ -1239,12 +1235,12 @@ export default function CheckoutScreen({ route, navigation }) {
                 {quoteLoading
                   ? "Refreshing quote..."
                   : routeLoading && !Number.isFinite(quoteEstimatedDurationMin)
-                  ? "Calculating..."
-                  : !hasExplicitDeliveryLocation
-                    ? "Location not provided"
-                    : estimatedDeliveryWindow
-                      ? `${estimatedDeliveryWindow.min}-${estimatedDeliveryWindow.max} mins`
-                      : "—"}
+                    ? "Calculating..."
+                    : !hasExplicitDeliveryLocation
+                      ? "Location not provided"
+                      : estimatedDeliveryWindow
+                        ? `${estimatedDeliveryWindow.min}-${estimatedDeliveryWindow.max} mins`
+                        : "—"}
               </Text>
             </View>
           </View>
@@ -1290,7 +1286,8 @@ export default function CheckoutScreen({ route, navigation }) {
               </View>
               <Text style={[styles.muted, { fontSize: 13, marginTop: 4 }]}>
                 {cart?.items?.length || 0} item
-                {cart?.items?.length !== 1 ? "s" : ""} • {formatPrice(subtotal)}
+                {cart?.items?.length !== 1 ? "s" : ""} •{" "}
+                {subtotal !== null ? formatPrice(subtotal) : "--"}
               </Text>
             </View>
             <Pressable
@@ -1407,18 +1404,21 @@ export default function CheckoutScreen({ route, navigation }) {
             </View>
           )}
 
-          <Row label="Subtotal" value={formatPrice(subtotal)} />
+          <Row
+            label="Subtotal"
+            value={subtotal !== null ? formatPrice(subtotal) : "--"}
+          />
+
           <Row
             label="Delivery fee"
             value={
-              quoteLoading
-                ? "..."
-                : deliveryFee !== null
-                  ? formatPrice(deliveryFee)
-                  : "--"
+              deliveryFee !== null ? formatPrice(deliveryFee) : "--"
             }
           />
-          <Row label="Service fee" value={formatPrice(serviceFee)} />
+          <Row
+            label="Service fee"
+            value={serviceFee !== null ? formatPrice(serviceFee) : "--"}
+          />
 
           <View style={styles.divider} />
           <Row
@@ -1455,21 +1455,19 @@ export default function CheckoutScreen({ route, navigation }) {
           >
             {placing
               ? "Placing..."
-              : quoteLoading
-                ? "Refreshing quote..."
-                : routeLoading && !Number.isFinite(quoteDistanceKm)
-                ? "Calculating..."
-                : !hasExplicitDeliveryLocation
-                  ? "Location not provided"
-                  : !String(city || "").trim()
-                    ? "Add city to continue"
-                    : !isDistanceWithinLimit && routeInfo
-                      ? `Not available beyond ${maxOrderDistanceKm} km`
-                      : !isSubtotalValid
-                        ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
-                        : finalTotal !== null
-                          ? `Place Order • ${formatPrice(finalTotal)}`
-                          : "Place Order"}
+              : routeLoading && !Number.isFinite(quoteDistanceKm)
+                      ? "Calculating..."
+                      : !hasExplicitDeliveryLocation
+                        ? "Location not provided"
+                        : !String(city || "").trim()
+                          ? "Add city to continue"
+                          : !isDistanceWithinLimit && routeInfo
+                            ? `Not available beyond ${maxOrderDistanceKm} km`
+                            : !isSubtotalValid
+                              ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
+                              : finalTotal !== null
+                                ? `Place Order • ${formatPrice(finalTotal)}`
+                                : "Place Order"}
           </Text>
         </Pressable>
       </View>

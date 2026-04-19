@@ -21,10 +21,15 @@ import { useAuth } from "../../app/providers/AuthProvider";
 import OptimizedImage from "../../components/common/OptimizedImage";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
+import { prefetchImageUrls } from "../../lib/imageCache";
+
+const getProfilePicCacheKey = (userId) =>
+  userId ? `@profile_pic:${String(userId)}` : "@profile_pic";
 
 export default function EditProfileScreen({ navigation, route }) {
   const { user, refreshAuthState } = useAuth();
   const prefill = route?.params?.prefill || {};
+  const profilePicCacheKey = getProfilePicCacheKey(user?.id);
 
   const [name, setName] = useState(prefill?.name || user?.name || "");
   const [email, setEmail] = useState(prefill?.email || user?.email || "");
@@ -50,11 +55,20 @@ export default function EditProfileScreen({ navigation, route }) {
         customer?.profile_picture || customer?.profile_pic || null;
       if (fetchedProfilePic) {
         setProfilePic(fetchedProfilePic);
+        await AsyncStorage.multiSet([
+          [profilePicCacheKey, fetchedProfilePic],
+          ["@profile_pic", fetchedProfilePic],
+        ]);
+      } else {
+        const cachedPic = await AsyncStorage.getItem(profilePicCacheKey);
+        if (cachedPic) {
+          setProfilePic(cachedPic);
+        }
       }
     } catch (error) {
       console.error("Failed to load customer profile details:", error);
     }
-  }, [user?.email]);
+  }, [profilePicCacheKey, user?.email]);
 
   useFocusEffect(
     useCallback(() => {
@@ -95,7 +109,13 @@ export default function EditProfileScreen({ navigation, route }) {
     setSaving(true);
     try {
       await AsyncStorage.setItem("userName", name.trim());
-      if (profilePic) await AsyncStorage.setItem("@profile_pic", profilePic);
+      if (profilePic) {
+        await AsyncStorage.multiSet([
+          [profilePicCacheKey, profilePic],
+          ["@profile_pic", profilePic],
+        ]);
+        await prefetchImageUrls([profilePic]);
+      }
       await refreshAuthState();
 
       Alert.alert("Saved", "Your profile has been updated.", [
@@ -106,7 +126,7 @@ export default function EditProfileScreen({ navigation, route }) {
     } finally {
       setSaving(false);
     }
-  }, [name, profilePic, navigation, refreshAuthState]);
+  }, [name, navigation, prefetchImageUrls, profilePic, profilePicCacheKey, refreshAuthState]);
 
   const initial = (name || "U").charAt(0).toUpperCase();
 

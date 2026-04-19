@@ -16,7 +16,7 @@ const DeliveryNotificationOverlay = ({
   visible = false,
   delivery = {},
   onAccept,
-  onReject,
+  onViewDelivery,
   timeRemaining = 30,
 }) => {
   if (!visible) return null;
@@ -28,19 +28,6 @@ const DeliveryNotificationOverlay = ({
     parseFloat(delivery.extra_earnings || 0) > 0 ||
     parseFloat(delivery.bonus_amount || 0) > 0;
 
-  const mainEarnings = isStackedDelivery
-    ? parseFloat(delivery.extra_earnings || 0) +
-      parseFloat(delivery.bonus_amount || 0)
-    : parseFloat(
-        delivery.base_amount ||
-          delivery.driver_earnings ||
-          delivery.total_trip_earnings ||
-          delivery.earnings ||
-          0,
-      );
-
-  const tipValue = parseFloat(delivery.tip_amount || 0);
-  const totalEarnings = mainEarnings + tipValue;
   const displayDistance = isStackedDelivery
     ? parseFloat(delivery.extra_distance_km || 0)
     : parseFloat(delivery.total_distance_km || delivery.distance || 0);
@@ -94,17 +81,11 @@ const DeliveryNotificationOverlay = ({
                 : "N/A"}
             </Text>
           </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>Earnings</Text>
-            <Text style={[styles.value, styles.earnings]}>
-              Rs. {totalEarnings.toFixed(2)}
-            </Text>
-          </View>
         </View>
 
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.rejectBtn} onPress={onReject}>
-            <Text style={styles.rejectText}>Reject</Text>
+          <TouchableOpacity style={styles.viewBtn} onPress={onViewDelivery}>
+            <Text style={styles.viewText}>View Delivery</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.acceptBtn} onPress={onAccept}>
             <Text style={styles.acceptText}>Accept</Text>
@@ -162,16 +143,15 @@ const styles = StyleSheet.create({
     flex: 2,
     textAlign: "right",
   },
-  earnings: { color: "#06C168", fontSize: 16 },
   actions: { flexDirection: "row", gap: 12 },
-  rejectBtn: {
+  viewBtn: {
     flex: 1,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: "#FEE2E2",
+    backgroundColor: "#EEF2FF",
     alignItems: "center",
   },
-  rejectText: { color: "#DC2626", fontWeight: "700", fontSize: 16 },
+  viewText: { color: "#3730A3", fontWeight: "700", fontSize: 16 },
   acceptBtn: {
     flex: 1,
     padding: 14,

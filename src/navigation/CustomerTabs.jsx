@@ -486,6 +486,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffff",
     paddingHorizontal: 10,
     paddingTop: 0,
+    paddingBottom: 10,
     position: "relative",
   },
   tabShellGradient: {
@@ -503,7 +504,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-evenly",
     paddingHorizontal: 2,
-    paddingVertical: 7,
+    paddingVertical: 8,
     borderWidth: 1,
     borderColor: "transparent",
     shadowColor: "#000",

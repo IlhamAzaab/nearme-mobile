@@ -25,7 +25,7 @@ import { getAccessToken, persistAuthSession } from "../../lib/authStorage";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
 const WEB_CARD_MAX_WIDTH = 680;
-const TERMS_AND_CONDITIONS_URL = "https://lucent-bombolone-2fa396.netlify.app";
+const TERMS_AND_CONDITIONS_URL = "https://tranquil-medovik-7b2e45.netlify.app/";
 
 export default function CompleteProfileLocationScreen({ navigation, route }) {
   const { refreshAuthState, markProfileCompleted } = useAuth();

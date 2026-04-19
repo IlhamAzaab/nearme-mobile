@@ -25,6 +25,7 @@ import { useSocket } from "./SocketContext";
 
 const AVAILABLE_DELIVERIES_CACHE_KEY = "available_deliveries_cache";
 const DRIVER_STATUS_ENDPOINT = "/driver/working-hours-status";
+const DRIVER_POPUP_SOUND_AUTO_STOP_MS = 30000;
 
 const DriverDeliveryNotificationContext = createContext(null);
 
@@ -35,6 +36,7 @@ export const useDriverDeliveryNotifications = () => {
       notifications: [],
       acceptDelivery: async () => ({ success: false }),
       declineDelivery: () => {},
+      stopNotificationSound: () => {},
       setDriverOnline: () => {},
       isDriverOnline: false,
     }
@@ -181,10 +183,39 @@ export function DriverDeliveryNotificationProvider({ children }) {
   const { socket } = useSocket();
   const soundRef = useRef(null);
   const soundPlayingRef = useRef(false);
+  const soundAutoStopTimeoutRef = useRef(null);
   const notificationsRef = useRef(notifications);
   notificationsRef.current = notifications;
   const isDriverOnlineRef = useRef(isDriverOnline);
   isDriverOnlineRef.current = isDriverOnline;
+
+  const clearSoundAutoStopTimeout = useCallback(() => {
+    if (soundAutoStopTimeoutRef.current) {
+      clearTimeout(soundAutoStopTimeoutRef.current);
+      soundAutoStopTimeoutRef.current = null;
+    }
+  }, []);
+
+  const stopNotificationSound = useCallback(() => {
+    clearSoundAutoStopTimeout();
+    if (soundRef.current) {
+      soundRef.current.stopAsync().catch(() => {});
+    }
+    soundPlayingRef.current = false;
+  }, [clearSoundAutoStopTimeout]);
+
+  const scheduleSoundAutoStop = useCallback(() => {
+    clearSoundAutoStopTimeout();
+    soundAutoStopTimeoutRef.current = setTimeout(() => {
+      if (!soundPlayingRef.current) return;
+      if (notificationsRef.current.length === 0) return;
+
+      if (soundRef.current) {
+        soundRef.current.stopAsync().catch(() => {});
+      }
+      soundPlayingRef.current = false;
+    }, DRIVER_POPUP_SOUND_AUTO_STOP_MS);
+  }, [clearSoundAutoStopTimeout]);
 
   // ──────────────────────────────────────────────
   // Initialize driver online state from storage
@@ -201,9 +232,12 @@ export function DriverDeliveryNotificationProvider({ children }) {
 
           // Pull source-of-truth status from backend to avoid stale local gate.
           try {
-            const statusRes = await fetch(`${API_BASE_URL}${DRIVER_STATUS_ENDPOINT}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
+            const statusRes = await fetch(
+              `${API_BASE_URL}${DRIVER_STATUS_ENDPOINT}`,
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              },
+            );
 
             if (statusRes.ok) {
               const statusData = await statusRes.json();
@@ -240,12 +274,13 @@ export function DriverDeliveryNotificationProvider({ children }) {
       soundRef.current = s;
     });
     return () => {
+      clearSoundAutoStopTimeout();
       if (soundRef.current) {
         soundRef.current.unloadAsync().catch(() => {});
         soundRef.current = null;
       }
     };
-  }, []);
+  }, [clearSoundAutoStopTimeout]);
 
   // ──────────────────────────────────────────────
   // Manage looping sound based on notification count
@@ -256,23 +291,27 @@ export function DriverDeliveryNotificationProvider({ children }) {
         soundRef.current.playAsync().catch(() => {});
         soundPlayingRef.current = true;
       }
-    } else {
-      if (soundPlayingRef.current && soundRef.current) {
-        soundRef.current.stopAsync().catch(() => {});
-        soundPlayingRef.current = false;
+      if (soundPlayingRef.current) {
+        scheduleSoundAutoStop();
       }
+    } else {
+      stopNotificationSound();
     }
-  }, [notifications.length]);
+  }, [notifications.length, scheduleSoundAutoStop, stopNotificationSound]);
 
   // ──────────────────────────────────────────────
   // setDriverOnline: clear notifications if going offline
   // ──────────────────────────────────────────────
-  const setDriverOnline = useCallback((online) => {
-    setIsDriverOnlineState(online);
-    if (!online) {
-      setNotifications([]);
-    }
-  }, []);
+  const setDriverOnline = useCallback(
+    (online) => {
+      setIsDriverOnlineState(online);
+      if (!online) {
+        stopNotificationSound();
+        setNotifications([]);
+      }
+    },
+    [stopNotificationSound],
+  );
 
   // ──────────────────────────────────────────────
   // addNotification – stacking, dedup, tip update
@@ -305,78 +344,82 @@ export function DriverDeliveryNotificationProvider({ children }) {
   // ──────────────────────────────────────────────
   // declineDelivery – removes from stack immediately
   // ──────────────────────────────────────────────
-  const declineDelivery = useCallback((deliveryId) => {
-    const remaining = notificationsRef.current.filter(
-      (n) => n.delivery_id !== deliveryId,
-    );
-    if (remaining.length === 0 && soundRef.current) {
-      soundRef.current.stopAsync().catch(() => {});
-      soundPlayingRef.current = false;
-    }
-    setNotifications(remaining);
-  }, []);
+  const declineDelivery = useCallback(
+    (deliveryId) => {
+      const remaining = notificationsRef.current.filter(
+        (n) => n.delivery_id !== deliveryId,
+      );
+      if (remaining.length === 0) {
+        stopNotificationSound();
+      }
+      setNotifications(remaining);
+    },
+    [stopNotificationSound],
+  );
 
   // ──────────────────────────────────────────────
   // acceptDelivery – API call + sound management
   // ──────────────────────────────────────────────
-  const acceptDelivery = useCallback(async (deliveryId, driverLocation) => {
-    // Stop sound immediately
-    if (soundRef.current) {
-      soundRef.current.stopAsync().catch(() => {});
-      soundPlayingRef.current = false;
-    }
+  const acceptDelivery = useCallback(
+    async (deliveryId, driverLocation) => {
+      // Stop sound immediately
+      stopNotificationSound();
 
-    const remaining = notificationsRef.current.filter(
-      (n) => n.delivery_id !== deliveryId,
-    );
-    const notification = notificationsRef.current.find(
-      (n) => n.delivery_id === deliveryId,
-    );
-    setNotifications(remaining);
-
-    if (!notification)
-      return { success: false, message: "Notification not found" };
-
-    try {
-      const token = await AsyncStorage.getItem("token");
-      const res = await fetch(
-        `${API_BASE_URL}/driver/deliveries/${deliveryId}/accept`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            driver_latitude: driverLocation?.latitude,
-            driver_longitude: driverLocation?.longitude,
-            earnings_data: notification.earnings_data || null,
-          }),
-        },
+      const remaining = notificationsRef.current.filter(
+        (n) => n.delivery_id !== deliveryId,
       );
-      const data = await res.json();
+      const notification = notificationsRef.current.find(
+        (n) => n.delivery_id === deliveryId,
+      );
+      setNotifications(remaining);
 
-      // Restart sound for remaining notifications
-      if (remaining.length > 0 && soundRef.current) {
-        soundRef.current.playAsync().catch(() => {});
-        soundPlayingRef.current = true;
-      }
+      if (!notification)
+        return { success: false, message: "Notification not found" };
 
-      return res.ok
-        ? { success: true, data }
-        : {
-            success: false,
-            message: data.message || "Failed to accept delivery",
-          };
-    } catch (e) {
-      console.error("[AcceptDelivery] Error:", e);
-      if (remaining.length > 0 && soundRef.current) {
-        soundRef.current.playAsync().catch(() => {});
-        soundPlayingRef.current = true;
+      try {
+        const token = await AsyncStorage.getItem("token");
+        const res = await fetch(
+          `${API_BASE_URL}/driver/deliveries/${deliveryId}/accept`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              driver_latitude: driverLocation?.latitude,
+              driver_longitude: driverLocation?.longitude,
+              earnings_data: notification.earnings_data || null,
+            }),
+          },
+        );
+        const data = await res.json();
+
+        // Restart sound for remaining notifications
+        if (remaining.length > 0 && soundRef.current) {
+          soundRef.current.playAsync().catch(() => {});
+          soundPlayingRef.current = true;
+          scheduleSoundAutoStop();
+        }
+
+        return res.ok
+          ? { success: true, data }
+          : {
+              success: false,
+              message: data.message || "Failed to accept delivery",
+            };
+      } catch (e) {
+        console.error("[AcceptDelivery] Error:", e);
+        if (remaining.length > 0 && soundRef.current) {
+          soundRef.current.playAsync().catch(() => {});
+          soundPlayingRef.current = true;
+          scheduleSoundAutoStop();
+        }
+        return { success: false, message: "Network error" };
       }
-      return { success: false, message: "Network error" };
-    }
-  }, []);
+    },
+    [scheduleSoundAutoStop, stopNotificationSound],
+  );
 
   // ──────────────────────────────────────────────
   // Push notification (expo-notifications)
@@ -398,21 +441,6 @@ export function DriverDeliveryNotificationProvider({ children }) {
     const title = isNew
       ? "🚨 New Delivery Available!"
       : "💰 Tip Added to Delivery!";
-    const baseAmount = parseFloat(
-      deliveryData.base_amount ||
-        deliveryData.driver_earnings ||
-        deliveryData.total_trip_earnings ||
-        0,
-    );
-    const deliveryComponent = isStacked
-      ? parseFloat(deliveryData.extra_earnings || 0)
-      : baseAmount;
-    const bonusComponent = parseFloat(deliveryData.bonus_amount || 0);
-    const tipComponent = parseFloat(deliveryData.tip_amount || 0);
-    const totalEarnings = deliveryComponent + bonusComponent + tipComponent;
-
-    const earnings = `LKR ${totalEarnings.toFixed(2)}`;
-
     const distKm = isStacked
       ? parseFloat(deliveryData.extra_distance_km || 0)
       : parseFloat(
@@ -422,13 +450,6 @@ export function DriverDeliveryNotificationProvider({ children }) {
       ? parseFloat(deliveryData.extra_time_minutes || 0)
       : parseFloat(deliveryData.estimated_time || 0);
     const body = [
-      `${earnings} · ${[
-        `Delivery ${deliveryComponent.toFixed(0)}`,
-        bonusComponent > 0 ? `Bonus ${bonusComponent.toFixed(0)}` : null,
-        tipComponent > 0 ? `Tip ${tipComponent.toFixed(0)}` : null,
-      ]
-        .filter(Boolean)
-        .join(" + ")}`,
       deliveryData.restaurant_name || "Restaurant",
       distKm > 0 ? `${isStacked ? "+" : ""}${distKm.toFixed(1)} km` : "",
       estTime > 0 ? `${isStacked ? "+" : ""}${Math.round(estTime)} min` : "",
@@ -572,6 +593,7 @@ export function DriverDeliveryNotificationProvider({ children }) {
     addNotification,
     declineDelivery,
     acceptDelivery,
+    stopNotificationSound,
     setDriverOnline,
     isDriverOnline,
   };

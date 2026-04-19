@@ -41,7 +41,6 @@ import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNoti
 import { useSocket } from "../../context/SocketContext";
 import { approximateDistanceMeters } from "../../utils/osrmClient";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
-import SplashScreen from "../SplashScreen";
 
 // Working time display labels
 const WORKING_TIME_LABELS = {
@@ -1435,7 +1434,12 @@ export default function DashboardScreen({ navigation }) {
   // ============================================================================
 
   if (loading && !hasDashboardSnapshot && !hasVisitedDriverDashboardScreen) {
-    return <SplashScreen />;
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#06C168" />
+        <Text style={styles.loadingText}>Loading dashboard...</Text>
+      </SafeAreaView>
+    );
   }
 
   return (

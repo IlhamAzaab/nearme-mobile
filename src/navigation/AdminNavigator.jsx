@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import AdminTabs from "./AdminTabs";
 import { useAuth } from "../app/providers/AuthProvider";
-import SplashScreen from "../screens/SplashScreen";
 
 // Admin Screens
 import AdminNotifications from "../screens/admin/AdminNotifications";
@@ -30,7 +30,11 @@ const Stack = createNativeStackNavigator();
  * Loading screen shown while checking admin status
  */
 function AdminLoadingScreen() {
-  return <SplashScreen />;
+  return (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color="#06C168" />
+    </View>
+  );
 }
 
 /**
@@ -145,3 +149,12 @@ export default function AdminNavigator() {
     </Stack.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#06C168",
+  },
+});

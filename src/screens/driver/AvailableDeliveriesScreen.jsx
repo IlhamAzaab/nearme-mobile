@@ -151,7 +151,7 @@ const hasValidDeliveryCoordinates = (delivery) => {
 // MAIN COMPONENT
 // ============================================================================
 
-export default function AvailableDeliveriesScreen({ navigation }) {
+export default function AvailableDeliveriesScreen({ navigation, route }) {
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const rawTabBarHeight = useBottomTabBarHeight();
@@ -230,6 +230,7 @@ export default function AvailableDeliveriesScreen({ navigation }) {
   const fetchPendingDeliveriesRef = useRef(null);
   const locationSubscriptionRef = useRef(null);
   const fetchInFlightRef = useRef(false);
+  const focusHandledKeyRef = useRef(null);
 
   const syncDeliveryMeta = useCallback((incomingDeliveries) => {
     const meta = deliveryMetaRef.current;
@@ -1137,6 +1138,46 @@ export default function AvailableDeliveriesScreen({ navigation }) {
     return orderMap;
   }, [sortedDeliveries]);
 
+  const requestedFocusDeliveryId = normalizeDeliveryId(
+    route?.params?.focusDeliveryId || route?.params?.deliveryId,
+  );
+  const requestedFocusTimestamp = String(route?.params?.focusRequestedAt || "");
+
+  useEffect(() => {
+    if (!isFocused || !requestedFocusDeliveryId) return;
+
+    const targetIndex = displayOrderById.get(requestedFocusDeliveryId);
+    if (typeof targetIndex !== "number" || targetIndex < 0) {
+      return;
+    }
+
+    const requestKey = `${requestedFocusDeliveryId}:${requestedFocusTimestamp}`;
+    if (focusHandledKeyRef.current === requestKey) return;
+    focusHandledKeyRef.current = requestKey;
+
+    setCurrentVisibleIndex(targetIndex);
+
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToIndex({
+        index: targetIndex,
+        animated: true,
+      });
+    });
+
+    navigation.setParams({
+      focusDeliveryId: undefined,
+      deliveryId: undefined,
+      focusRequestedAt: undefined,
+      focusSource: undefined,
+    });
+  }, [
+    displayOrderById,
+    isFocused,
+    navigation,
+    requestedFocusDeliveryId,
+    requestedFocusTimestamp,
+  ]);
+
   const renderDeliveryCard = ({ item, index }) => {
     const normalizedItemId = normalizeDeliveryId(item.delivery_id);
     const isDeclined = normalizedItemId
@@ -1347,6 +1388,14 @@ export default function AvailableDeliveriesScreen({ navigation }) {
                     animated: false,
                   });
                 }
+              }}
+              onScrollToIndexFailed={(info) => {
+                const estimatedOffset =
+                  Math.max(0, info?.index || 0) * viewportHeight;
+                flatListRef.current?.scrollToOffset({
+                  offset: estimatedOffset,
+                  animated: true,
+                });
               }}
               initialNumToRender={1}
               maxToRenderPerBatch={1}

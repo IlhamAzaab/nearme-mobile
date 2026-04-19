@@ -32,7 +32,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
 const WEB_CARD_MAX_WIDTH = 560;
 const TERMS_AND_CONDITIONS_URL =
-  "https://glittering-daifuku-7a1eea.netlify.app/";
+  "https://tranquil-medovik-7b2e45.netlify.app/";
 
 const UserIcon = ({ size = 20, color = "#9CA3AF" }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -80,7 +80,8 @@ const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
 );
 
 export default function CompleteProfileScreen({ navigation, route }) {
-  const { refreshAuthState, markProfileCompleted } = useAuth();
+  const { refreshAuthState, markProfileCompleted, preparePostLoginTransition } =
+    useAuth();
   const insets = useSafeAreaInsets();
   const { userId, accessToken, prefillPhone } = route.params || {};
   const [formData, setFormData] = useState({
@@ -229,6 +230,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
 
       await markProfileCompleted();
       await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
+      preparePostLoginTransition();
       await refreshAuthState();
     } catch (err) {
       console.error("Profile completion error:", err);

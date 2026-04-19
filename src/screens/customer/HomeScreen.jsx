@@ -10,7 +10,6 @@ import React, {
   useState,
 } from "react";
 import {
-  Animated,
   FlatList,
   Image,
   Keyboard,
@@ -28,7 +27,6 @@ import Svg, { G, Path } from "react-native-svg";
 import { useNotifications } from "../../app/providers/NotificationProvider";
 import OptimizedImage from "../../components/common/OptimizedImage";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
-import StaggeredFadeInUp from "../../components/common/StaggeredFadeInUp";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
 import { prefetchImageUrls } from "../../lib/imageCache";
@@ -48,7 +46,9 @@ const LAUNCH_PROMO_DEFAULTS = {
 
 const RESTAURANTS_CACHE_KEY = "public:restaurants";
 const FOODS_CACHE_KEY = "public:foods";
-const HOME_FIRST_ENTER_ANIMATED_KEY = "@home_first_enter_animated";
+
+const INITIAL_CACHED_RESTAURANTS = getCachedRestaurantsList();
+const INITIAL_CACHED_FOODS = getCachedFoodsList();
 
 function getCachedRestaurantsList() {
   const cached = getCachedJson(RESTAURANTS_CACHE_KEY, 120000);
@@ -259,6 +259,11 @@ const CATEGORY_IMAGE_BY_KEY = {
   others: require("../../assets/category-images/others.jpg"),
 };
 
+const FIXED_CATEGORIES = CATEGORY_ORDER.map((name, index) => ({
+  id: index + 1,
+  name,
+}));
+
 function normalizeCategoryLabel(value) {
   const key = String(value || "")
     .trim()
@@ -268,16 +273,12 @@ function normalizeCategoryLabel(value) {
 
 const CategoryIcon = ({ category }) => {
   const key = normalizeCategoryLabel(category).toLowerCase();
-  const imageSource = CATEGORY_IMAGE_BY_KEY[key] || CATEGORY_IMAGE_BY_KEY.others;
+  const imageSource =
+    CATEGORY_IMAGE_BY_KEY[key] || CATEGORY_IMAGE_BY_KEY.others;
 
   return (
     <View style={styles.catIconImageWrap}>
       <Image source={imageSource} style={styles.catImage} resizeMode="cover" />
-      <View style={styles.catImageLabelOverlay}>
-        <Text style={styles.catImageLabelText} numberOfLines={1}>
-          {category}
-        </Text>
-      </View>
     </View>
   );
 };
@@ -301,7 +302,7 @@ const CategorySection = React.memo(function CategorySection({
         {categories.map((c) => {
           const active = selectedCategory === c.name;
           return (
-            <StaggeredFadeInUp key={c.id} delay={16 + c.id * 18}>
+            <View key={c.id}>
               <Pressable
                 onPress={() => onSelectCategory(c)}
                 style={({ pressed }) => [
@@ -319,7 +320,7 @@ const CategorySection = React.memo(function CategorySection({
                   {c.name}
                 </Text>
               </Pressable>
-            </StaggeredFadeInUp>
+            </View>
           );
         })}
       </ScrollView>
@@ -329,14 +330,12 @@ const CategorySection = React.memo(function CategorySection({
 
 export default function HomeScreen({ navigation }) {
   const randomSortSeed = useMemo(() => `${Date.now()}-${Math.random()}`, []);
-  const enterTranslateY = useRef(new Animated.Value(0)).current;
-  const enterOpacity = useRef(new Animated.Value(1)).current;
 
   // Full data from API (not filtered)
-  const [allRestaurants, setAllRestaurants] = useState(() =>
-    getCachedRestaurantsList(),
+  const [allRestaurants, setAllRestaurants] = useState(
+    () => INITIAL_CACHED_RESTAURANTS,
   );
-  const [allFoodsData, setAllFoodsData] = useState(() => getCachedFoodsList());
+  const [allFoodsData, setAllFoodsData] = useState(() => INITIAL_CACHED_FOODS);
   const [orderRanking, setOrderRanking] = useState({
     hasDeliveredOrders: false,
     restaurantCounts: {},
@@ -345,15 +344,21 @@ export default function HomeScreen({ navigation }) {
   });
 
   // Filtered/displayed data
-  const [restaurants, setRestaurants] = useState(() =>
-    getCachedRestaurantsList(),
+  const [restaurants, setRestaurants] = useState(
+    () => INITIAL_CACHED_RESTAURANTS,
   );
-  const [allFoods, setAllFoods] = useState(() => getCachedFoodsList());
+  const [allFoods, setAllFoods] = useState(() => INITIAL_CACHED_FOODS);
   const [isRestaurantsLoading, setIsRestaurantsLoading] = useState(
-    () => getCachedRestaurantsList().length === 0,
+    () => INITIAL_CACHED_RESTAURANTS.length === 0,
   );
   const [isFoodsLoading, setIsFoodsLoading] = useState(
-    () => getCachedFoodsList().length === 0,
+    () => INITIAL_CACHED_FOODS.length === 0,
+  );
+  const [hasLoadedRestaurants, setHasLoadedRestaurants] = useState(
+    () => INITIAL_CACHED_RESTAURANTS.length > 0,
+  );
+  const [hasLoadedFoods, setHasLoadedFoods] = useState(
+    () => INITIAL_CACHED_FOODS.length > 0,
   );
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -367,65 +372,7 @@ export default function HomeScreen({ navigation }) {
   const [showLaunchPromoModal, setShowLaunchPromoModal] = useState(false);
   const [acknowledgingPromo, setAcknowledgingPromo] = useState(false);
 
-  const categories = useMemo(() => {
-    const categorySet = new Set();
-    for (const food of allFoodsData) {
-      categorySet.add(normalizeCategoryLabel(food?.category));
-    }
-
-    return Array.from(categorySet)
-      .sort((a, b) => {
-        const aIndex = CATEGORY_ORDER.indexOf(a);
-        const bIndex = CATEGORY_ORDER.indexOf(b);
-        const safeA = aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex;
-        const safeB = bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex;
-        if (safeA !== safeB) return safeA - safeB;
-        return a.localeCompare(b);
-      })
-      .map((name, index) => ({ id: index + 1, name }));
-  }, [allFoodsData]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const runEnterAnimation = async () => {
-      try {
-        const hasAnimated = await AsyncStorage.getItem(
-          HOME_FIRST_ENTER_ANIMATED_KEY,
-        );
-
-        if (cancelled || hasAnimated) {
-          return;
-        }
-
-        enterTranslateY.setValue(50);
-        enterOpacity.setValue(0);
-
-        Animated.parallel([
-          Animated.timing(enterTranslateY, {
-            toValue: 0,
-            duration: 350,
-            useNativeDriver: true,
-          }),
-          Animated.timing(enterOpacity, {
-            toValue: 1,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-        ]).start();
-
-        await AsyncStorage.setItem(HOME_FIRST_ENTER_ANIMATED_KEY, "1");
-      } catch {
-        // Non-blocking: screen should render even if animation persistence fails.
-      }
-    };
-
-    runEnterAnimation();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [enterOpacity, enterTranslateY]);
+  const categories = useMemo(() => FIXED_CATEGORIES, []);
 
   const fetchLaunchPromotionStatus = useCallback(async (tokenArg) => {
     try {
@@ -720,6 +667,7 @@ export default function HomeScreen({ navigation }) {
       setRestaurants([]);
     } finally {
       setIsRestaurantsLoading(false);
+      setHasLoadedRestaurants(true);
     }
   };
 
@@ -749,6 +697,7 @@ export default function HomeScreen({ navigation }) {
       setAllFoods([]);
     } finally {
       setIsFoodsLoading(false);
+      setHasLoadedFoods(true);
     }
   };
 
@@ -766,6 +715,12 @@ export default function HomeScreen({ navigation }) {
       if (allRestaurants.length === 0) fetchRestaurants();
     }
   }, [activeTab, allFoodsData.length, allRestaurants.length]);
+
+  useEffect(() => {
+    if (allFoodsData.length === 0) {
+      fetchAllFoods();
+    }
+  }, [allFoodsData.length]);
 
   // 🔍 Fuzzy search filter when search query changes
   useEffect(() => {
@@ -815,27 +770,34 @@ export default function HomeScreen({ navigation }) {
     sortRestaurantsForHome,
   ]);
 
-  const onSelectCategory = useCallback((category) => {
-    const normalized = normalizeCategoryLabel(category?.name);
-    const filteredByCategory = allFoodsData.filter(
-      (food) => normalizeCategoryLabel(food?.category) === normalized,
-    );
+  const onSelectCategory = useCallback(
+    (category) => {
+      const normalized = normalizeCategoryLabel(category?.name);
+      const filteredByCategory = allFoodsData.filter(
+        (food) => normalizeCategoryLabel(food?.category) === normalized,
+      );
 
-    setSelectedCategory(normalized);
-    setActiveTab("food");
-    setSearchQuery(normalized);
-    setAllFoods(sortFoodsForHome(filteredByCategory));
-  }, [allFoodsData, sortFoodsForHome]);
+      setSelectedCategory(normalized);
+      setActiveTab("food");
+      setSearchQuery(normalized);
+      setAllFoods(sortFoodsForHome(filteredByCategory));
+    },
+    [allFoodsData, sortFoodsForHome],
+  );
 
-  const handleSearchChange = useCallback((value) => {
-    setSearchQuery(value);
-    if (
-      selectedCategory &&
-      normalizeCategoryLabel(value) !== normalizeCategoryLabel(selectedCategory)
-    ) {
-      setSelectedCategory(null);
-    }
-  }, [selectedCategory]);
+  const handleSearchChange = useCallback(
+    (value) => {
+      setSearchQuery(value);
+      if (
+        selectedCategory &&
+        normalizeCategoryLabel(value) !==
+          normalizeCategoryLabel(selectedCategory)
+      ) {
+        setSelectedCategory(null);
+      }
+    },
+    [selectedCategory],
+  );
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery("");
@@ -1011,7 +973,7 @@ export default function HomeScreen({ navigation }) {
 
   const renderFoodItem = useCallback(
     ({ item, index }) => (
-      <StaggeredFadeInUp delay={index * 16} style={styles.foodCardAnimWrap}>
+      <View style={styles.foodCardAnimWrap}>
         <Pressable
           onPress={() =>
             navigation.navigate("FoodDetail", {
@@ -1088,7 +1050,7 @@ export default function HomeScreen({ navigation }) {
             );
           })()}
         </Pressable>
-      </StaggeredFadeInUp>
+      </View>
     ),
     [navigation],
   );
@@ -1157,12 +1119,20 @@ export default function HomeScreen({ navigation }) {
     [activeTab, categories, selectedCategory, onSelectCategory],
   );
 
+  const isRestaurantDataReady =
+    hasLoadedRestaurants || allRestaurants.length > 0;
+  const isFoodDataReady = hasLoadedFoods || allFoodsData.length > 0;
+
   const shouldShowRestaurantSkeleton =
     activeTab === "restaurant" &&
+    !isRestaurantDataReady &&
     isRestaurantsLoading &&
     restaurants.length === 0;
   const shouldShowFoodSkeleton =
-    activeTab === "food" && isFoodsLoading && allFoods.length === 0;
+    activeTab === "food" &&
+    !isFoodDataReady &&
+    isFoodsLoading &&
+    allFoods.length === 0;
   const shouldShowSkeleton =
     shouldShowRestaurantSkeleton || shouldShowFoodSkeleton;
 
@@ -1170,13 +1140,7 @@ export default function HomeScreen({ navigation }) {
     <SafeAreaView style={styles.page} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      <Animated.View
-        style={{
-          flex: 1,
-          opacity: enterOpacity,
-          transform: [{ translateY: enterTranslateY }],
-        }}
-      >
+      <View style={{ flex: 1 }}>
         <Modal
           visible={showLaunchPromoModal}
           transparent
@@ -1220,7 +1184,9 @@ export default function HomeScreen({ navigation }) {
                   style={({ pressed }) => [
                     styles.promoCtaBtn,
                     acknowledgingPromo && styles.promoCtaBtnDisabled,
-                    pressed && !acknowledgingPromo ? styles.promoCtaPressed : null,
+                    pressed && !acknowledgingPromo
+                      ? styles.promoCtaPressed
+                      : null,
                   ]}
                 >
                   <LinearGradient
@@ -1437,7 +1403,9 @@ export default function HomeScreen({ navigation }) {
               String(getRestaurantId(item) ?? `restaurant-${index}`)
             }
             ListHeaderComponent={renderDiscoveryHeader}
-            ListEmptyComponent={EmptyState}
+            ListEmptyComponent={
+              <EmptyState activeTab="restaurant" searchQuery={searchQuery} />
+            }
             ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
             renderItem={renderRestaurantItem}
             contentContainerStyle={styles.content}
@@ -1463,7 +1431,9 @@ export default function HomeScreen({ navigation }) {
             keyExtractor={(item) => String(item.id)}
             numColumns={2}
             ListHeaderComponent={renderDiscoveryHeader}
-            ListEmptyComponent={EmptyState}
+            ListEmptyComponent={
+              <EmptyState activeTab="food" searchQuery={searchQuery} />
+            }
             renderItem={renderFoodItem}
             columnWrapperStyle={{ gap: 12 }}
             contentContainerStyle={[styles.content, { gap: 12 }]}
@@ -1493,19 +1463,29 @@ export default function HomeScreen({ navigation }) {
             </Text>
           </Pressable>
         )}
-      </Animated.View>
+      </View>
     </SafeAreaView>
   );
 }
 
-function EmptyState() {
+function EmptyState({ activeTab, searchQuery }) {
+  const hasSearch = String(searchQuery || "").trim().length > 0;
+  const title = hasSearch
+    ? "No matches yet"
+    : activeTab === "restaurant"
+      ? "No restaurants available"
+      : "No food items available";
+  const subTitle = hasSearch
+    ? "Try another keyword, item name, or category."
+    : "Please check back shortly while we refresh this section.";
+
   return (
     <View style={styles.emptyBox}>
-      <Text style={styles.emptyEmoji}>🔍</Text>
-      <Text style={styles.emptyTitle}>No results found</Text>
-      <Text style={styles.emptySub}>
-        Try adjusting your search or browse categories
-      </Text>
+      <View style={styles.emptyIconWrap}>
+        <Ionicons name="file-tray-outline" size={34} color="#0B8A49" />
+      </View>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptySub}>{subTitle}</Text>
     </View>
   );
 }
@@ -1800,21 +1780,6 @@ const styles = StyleSheet.create({
   catImage: {
     width: 72,
     height: 72,
-  },
-  catImageLabelOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-  },
-  catImageLabelText: {
-    fontSize: 8,
-    color: "#ffffff",
-    fontWeight: "700",
-    textAlign: "center",
   },
   catFallback: {
     alignItems: "center",
@@ -2137,19 +2102,40 @@ const styles = StyleSheet.create({
   },
   foodTime: { color: "#94A3B8", fontSize: 11, fontWeight: "600" },
 
-  emptyBox: { alignItems: "center", paddingVertical: 60, gap: 8 },
-  emptyEmoji: { fontSize: 56, opacity: 0.3 },
+  emptyBox: {
+    alignItems: "center",
+    marginTop: 14,
+    paddingVertical: 30,
+    paddingHorizontal: 18,
+    borderRadius: 18,
+    backgroundColor: "#F8FCFA",
+    borderWidth: 1,
+    borderColor: "#DDF5E8",
+    gap: 10,
+  },
+  emptyIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E6F9EF",
+    borderWidth: 1,
+    borderColor: "#C7EED8",
+  },
   emptyTitle: {
     fontWeight: "800",
-    color: "#334155",
-    fontSize: 17,
+    color: "#1E293B",
+    fontSize: 18,
     letterSpacing: -0.3,
+    textAlign: "center",
   },
   emptySub: {
-    color: "#64748B",
+    color: "#475569",
     textAlign: "center",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "500",
+    lineHeight: 18,
   },
 
   fabCart: {

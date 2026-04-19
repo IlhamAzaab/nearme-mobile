@@ -41,7 +41,7 @@ function maskPhone(phone) {
 }
 
 export default function VerifyOtpScreen({ navigation, route }) {
-  const { refreshAuthState } = useAuth();
+  const { refreshAuthState, preparePostLoginTransition } = useAuth();
   const insets = useSafeAreaInsets();
   const { userId, phone, prefillPhone, accessToken, nextScreen } =
     route.params || {};
@@ -52,7 +52,6 @@ export default function VerifyOtpScreen({ navigation, route }) {
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
   const [resending, setResending] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
 
   const shakeX = useRef(new Animated.Value(0)).current;
   const otpInputRefs = useRef([]);
@@ -297,30 +296,27 @@ export default function VerifyOtpScreen({ navigation, route }) {
       }
 
       setLoading(false);
-      setIsTransitioning(true);
+      if (shouldRouteToProfile) {
+        const completeProfileParams = {
+          userId: resolvedUserId,
+          accessToken: appAccessToken,
+          prefillPhone: normalizedPhone,
+        };
 
-      setTimeout(async () => {
-        if (shouldRouteToProfile) {
-          const completeProfileParams = {
-            userId: resolvedUserId,
-            accessToken: appAccessToken,
-            prefillPhone: normalizedPhone,
-          };
+        await AsyncStorage.setItem(
+          SIGNUP_FLOW_STATE_KEY,
+          JSON.stringify(
+            buildSignupFlowState("CompleteProfile", completeProfileParams),
+          ),
+        );
 
-          await AsyncStorage.setItem(
-            SIGNUP_FLOW_STATE_KEY,
-            JSON.stringify(
-              buildSignupFlowState("CompleteProfile", completeProfileParams),
-            ),
-          );
+        navigation.replace("CompleteProfile", completeProfileParams);
+        return;
+      }
 
-          navigation.replace("CompleteProfile", completeProfileParams);
-          return;
-        }
-
-        await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
-        await refreshAuthState();
-      }, 1200);
+      await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
+      preparePostLoginTransition();
+      await refreshAuthState();
     } catch (err) {
       console.error("OTP verify error:", err);
       setError("Network error. Please try again.");
@@ -364,16 +360,6 @@ export default function VerifyOtpScreen({ navigation, route }) {
         style={styles.pageContainer}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        {isTransitioning && (
-          <View style={styles.transitionOverlay}>
-            <View style={styles.successCircle}>
-              <Text style={styles.successTick}>✓</Text>
-            </View>
-            <Text style={styles.successTitle}>OTP Verified!</Text>
-            <Text style={styles.successSub}>Redirecting...</Text>
-          </View>
-        )}
-
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,

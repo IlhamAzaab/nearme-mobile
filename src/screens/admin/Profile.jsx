@@ -15,7 +15,7 @@ import OptimizedImage from "../../components/common/OptimizedImage";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
 
-const PRIVACY_POLICY_URL = "https://tiny-medovik-de85ce.netlify.app";
+const PRIVACY_POLICY_URL = "https://moonlit-dieffenbachia-52f106.netlify.app/";
 const TERMS_AND_CONDITIONS_URL = "https://whimsical-sopapillas-ef4bec.netlify.app";
 const HELP_AND_SUPPORT_URL = "https://tranquil-sawine-c7257f.netlify.app";
 

@@ -39,12 +39,20 @@ const getOrderItems = (data) => {
       .split(",")
       .map((raw) => raw.trim())
       .filter(Boolean)
-      .map((entry) => ({
-        quantity: 1,
-        foodName: entry,
-        size: "regular",
-        lineTotal: 0,
-      }));
+      .map((entry) => {
+        const quantityMatch = entry.match(/^\s*(\d+)\s*x\s*/i);
+        const parsedQuantity = quantityMatch
+          ? Number.parseInt(quantityMatch[1], 10)
+          : 1;
+        const cleanedName = entry.replace(/^\s*\d+\s*x\s*/i, "").trim();
+
+        return {
+          quantity: Number.isFinite(parsedQuantity) ? parsedQuantity : 1,
+          foodName: cleanedName || "Item",
+          size: "regular",
+          lineTotal: 0,
+        };
+      });
   }
 
   return [];

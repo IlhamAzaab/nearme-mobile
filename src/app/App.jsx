@@ -45,6 +45,7 @@ LogBox.ignoreLogs([
 
 const ADMIN_ORDER_STATUS_EVENT = "admin:order_status_changed";
 const DRIVER_DELIVERY_ACTION_EVENT = "driver:delivery_notification_action";
+const DRIVER_POPUP_SOUND_SECONDS = 30;
 
 const normalizeDeliveries = (deliveries) => {
   if (!deliveries) return [];
@@ -59,6 +60,12 @@ const normalizeAdminOrderStatus = (status) => {
   if (normalized === "accepted") return "pending";
   if (normalized === "rejected") return "failed";
   return normalized;
+};
+
+const sanitizeOrderItemName = (name) => {
+  const raw = String(name || "").trim();
+  if (!raw) return "Item";
+  return raw.replace(/^\s*\d+\s*x\s*/i, "").trim() || "Item";
 };
 
 const patchAdminOrdersCache = (orderId, status, reason) => {
@@ -108,6 +115,9 @@ const refreshDriverDeliveryCaches = () => {
     .invalidateQueries({ queryKey: ["driver", "active-deliveries"] })
     .catch(() => {});
 };
+
+const isOrderUrgentType = (type) =>
+  type === "new_order" || type === "order_reminder";
 
 // Safe import G�� requires native rebuild to work
 let NavigationBar = null;
@@ -177,10 +187,19 @@ function RealtimeProviders({ children }) {
   );
 }
 
-function DriverNotificationLayer() {
-  const { notifications, acceptDelivery, declineDelivery, isDriverOnline } =
-    useDriverDeliveryNotifications();
+function DriverNotificationLayer({ navigationRef }) {
+  const {
+    notifications,
+    acceptDelivery,
+    declineDelivery,
+    stopNotificationSound,
+    isDriverOnline,
+  } = useDriverDeliveryNotifications();
   const [driverLocation, setDriverLocation] = useState(null);
+  const [timeRemaining, setTimeRemaining] = useState(
+    DRIVER_POPUP_SOUND_SECONDS,
+  );
+  const countdownHandledForIdRef = useRef(null);
 
   useEffect(() => {
     let mounted = true;
@@ -215,6 +234,43 @@ function DriverNotificationLayer() {
   }, [notifications.length]);
 
   const topNotification = notifications?.[0] || null;
+  const topDeliveryId = topNotification?.delivery_id
+    ? String(topNotification.delivery_id)
+    : null;
+
+  useEffect(() => {
+    if (!topDeliveryId) {
+      setTimeRemaining(DRIVER_POPUP_SOUND_SECONDS);
+      countdownHandledForIdRef.current = null;
+      return;
+    }
+
+    setTimeRemaining(DRIVER_POPUP_SOUND_SECONDS);
+    countdownHandledForIdRef.current = null;
+
+    const countdownInterval = setInterval(() => {
+      setTimeRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(countdownInterval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(countdownInterval);
+  }, [topDeliveryId]);
+
+  useEffect(() => {
+    if (!topDeliveryId || timeRemaining > 0) return;
+    if (countdownHandledForIdRef.current === topDeliveryId) return;
+
+    countdownHandledForIdRef.current = topDeliveryId;
+    stopNotificationSound();
+    if (pushNotificationService?.stopAlarm) {
+      pushNotificationService.stopAlarm().catch(() => {});
+    }
+  }, [stopNotificationSound, timeRemaining, topDeliveryId]);
 
   const handleAccept = useCallback(async () => {
     if (!topNotification?.delivery_id) return;
@@ -233,16 +289,31 @@ function DriverNotificationLayer() {
     }
   }, [acceptDelivery, topNotification, driverLocation]);
 
-  const handleReject = useCallback(() => {
-    if (!topNotification?.delivery_id) return;
+  const handleViewDelivery = useCallback(() => {
+    const focusDeliveryId = topNotification?.delivery_id
+      ? String(topNotification.delivery_id)
+      : null;
+    if (!focusDeliveryId) return;
+
+    stopNotificationSound();
     declineDelivery(topNotification.delivery_id);
-    DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
-      deliveryId: String(topNotification.delivery_id),
-      action: "declined",
-      source: "driver_overlay",
-    });
-    refreshDriverDeliveryCaches();
-  }, [declineDelivery, topNotification]);
+
+    if (pushNotificationService?.stopAlarm) {
+      pushNotificationService.stopAlarm().catch(() => {});
+    }
+
+    if (navigationRef.current) {
+      navigationRef.current.navigate("DriverTabs", {
+        screen: "Available",
+        params: {
+          focusDeliveryId,
+          deliveryId: focusDeliveryId,
+          focusSource: "driver_overlay",
+          focusRequestedAt: Date.now(),
+        },
+      });
+    }
+  }, [declineDelivery, stopNotificationSound, topNotification]);
 
   if (!isDriverOnline || !topNotification) {
     return null;
@@ -261,7 +332,8 @@ function DriverNotificationLayer() {
         estimated_time: topNotification.estimated_time,
       }}
       onAccept={handleAccept}
-      onReject={handleReject}
+      onViewDelivery={handleViewDelivery}
+      timeRemaining={timeRemaining}
     />
   );
 }
@@ -301,6 +373,8 @@ export default function App() {
 
   // Urgent notification modal state
   const [urgentNotification, setUrgentNotification] = useState(null);
+  const urgentNotificationType = String(urgentNotification?.data?.type || "");
+  const shouldShowUrgentModal = isOrderUrgentType(urgentNotificationType);
 
   useEffect(() => {
     urgentNotificationRef.current = urgentNotification;
@@ -325,22 +399,6 @@ export default function App() {
     [],
   );
 
-  const publishDriverDeliveryAction = useCallback(
-    (deliveryId, action, source) => {
-      const normalizedDeliveryId = String(deliveryId || "").trim();
-      if (!normalizedDeliveryId) return;
-
-      DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
-        deliveryId: normalizedDeliveryId,
-        action,
-        source: source || "app",
-      });
-
-      refreshDriverDeliveryCaches();
-    },
-    [],
-  );
-
   useEffect(() => {
     const subscription = DeviceEventEmitter.addListener(
       ADMIN_ORDER_STATUS_EVENT,
@@ -356,8 +414,21 @@ export default function App() {
         const activeOrderId = String(
           urgentNotificationRef.current?.data?.orderId || "",
         ).trim();
+        const source = String(payload?.source || "")
+          .trim()
+          .toLowerCase();
+        const resolvedStatus = String(status || "")
+          .trim()
+          .toLowerCase();
+        const shouldForceClearForUserAction =
+          source === "orders_screen" || source === "orders_socket";
 
-        if (activeOrderId && activeOrderId === orderId && status !== "placed") {
+        if (
+          (activeOrderId &&
+            activeOrderId === orderId &&
+            resolvedStatus !== "placed") ||
+          (shouldForceClearForUserAction && resolvedStatus !== "placed")
+        ) {
           pushNotificationService.stopAlarm().catch(() => {});
           setUrgentNotification(null);
         }
@@ -424,35 +495,6 @@ export default function App() {
           if (navigationRef.current) {
             navigationRef.current.navigate("AdminMain", { screen: "Orders" });
           }
-        } else if (data?.type === "new_delivery" && data?.deliveryId) {
-          // Accept delivery (driver)
-          const response = await fetch(
-            `${API_URL}/driver/deliveries/${data.deliveryId}/accept`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-              },
-            },
-          );
-          if (response.ok) {
-            Alert.alert("Success", "Delivery accepted!");
-            publishDriverDeliveryAction(
-              data.deliveryId,
-              "accepted",
-              "urgent_modal",
-            );
-          } else {
-            const body = await response.json().catch(() => ({}));
-            Alert.alert("Error", body.message || "Failed to accept delivery");
-          }
-          // Navigate to available deliveries tab
-          if (navigationRef.current) {
-            navigationRef.current.navigate("DriverTabs", {
-              screen: "Available",
-            });
-          }
         }
       } catch (err) {
         console.error("[UrgentModal] Accept error:", err);
@@ -462,7 +504,7 @@ export default function App() {
         );
       }
     },
-    [publishAdminOrderStatus, publishDriverDeliveryAction],
+    [publishAdminOrderStatus],
   );
 
   // Handle reject/decline action from urgent notification modal
@@ -522,20 +564,9 @@ export default function App() {
         if (navigationRef.current) {
           navigationRef.current.navigate("AdminMain", { screen: "Orders" });
         }
-      } else if (data?.type === "new_delivery") {
-        // Driver just dismisses G�� no reason needed
-        console.log(
-          "[UrgentModal] Driver declined delivery:",
-          data?.deliveryId,
-        );
-        publishDriverDeliveryAction(
-          data?.deliveryId,
-          "declined",
-          "urgent_modal",
-        );
       }
     },
-    [publishAdminOrderStatus, publishDriverDeliveryAction],
+    [publishAdminOrderStatus],
   );
 
   // Handle dismiss (X button) - stop alarm but leave order unchanged
@@ -556,6 +587,11 @@ export default function App() {
         notification.data?.type,
       );
 
+      if (notification?.data?.type === "new_delivery") {
+        await pushNotificationService.stopAlarm();
+        return;
+      }
+
       // Check if this order has already been displayed
       if (notification.data?.orderId) {
         const trackingKey =
@@ -569,6 +605,8 @@ export default function App() {
           console.log(
             `[App] Urgent notification already displayed for key ${trackingKey}, skipping`,
           );
+          // Prevent orphan alarm loops when duplicate urgent notifications are ignored.
+          await pushNotificationService.stopAlarm();
           return;
         }
         // Mark as displayed
@@ -656,9 +694,10 @@ export default function App() {
             const items = pendingOrder.order_items || [];
             const itemsSummary = items
               .map((item) => {
+                const cleanedName = sanitizeOrderItemName(item.food_name);
                 const size =
                   item.size && item.size !== "regular" ? ` (${item.size})` : "";
-                return `${item.quantity}x ${item.food_name}${size}`;
+                return `${item.quantity}x ${cleanedName}${size}`;
               })
               .join(", ");
 
@@ -765,10 +804,10 @@ export default function App() {
                   <RealtimeProviders>
                     <NavigationContainer ref={navigationRef}>
                       <RootNavigator />
-                      <DriverNotificationLayer />
+                      <DriverNotificationLayer navigationRef={navigationRef} />
                       {/* Urgent notification modal - renders above everything */}
                       <UrgentNotificationModal
-                        visible={!!urgentNotification}
+                        visible={shouldShowUrgentModal}
                         title={urgentNotification?.title}
                         body={urgentNotification?.body}
                         data={urgentNotification?.data}

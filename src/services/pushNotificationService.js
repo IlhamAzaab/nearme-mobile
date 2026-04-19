@@ -45,8 +45,7 @@ const PUSH_REGISTER_RETRY_AT_KEY = "pushRegisterRetryAt";
 const PUSH_REGISTER_COOLDOWN_MS = 5 * 60 * 1000;
 const PUSH_REGISTER_TIMEOUT_MS = 12000;
 const RETRYABLE_PUSH_STATUSES = new Set([
-  408, 429, 500, 502, 503, 504,
-  520, 521, 522, 523, 524, 525, 526,
+  408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526,
 ]);
 
 function isRetryablePushStatus(status) {
@@ -54,14 +53,14 @@ function isRetryablePushStatus(status) {
 }
 
 function normalizeBaseUrl(url) {
-  return String(url || "").trim().replace(/\/+$/, "");
+  return String(url || "")
+    .trim()
+    .replace(/\/+$/, "");
 }
 
 function getPushRegisterUrls(baseUrl) {
   const normalized = normalizeBaseUrl(baseUrl);
-  const urls = [
-    `${normalized}/push/register-token`,
-  ];
+  const urls = [`${normalized}/push/register-token`];
 
   if (!/\/api(?:$|\/)/i.test(normalized)) {
     urls.push(`${normalized}/api/push/register-token`);
@@ -76,15 +75,15 @@ function toAppNotification({ title, body, data, createdAt }) {
     d.notificationId ||
     d.notification_id ||
     d.id ||
-    `push:${d.type || 'general'}:${d.orderId || d.order_id || ''}:${title || ''}:${body || ''}`;
+    `push:${d.type || "general"}:${d.orderId || d.order_id || ""}:${title || ""}:${body || ""}`;
 
   return {
     id: String(notificationId),
-    title: title || 'Notification',
-    message: body || d.message || '',
+    title: title || "Notification",
+    message: body || d.message || "",
     created_at: createdAt || new Date().toISOString(),
     is_read: false,
-    type: d.type || 'info',
+    type: d.type || "info",
     order_id: d.orderId || d.order_id,
     data: {
       ...d,
@@ -362,11 +361,13 @@ class PushNotificationService {
   }
 
   onNotificationReceived(callback) {
-    this._onNotificationReceived = typeof callback === 'function' ? callback : null;
+    this._onNotificationReceived =
+      typeof callback === "function" ? callback : null;
   }
 
   onNotificationOpened(callback) {
-    this._onNotificationOpened = typeof callback === 'function' ? callback : null;
+    this._onNotificationOpened =
+      typeof callback === "function" ? callback : null;
   }
 
   // ─── PERSISTENT RINGING ───────────────────────────────────────
@@ -600,7 +601,10 @@ class PushNotificationService {
         let timeoutId;
         try {
           const controller = new AbortController();
-          timeoutId = setTimeout(() => controller.abort(), PUSH_REGISTER_TIMEOUT_MS);
+          timeoutId = setTimeout(
+            () => controller.abort(),
+            PUSH_REGISTER_TIMEOUT_MS,
+          );
 
           const response = await rateLimitedFetch(
             url,
@@ -652,7 +656,9 @@ class PushNotificationService {
           const canTryNext = i < registerUrls.length - 1;
 
           if (canTryNext) {
-            console.warn(`[Push] Register endpoint failed, trying fallback: ${url}`);
+            console.warn(
+              `[Push] Register endpoint failed, trying fallback: ${url}`,
+            );
             continue;
           }
 
@@ -754,11 +760,11 @@ class PushNotificationService {
         const isPersistent =
           data?.persistent === "true" || data?.persistent === true;
         const isUrgent =
-          data?.type === "new_order" ||
-          data?.type === "order_reminder" ||
-          data?.type === "new_delivery";
+          data?.type === "new_order" || data?.type === "order_reminder";
+        const shouldOpenUrgentModal =
+          (isPersistent || isUrgent) && data?.type !== "new_delivery";
 
-        if (isPersistent || isUrgent) {
+        if (shouldOpenUrgentModal) {
           // Start persistent alarm (sound + modal)
           this.startAlarm(title, body, data);
 
@@ -818,9 +824,10 @@ class PushNotificationService {
           notifData?.persistent === "true" || notifData?.persistent === true;
         const isUrgent =
           notifData?.type === "new_order" ||
-          notifData?.type === "order_reminder" ||
-          notifData?.type === "new_delivery";
-        if (isPersistent || isUrgent) {
+          notifData?.type === "order_reminder";
+        const shouldOpenUrgentModal =
+          (isPersistent || isUrgent) && notifData?.type !== "new_delivery";
+        if (shouldOpenUrgentModal) {
           this.startAlarm(content.title, content.body, notifData);
           if (this._onUrgentNotification) {
             this._onUrgentNotification({
@@ -899,9 +906,10 @@ class PushNotificationService {
           notifData?.persistent === "true" || notifData?.persistent === true;
         const isUrgent =
           notifData?.type === "new_order" ||
-          notifData?.type === "order_reminder" ||
-          notifData?.type === "new_delivery";
-        if (isPersistent || isUrgent) {
+          notifData?.type === "order_reminder";
+        const shouldOpenUrgentModal =
+          (isPersistent || isUrgent) && notifData?.type !== "new_delivery";
+        if (shouldOpenUrgentModal) {
           this.startAlarm(content.title, content.body, notifData);
           if (this._onUrgentNotification) {
             this._onUrgentNotification({
@@ -971,7 +979,19 @@ class PushNotificationService {
         break;
       case "new_delivery":
         // DriverTabs screen is 'Available' inside the 'DriverTabs' stack screen
-        nav.navigate("DriverTabs", { screen: "Available" });
+        nav.navigate("DriverTabs", {
+          screen: "Available",
+          params: {
+            focusDeliveryId: String(
+              data?.deliveryId || data?.delivery_id || "",
+            ).trim(),
+            deliveryId: String(
+              data?.deliveryId || data?.delivery_id || "",
+            ).trim(),
+            focusSource: "push_notification",
+            focusRequestedAt: Date.now(),
+          },
+        });
         break;
       case "payment_received":
         nav.navigate("DriverWithdrawals", {

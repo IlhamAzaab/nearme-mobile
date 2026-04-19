@@ -183,6 +183,32 @@ export default function FoodDetailScreen({ route, navigation }) {
 
   const totalPrice = useMemo(() => unitPrice * quantity, [unitPrice, quantity]);
 
+  const sizeOptions = useMemo(() => {
+    if (!food) return [];
+
+    const options = [
+      {
+        key: "regular",
+        label: food.regular_size || "Regular",
+        portion: food.regular_portion,
+        currentPrice: food.offer_price || food.regular_price,
+        oldPrice: food.offer_price ? food.regular_price : null,
+      },
+    ];
+
+    if (food.extra_price) {
+      options.push({
+        key: "large",
+        label: food.extra_size || "Large",
+        portion: food.extra_portion,
+        currentPrice: food.extra_offer_price || food.extra_price,
+        oldPrice: food.extra_offer_price ? food.extra_price : null,
+      });
+    }
+
+    return options;
+  }, [food]);
+
   const addToCart = async ({ goToCheckout = false } = {}) => {
     try {
       const token = await getAccessToken();
@@ -354,171 +380,77 @@ export default function FoodDetailScreen({ route, navigation }) {
           <View style={styles.sectionContainer}>
             <Text style={styles.sectionLabel}>SELECT SIZE</Text>
             <View style={styles.sizeContainer}>
-              <Pressable
-                onPress={() => setSelectedSize("regular")}
-                style={[
-                  styles.sizeOption,
-                  selectedSize === "regular" && styles.sizeOptionActive,
-                ]}
-              >
-                {food.regular_size ? (
-                  <Text
+              {sizeOptions.map((option) => {
+                const isSelected = selectedSize === option.key;
+
+                return (
+                  <Pressable
+                    key={option.key}
+                    onPress={() => setSelectedSize(option.key)}
                     style={[
-                      styles.sizeOptionName,
-                      selectedSize === "regular" && styles.sizeOptionNameActive,
+                      styles.sizeOption,
+                      isSelected && styles.sizeOptionActive,
                     ]}
                   >
-                    {food.regular_size}
-                  </Text>
-                ) : (
-                  <Text
-                    style={[
-                      styles.sizeOptionName,
-                      selectedSize === "regular" && styles.sizeOptionNameActive,
-                    ]}
-                  >
-                    Regular
-                  </Text>
-                )}
-                {food.regular_portion ? (
-                  <Text
-                    style={[
-                      styles.sizePortionText,
-                      selectedSize === "regular" &&
-                        styles.sizePortionTextActive,
-                    ]}
-                  >
-                    portion {food.regular_portion}
-                  </Text>
-                ) : null}
-                <View style={styles.sizePriceWrap}>
-                  {food.offer_price ? (
-                    <>
+                    <View
+                      style={[
+                        styles.sizeSelectedBadge,
+                        isSelected && styles.sizeSelectedBadgeActive,
+                      ]}
+                    >
+                      <Ionicons
+                        name={
+                          isSelected ? "checkmark-circle" : "ellipse-outline"
+                        }
+                        size={16}
+                        color={isSelected ? "#06C168" : "#94A3B8"}
+                      />
+                    </View>
+
+                    <View style={styles.sizeInfoWrap}>
                       <Text
                         style={[
-                          styles.sizeOldPrice,
-                          selectedSize === "regular" &&
-                            styles.sizeOldPriceActive,
+                          styles.sizeOptionName,
+                          isSelected && styles.sizeOptionNameActive,
                         ]}
                       >
-                        {formatPrice(food.regular_price)}
+                        {option.label}
                       </Text>
+                      {!!option.portion && (
+                        <Text
+                          style={[
+                            styles.sizePortionText,
+                            isSelected && styles.sizePortionTextActive,
+                          ]}
+                        >
+                          Portion {option.portion}
+                        </Text>
+                      )}
+                    </View>
+
+                    <View style={styles.sizePriceWrap}>
                       <Text
                         style={[
                           styles.sizeOptionPrice,
-                          selectedSize === "regular" &&
-                            styles.sizeOptionPriceActive,
+                          isSelected && styles.sizeOptionPriceActive,
                         ]}
                       >
-                        {formatPrice(food.offer_price)}
+                        {formatPrice(option.currentPrice)}
                       </Text>
-                    </>
-                  ) : (
-                    <Text
-                      style={[
-                        styles.sizeOptionPrice,
-                        selectedSize === "regular" &&
-                          styles.sizeOptionPriceActive,
-                      ]}
-                    >
-                      {formatPrice(food.regular_price)}
-                    </Text>
-                  )}
-                </View>
-                {selectedSize === "regular" && (
-                  <View style={styles.sizeCheck}>
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={16}
-                      color="#06C168"
-                    />
-                  </View>
-                )}
-              </Pressable>
-
-              {!!food.extra_price && (
-                <Pressable
-                  onPress={() => setSelectedSize("large")}
-                  style={[
-                    styles.sizeOption,
-                    selectedSize === "large" && styles.sizeOptionActive,
-                  ]}
-                >
-                  {food.extra_size ? (
-                    <Text
-                      style={[
-                        styles.sizeOptionName,
-                        selectedSize === "large" && styles.sizeOptionNameActive,
-                      ]}
-                    >
-                      {food.extra_size}
-                    </Text>
-                  ) : (
-                    <Text
-                      style={[
-                        styles.sizeOptionName,
-                        selectedSize === "large" && styles.sizeOptionNameActive,
-                      ]}
-                    >
-                      Large
-                    </Text>
-                  )}
-                  {food.extra_portion ? (
-                    <Text
-                      style={[
-                        styles.sizePortionText,
-                        selectedSize === "large" &&
-                          styles.sizePortionTextActive,
-                      ]}
-                    >
-                      portion {food.extra_portion}
-                    </Text>
-                  ) : null}
-                  <View style={styles.sizePriceWrap}>
-                    {food.extra_offer_price ? (
-                      <>
+                      {!!option.oldPrice && (
                         <Text
                           style={[
                             styles.sizeOldPrice,
-                            selectedSize === "large" &&
-                              styles.sizeOldPriceActive,
+                            isSelected && styles.sizeOldPriceActive,
                           ]}
                         >
-                          {formatPrice(food.extra_price)}
+                          {formatPrice(option.oldPrice)}
                         </Text>
-                        <Text
-                          style={[
-                            styles.sizeOptionPrice,
-                            selectedSize === "large" &&
-                              styles.sizeOptionPriceActive,
-                          ]}
-                        >
-                          {formatPrice(food.extra_offer_price)}
-                        </Text>
-                      </>
-                    ) : (
-                      <Text
-                        style={[
-                          styles.sizeOptionPrice,
-                          selectedSize === "large" &&
-                            styles.sizeOptionPriceActive,
-                        ]}
-                      >
-                        {formatPrice(food.extra_price)}
-                      </Text>
-                    )}
-                  </View>
-                  {selectedSize === "large" && (
-                    <View style={styles.sizeCheck}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={16}
-                        color="#06C168"
-                      />
+                      )}
                     </View>
-                  )}
-                </Pressable>
-              )}
+                  </Pressable>
+                );
+              })}
             </View>
           </View>
 
@@ -571,12 +503,6 @@ export default function FoodDetailScreen({ route, navigation }) {
                   addingToCart && { opacity: 0.6 },
                 ]}
               >
-                <Ionicons
-                  name="cart"
-                  size={18}
-                  color="#fff"
-                  style={{ marginRight: 6 }}
-                />
                 <Text style={styles.addToCartText}>
                   {addingToCart
                     ? "Adding..."
@@ -811,76 +737,90 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   sizeContainer: {
-    flexDirection: "row",
-    gap: 12,
+    gap: 10,
     marginTop: 12,
   },
   sizeOption: {
-    flex: 1,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 16,
+    paddingVertical: 14,
     paddingHorizontal: 12,
     borderRadius: 16,
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: "#F1F5F9",
     backgroundColor: "#fff",
   },
   sizeOptionActive: {
     borderColor: "#06C168",
-    backgroundColor: "#E6F9EE",
+    backgroundColor: "#F2FCF6",
     shadowColor: "#06C168",
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
+    shadowOpacity: 0.09,
+    shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    elevation: 2,
+  },
+  sizeSelectedBadge: {
+    minWidth: 34,
+    marginRight: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+  },
+  sizeSelectedBadgeActive: {
+    minWidth: 62,
+  },
+  sizeSelectedBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#06C168",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  sizeInfoWrap: {
+    flex: 1,
   },
   sizeOptionName: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "700",
-    color: "#64748B",
+    color: "#0F172A",
   },
   sizeOptionNameActive: {
-    color: "#06C168",
+    color: "#0B1324",
     fontWeight: "800",
   },
   sizeOptionPrice: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#94A3B8",
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0F172A",
   },
   sizeOptionPriceActive: {
-    color: "#06C168",
+    color: "#0B1324",
     fontWeight: "800",
   },
   sizePriceWrap: {
-    alignItems: "center",
-    gap: 2,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    marginLeft: 12,
   },
   sizeOldPrice: {
-    fontSize: 11,
-    fontWeight: "500",
-    color: "#CBD5E1",
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#EF4444",
     textDecorationLine: "line-through",
+    marginTop: 3,
   },
   sizeOldPriceActive: {
-    color: "#94A3B8",
+    color: "#DC2626",
   },
   sizePortionText: {
-    fontSize: 11,
-    fontWeight: "500",
+    fontSize: 12,
+    fontWeight: "600",
     color: "#94A3B8",
-    marginTop: -2,
+    marginTop: 2,
   },
   sizePortionTextActive: {
-    color: "#06C168",
-    fontWeight: "600",
-  },
-  sizeCheck: {
-    position: "absolute",
-    top: 8,
-    right: 8,
+    color: "#475569",
+    fontWeight: "700",
   },
 
   // Quantity

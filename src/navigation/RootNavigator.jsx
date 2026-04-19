@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { StyleSheet, View } from "react-native";
 import AuthNavigator from "./AuthNavigator";
 import CustomerStack from "./CustomerStack";
 import DriverNavigator from "./DriverNavigator";
@@ -15,7 +16,6 @@ import {
   preloadAllAppImages,
 } from "../services/ImagePreloader";
 
-const SPLASH_MIN_MS = 900; // shorter splash for faster startup on low-end devices
 const RESTAURANTS_CACHE_KEY = "public:restaurants";
 const FOODS_CACHE_KEY = "public:foods";
 
@@ -23,7 +23,6 @@ export default function RootNavigator() {
   const {
     isAuthenticated,
     userRole,
-    isLoading,
     authTransitionMode,
     authInitialRoute,
     authInitialParams,
@@ -33,8 +32,11 @@ export default function RootNavigator() {
   } = useAuth();
   const didPreloadCustomerImagesRef = useRef(false);
   const cacheRefreshCleanupRef = useRef(null);
+  const lastAuthTransitionModeRef = useRef(authTransitionMode);
+  const lastSplashCompletedAtRef = useRef(0);
 
-  const [showSplash, setShowSplash] = useState(true);
+  const [isSplashVisible, setIsSplashVisible] = useState(!skipSplashOnAuth);
+  const [splashCycle, setSplashCycle] = useState(0);
   const normalizedRole = String(userRole || "")
     .trim()
     .toLowerCase();
@@ -46,19 +48,30 @@ export default function RootNavigator() {
         : normalizedRole;
 
   useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), SPLASH_MIN_MS);
-    return () => clearTimeout(timer);
-  }, []);
+    if (!skipSplashOnAuth) return;
+    setIsSplashVisible(false);
+  }, [skipSplashOnAuth]);
 
   useEffect(() => {
-    if (!isAuthenticated || authTransitionMode !== "post-login") return;
+    const previousMode = lastAuthTransitionModeRef.current;
 
-    const timer = setTimeout(() => {
-      clearAuthTransitionMode();
-    }, SPLASH_MIN_MS);
+    if (authTransitionMode === "post-login" && previousMode !== "post-login") {
+      const now = Date.now();
+      const wasRecentlyCompleted =
+        now - lastSplashCompletedAtRef.current < 4500;
 
-    return () => clearTimeout(timer);
-  }, [isAuthenticated, authTransitionMode, clearAuthTransitionMode]);
+      // Customer flow should never replay the same splash sequence twice back-to-back.
+      if (isSplashVisible || (effectiveRole === "customer" && wasRecentlyCompleted)) {
+        clearAuthTransitionMode();
+      } else {
+      // Re-arm splash exactly once per successful auth transition.
+        setIsSplashVisible(true);
+        setSplashCycle((prev) => prev + 1);
+      }
+    }
+
+    lastAuthTransitionModeRef.current = authTransitionMode;
+  }, [authTransitionMode, clearAuthTransitionMode, effectiveRole, isSplashVisible]);
 
   useEffect(() => {
     if (!isAuthenticated || effectiveRole !== "customer") {
@@ -134,49 +147,74 @@ export default function RootNavigator() {
     };
   }, []);
 
-  if (
-    isLoading ||
-    (showSplash && !skipSplashOnAuth) ||
-    (isAuthenticated && authTransitionMode === "post-login")
-  ) {
-    return <SplashScreen />;
-  }
+  const shouldShowStartupSplash = !skipSplashOnAuth && isSplashVisible;
 
-  // Handle routing based on authentication and user role
-  if (isAuthenticated) {
-    switch (effectiveRole) {
-      case "customer":
-        if (!profileCompleted) {
+  const handleSplashComplete = useCallback(() => {
+    lastSplashCompletedAtRef.current = Date.now();
+    setIsSplashVisible(false);
+    if (authTransitionMode === "post-login") {
+      clearAuthTransitionMode();
+    }
+  }, [authTransitionMode, clearAuthTransitionMode]);
+
+  const renderMainNavigator = () => {
+    if (isAuthenticated) {
+      switch (effectiveRole) {
+        case "customer":
+          if (!profileCompleted) {
+            return (
+              <AuthNavigator
+                initialRouteName="CompleteProfile"
+                initialRouteParams={authInitialParams}
+              />
+            );
+          }
+          return <CustomerStack />;
+        case "driver":
+          return <DriverNavigator />;
+        case "manager":
+          return <ManagerNavigator />;
+        case "admin":
+          return <AdminNavigator />;
+        default:
           return (
             <AuthNavigator
-              initialRouteName="CompleteProfile"
+              initialRouteName={authInitialRoute}
               initialRouteParams={authInitialParams}
             />
           );
-        }
-        return <CustomerStack />;
-      case "driver":
-        return <DriverNavigator />;
-      case "manager":
-        return <ManagerNavigator />;
-      case "admin":
-        return <AdminNavigator />;
-      default:
-        // If role is unknown but authenticated, default to Auth or a generic error
-        return (
-          <AuthNavigator
-            initialRouteName={authInitialRoute}
-            initialRouteParams={authInitialParams}
-          />
-        );
+      }
     }
-  }
 
-  // Otherwise show Auth screens
+    return (
+      <AuthNavigator
+        initialRouteName={authInitialRoute}
+        initialRouteParams={authInitialParams}
+      />
+    );
+  };
+
   return (
-    <AuthNavigator
-      initialRouteName={authInitialRoute}
-      initialRouteParams={authInitialParams}
-    />
+    <View style={styles.root}>
+      {renderMainNavigator()}
+      {shouldShowStartupSplash && (
+        <View style={styles.startupSplashOverlay} pointerEvents="auto">
+          <SplashScreen
+            key={`startup-splash-${splashCycle}`}
+            onComplete={handleSplashComplete}
+          />
+        </View>
+      )}
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+  startupSplashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 999,
+  },
+});

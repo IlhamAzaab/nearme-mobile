@@ -16,10 +16,10 @@ import { DriverProfileLoadingSkeleton } from "../../components/driver/DriverAppL
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
 
-const DRIVER_PRIVACY_POLICY_URL = "https://radiant-melba-e986f5.netlify.app";
-const DRIVER_TERMS_URL = "https://glittering-banoffee-2a68ab.netlify.app";
+const DRIVER_PRIVACY_POLICY_URL = "https://frabjous-douhua-6c3f75.netlify.app/";
+const DRIVER_TERMS_URL = "https://friendly-torrone-f06da3.netlify.app/";
 const DRIVER_CODE_OF_CONDUCT_URL = "https://gleeful-dasik-6183d2.netlify.app";
-const DRIVER_HELP_SUPPORT_URL = "https://brilliant-druid-8aaa8f.netlify.app";
+const DRIVER_HELP_SUPPORT_URL = "https://fluffy-kleicha-35881e.netlify.app/";
 
 function pickFirstValue(source, keys, fallback = "-") {
   for (const key of keys) {

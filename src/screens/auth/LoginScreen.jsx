@@ -5,7 +5,6 @@ import {
   Alert,
   Animated,
   Dimensions,
-  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -27,7 +26,6 @@ import pushNotificationService from "../../services/pushNotificationService";
 import { persistAuthSession } from "../../lib/authStorage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
 const WEB_CARD_MAX_WIDTH = 560;
 const WEB_LOGO_SIZE = 220;
@@ -78,13 +76,9 @@ export default function LoginScreen({ navigation }) {
   const [showPassword, setShowPassword] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
 
   // shake animation
   const shakeX = useRef(new Animated.Value(0)).current;
-  const transitionTranslateY = useRef(
-    new Animated.Value(SCREEN_HEIGHT),
-  ).current;
 
   const triggerShake = () => {
     shakeX.setValue(0);
@@ -267,19 +261,7 @@ export default function LoginScreen({ navigation }) {
 
       setIsLoading(false);
       preparePostLoginTransition();
-      transitionTranslateY.setValue(SCREEN_HEIGHT);
-      setIsTransitioning(true);
-
-      Animated.timing(transitionTranslateY, {
-        toValue: 0,
-        duration: 420,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start(async ({ finished }) => {
-        if (!finished) return;
-        // Refresh auth state after the transition so splash starts immediately next.
-        await refreshAuthState();
-      });
+      await refreshAuthState();
     } catch (error) {
       console.error("Login error:", error);
       setIsLoading(false);
@@ -492,16 +474,6 @@ export default function LoginScreen({ navigation }) {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
-
-      {isTransitioning && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.transitionOverlay,
-            { transform: [{ translateY: transitionTranslateY }] },
-          ]}
-        />
-      )}
     </View>
   );
 }
@@ -676,12 +648,5 @@ const styles = StyleSheet.create({
     color: "#06C168",
     fontWeight: "800",
     fontSize: 14,
-  },
-
-  /* Transition overlay */
-  transitionOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 100,
-    backgroundColor: "#06C168",
   },
 });

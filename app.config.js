@@ -1,16 +1,28 @@
+const BRAND_ASSETS = {
+  appIcon: "./assets/branding/app-icon.png",
+  iosIcon: "./assets/branding/ios-icon.png",
+  androidAdaptiveForeground:
+    "./assets/branding/android-adaptive-foreground.png",
+  androidAdaptiveMonochrome:
+    "./assets/branding/android-adaptive-monochrome.png",
+  splashLogo: "./assets/branding/splash-logo.png",
+  favicon: "./assets/branding/favicon.png",
+};
+
 export default {
   expo: {
     name: "nearme-mobile",
     slug: "nearme-mobile",
     version: "1.0.1",
     orientation: "portrait",
-    icon: "./assets/images/icon.png",
+    icon: BRAND_ASSETS.appIcon,
     scheme: "nearmemobile",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.nearme.mobile",
+      icon: BRAND_ASSETS.iosIcon,
       infoPlist: {
         UIBackgroundModes: ["remote-notification", "location"],
         NSLocationWhenInUseUsageDescription:
@@ -27,9 +39,8 @@ export default {
         process.env.GOOGLE_SERVICES_JSON || "./google-services.json",
       adaptiveIcon: {
         backgroundColor: "#E6F4FE",
-        foregroundImage: "./assets/images/android-icon-foreground.png",
-        backgroundImage: "./assets/images/android-icon-background.png",
-        monochromeImage: "./assets/images/android-icon-monochrome.png",
+        foregroundImage: BRAND_ASSETS.androidAdaptiveForeground,
+        monochromeImage: BRAND_ASSETS.androidAdaptiveMonochrome,
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
@@ -46,18 +57,18 @@ export default {
     },
     web: {
       output: "single",
-      favicon: "./assets/images/favicon.png",
+      favicon: BRAND_ASSETS.favicon,
     },
     plugins: [
       [
         "expo-splash-screen",
         {
-          image: "./assets/images/splash-icon.png",
+          image: BRAND_ASSETS.splashLogo,
           imageWidth: 200,
           resizeMode: "contain",
-          backgroundColor: "#ffffff",
+          backgroundColor: "#06C168",
           dark: {
-            backgroundColor: "#000000",
+            backgroundColor: "#06C168",
           },
         },
       ],

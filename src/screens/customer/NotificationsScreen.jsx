@@ -108,32 +108,6 @@ function humanizeStatus(status) {
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
-function getStatusScreenName(status) {
-  const normalized = String(status || "").toLowerCase().trim();
-
-  switch (normalized) {
-    case "placed":
-      return "PlacingOrder";
-    case "pending":
-    case "received":
-    case "preparing":
-    case "ready":
-      return "OrderReceived";
-    case "accepted":
-    case "driver_accepted":
-    case "driver_assigned":
-      return "DriverAccepted";
-    case "picked_up":
-      return "OrderPickedUp";
-    case "on_the_way":
-      return "OrderOnTheWay";
-    case "delivered":
-      return "OrderDelivered";
-    default:
-      return "OrderReceived";
-  }
-}
-
 function buildItemsFromOrder(order) {
   const items = order?.order_items || order?.items || [];
   if (!Array.isArray(items)) return [];
@@ -530,12 +504,21 @@ export default function NotificationsScreen({ navigation, route }) {
                 </Text>
               </View>
 
-              {selectedNotification?.orderId ? (
+              {(selectedNotification?.order?.order_number ||
+                selectedNotification?.payload?.order_number ||
+                selectedNotification?.payload?.orderNumber ||
+                selectedNotification?.item?.order_number) ? (
                 <>
                   <View style={st.reportDivider} />
                   <View style={st.reportRow}>
-                    <Text style={st.reportLabel}>Order ID</Text>
-                    <Text style={st.reportValue}>{selectedNotification.orderId}</Text>
+                    <Text style={st.reportLabel}>Order Number</Text>
+                    <Text style={st.reportValue}>
+                      {selectedNotification?.order?.order_number ||
+                        selectedNotification?.payload?.order_number ||
+                        selectedNotification?.payload?.orderNumber ||
+                        selectedNotification?.item?.order_number ||
+                        "-"}
+                    </Text>
                   </View>
                 </>
               ) : null}
@@ -596,37 +579,6 @@ export default function NotificationsScreen({ navigation, route }) {
             })()}
 
             <View style={st.modalActions}>
-              {selectedNotification?.orderId ? (
-                <Pressable
-                  style={({ pressed }) => [
-                    st.trackBtn,
-                    pressed && st.actionPressed,
-                  ]}
-                  onPress={() => {
-                    const orderId = selectedNotification?.orderId;
-                    const status =
-                      selectedNotification?.order?.effective_status ||
-                      selectedNotification?.order?.delivery_status ||
-                      selectedNotification?.order?.status ||
-                      selectedNotification?.payload?.effective_status ||
-                      selectedNotification?.payload?.delivery_status ||
-                      selectedNotification?.payload?.status ||
-                      selectedNotification?.item?.status;
-                    const target = getStatusScreenName(status);
-                    closeNotificationDetails();
-                    if (orderId) {
-                      navigation.navigate(target, {
-                        orderId,
-                        status,
-                        statusScreenMode: true,
-                      });
-                    }
-                  }}
-                >
-                  <Text style={st.trackBtnText}>Track Order</Text>
-                </Pressable>
-              ) : null}
-
               <Pressable
                 style={({ pressed }) => [
                   st.closeBtn,
@@ -852,18 +804,6 @@ const st = StyleSheet.create({
     paddingHorizontal: 18,
     justifyContent: "center",
   },
-  modalCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#111827",
-  },
   modalMessage: {
     marginTop: 10,
     fontSize: 14,
@@ -998,17 +938,6 @@ const st = StyleSheet.create({
     justifyContent: "flex-end",
     gap: 10,
     marginTop: 16,
-  },
-  trackBtn: {
-    backgroundColor: "#06C168",
-    borderRadius: 12,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-  },
-  trackBtnText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
   },
   closeBtn: {
     backgroundColor: "#F3F4F6",

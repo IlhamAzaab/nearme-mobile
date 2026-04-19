@@ -14,7 +14,6 @@ import wrapCustomerScreen from "./wrapCustomerScreen";
 
 const Stack = createNativeStackNavigator();
 
-const CustomerTabsAnimated = wrapCustomerScreen(CustomerTabs);
 const CheckoutScreenAnimated = wrapCustomerScreen(CheckoutScreen);
 const PlacingOrderScreenAnimated = wrapCustomerScreen(PlacingOrderScreen);
 const OrderReceivedScreenAnimated = wrapCustomerScreen(OrderReceivedScreen);
@@ -37,7 +36,7 @@ const customerRootStackScreenOptions = {
 export default function CustomerStack() {
   return (
     <Stack.Navigator screenOptions={customerRootStackScreenOptions}>
-      <Stack.Screen name="MainTabs" component={CustomerTabsAnimated} />
+      <Stack.Screen name="MainTabs" component={CustomerTabs} />
       <Stack.Screen name="Checkout" component={CheckoutScreenAnimated} />
       <Stack.Screen
         name="PlacingOrder"

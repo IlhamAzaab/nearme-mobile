@@ -16,11 +16,16 @@ import { useAuth } from "../../app/providers/AuthProvider";
 import OptimizedImage from "../../components/common/OptimizedImage";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const getProfilePicCacheKey = (userId) =>
+  userId ? `@profile_pic:${String(userId)}` : "@profile_pic";
 
 /* ─────────────────────── PROFILE SCREEN ─────────────────────── */
 
 export default function ProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
+  const profilePicCacheKey = getProfilePicCacheKey(user?.id);
   const [profilePic, setProfilePic] = useState(null);
   const [phone, setPhone] = useState(null);
   const [email, setEmail] = useState("");
@@ -40,10 +45,16 @@ export default function ProfileScreen({ navigation }) {
   const fetchProfile = useCallback(async () => {
     setProfileLoading(true);
     try {
+      const cachedProfilePic = await AsyncStorage.getItem(profilePicCacheKey);
+      if (cachedProfilePic) {
+        setProfilePic(cachedProfilePic);
+      }
+
       const token = await getAccessToken();
       if (!token) {
         setPhone("");
         setEmail("");
+        setProfilePic(cachedProfilePic || null);
         setSavedAddress({
           address: "",
           city: "",
@@ -68,7 +79,8 @@ export default function ProfileScreen({ navigation }) {
       const lat = Number(customer?.latitude);
       const lng = Number(customer?.longitude);
 
-      setProfilePic(resolvedProfilePic);
+      const profilePicToShow = cachedProfilePic || resolvedProfilePic || null;
+      setProfilePic(profilePicToShow);
       setPhone(resolvedPhone);
       setEmail(resolvedEmail);
       setSavedAddress({
@@ -77,12 +89,19 @@ export default function ProfileScreen({ navigation }) {
         latitude: Number.isFinite(lat) ? lat : null,
         longitude: Number.isFinite(lng) ? lng : null,
       });
+
+      if (resolvedProfilePic) {
+        await AsyncStorage.multiSet([
+          [profilePicCacheKey, resolvedProfilePic],
+          ["@profile_pic", resolvedProfilePic],
+        ]);
+      }
     } catch (error) {
       console.error("Failed to load customer profile:", error);
     } finally {
       setProfileLoading(false);
     }
-  }, [user?.email]);
+  }, [profilePicCacheKey, user?.email]);
 
   useFocusEffect(
     useCallback(() => {

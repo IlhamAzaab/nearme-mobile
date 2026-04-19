@@ -2450,7 +2450,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
             <View style={st.reportDivider} />
 
             <View style={st.reportRow}>
-              <Text style={st.reportLabel}>Order ID</Text>
+              <Text style={st.reportLabel}>Order Number</Text>
               <Text style={st.reportValue} numberOfLines={1}>
                 {orderNumber}
               </Text>
