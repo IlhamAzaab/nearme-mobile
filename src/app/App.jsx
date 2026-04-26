@@ -11,6 +11,7 @@ import {
   StatusBar,
 } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import AppErrorBoundary from "../components/common/AppErrorBoundary";
 import UrgentNotificationModal from "../components/common/UrgentNotificationModal";
 import DeliveryNotificationOverlay from "../components/driver/DeliveryNotificationOverlay";
 import { API_URL } from "../config/env";
@@ -31,6 +32,10 @@ import { mobileQueryClient } from "../lib/queryClient";
 import RootNavigator from "../navigation/RootNavigator";
 import orderTrackingService from "../services/orderTrackingService";
 import pushNotificationService from "../services/pushNotificationService";
+import {
+  DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
+  getCurrentDriverScopedCacheKey,
+} from "../utils/driverRequestCache";
 import { AuthProvider, useAuth } from "./providers/AuthProvider";
 import { NotificationProvider } from "./providers/NotificationProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
@@ -206,9 +211,14 @@ function DriverNotificationLayer({ navigationRef }) {
 
     const readDriverLocation = async () => {
       try {
-        const cachedRaw = await AsyncStorage.getItem(
-          "available_deliveries_cache",
+        const scopedKey = await getCurrentDriverScopedCacheKey(
+          DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
         );
+        const cachedRaw =
+          (await AsyncStorage.getItem(scopedKey)) ||
+          (await AsyncStorage.getItem(
+            DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
+          ));
         if (!cachedRaw || !mounted) return;
         const parsed = JSON.parse(cachedRaw);
         const cachedLocation = parsed?.data?.driverLocation || null;
@@ -802,20 +812,24 @@ export default function App() {
               <NotificationProvider>
                 <OrderProvider>
                   <RealtimeProviders>
-                    <NavigationContainer ref={navigationRef}>
-                      <RootNavigator />
-                      <DriverNotificationLayer navigationRef={navigationRef} />
-                      {/* Urgent notification modal - renders above everything */}
-                      <UrgentNotificationModal
-                        visible={shouldShowUrgentModal}
-                        title={urgentNotification?.title}
-                        body={urgentNotification?.body}
-                        data={urgentNotification?.data}
-                        onAccept={handleAcceptUrgent}
-                        onReject={handleRejectUrgent}
-                        onDismiss={handleDismissUrgent}
-                      />
-                    </NavigationContainer>
+                    <AppErrorBoundary scope="Navigation tree">
+                      <NavigationContainer ref={navigationRef}>
+                        <RootNavigator />
+                        <DriverNotificationLayer
+                          navigationRef={navigationRef}
+                        />
+                        {/* Urgent notification modal - renders above everything */}
+                        <UrgentNotificationModal
+                          visible={shouldShowUrgentModal}
+                          title={urgentNotification?.title}
+                          body={urgentNotification?.body}
+                          data={urgentNotification?.data}
+                          onAccept={handleAcceptUrgent}
+                          onReject={handleRejectUrgent}
+                          onDismiss={handleDismissUrgent}
+                        />
+                      </NavigationContainer>
+                    </AppErrorBoundary>
                   </RealtimeProviders>
                 </OrderProvider>
               </NotificationProvider>

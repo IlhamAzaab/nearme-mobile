@@ -21,7 +21,7 @@ import {
 import Svg, { Path } from "react-native-svg";
 import MeezoLogo from "../../components/common/MeezoLogo";
 import FloatingLabelInput from "../../components/common/FloatingLabelInput";
-import supabase from "../../lib/supabaseClient";
+import { API_BASE_URL } from "../../constants/api";
 import { normalizeSriLankaPhone } from "../../utils/phone";
 import {
   buildSignupFlowState,
@@ -99,25 +99,36 @@ export default function SignupScreen({ navigation }) {
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: normalizedPhone,
-        options: {
-          channel: "sms",
+      const requestOtpRes = await fetch(
+        `${API_BASE_URL}/auth/phone/request-otp`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-client-platform": "react-native",
+          },
+          body: JSON.stringify({ phone: normalizedPhone }),
         },
-      });
+      );
 
-      if (error) {
+      const requestOtpData = await requestOtpRes.json().catch(() => ({}));
+
+      if (!requestOtpRes.ok) {
         triggerShake();
         Alert.alert(
           "Signup failed",
-          error?.message || "Failed to send OTP. Please try again.",
+          requestOtpData?.message || "Failed to send OTP. Please try again.",
         );
         return;
       }
 
+      const resolvedPhone =
+        normalizeSriLankaPhone(requestOtpData?.phone || normalizedPhone) ||
+        normalizedPhone;
+
       const verifyOtpParams = {
-        prefillPhone: normalizedPhone,
-        phone: normalizedPhone,
+        prefillPhone: resolvedPhone,
+        phone: resolvedPhone,
         nextScreen: "CompleteProfile",
       };
 
@@ -136,7 +147,7 @@ export default function SignupScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.pageContainer} edges={["top"]}>
+    <SafeAreaView style={styles.pageContainer} edges={["bottom"]}>
       <KeyboardAvoidingView
         style={styles.pageContainer}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -161,7 +172,11 @@ export default function SignupScreen({ navigation }) {
               colors={["#04753E", "#059B52", "#06C168"]}
               start={{ x: 0.5, y: 0 }}
               end={{ x: 0.5, y: 1 }}
-              style={[styles.greenSection, IS_WEB && styles.greenSectionWeb]}
+              style={[
+                styles.greenSection,
+                IS_WEB && styles.greenSectionWeb,
+                { paddingTop: Platform.OS === "web" ? 72 : insets.top + 42 },
+              ]}
             >
               <View style={styles.bgCircle1} />
               <View style={styles.bgCircle2} />
@@ -292,14 +307,15 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   greenSection: {
-    paddingTop: Platform.OS === "ios" ? 60 : 48,
+    minHeight: 190,
+    justifyContent: "center",
     paddingBottom: 12,
     alignItems: "center",
     overflow: "hidden",
   },
   greenSectionWeb: {
-    paddingTop: 34,
-    paddingBottom: 8,
+    minHeight: 210,
+    paddingBottom: 10,
   },
   bgCircle1: {
     position: "absolute",

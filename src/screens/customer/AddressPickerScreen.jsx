@@ -14,7 +14,6 @@ import {
 } from "react-native-safe-area-context";
 import colors from "../../constants/colors";
 import OSMMapView from "../../components/maps/OSMMapView";
-import SkeletonBlock from "../../components/common/SkeletonBlock";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
 
@@ -22,6 +21,12 @@ const GEOCODE_DEBOUNCE_MS = 700;
 const GEOCODE_TIMEOUT_MS = 6500;
 const MIN_GEOCODE_DISTANCE_METERS = 20;
 const LOCATION_TIMEOUT_MS = 9000;
+const DEFAULT_MAP_REGION = {
+  latitude: 8.5874,
+  longitude: 81.2147,
+  latitudeDelta: 0.045,
+  longitudeDelta: 0.045,
+};
 
 function buildPinMarkerHtml() {
   return (
@@ -59,27 +64,48 @@ function withTimeout(promise, timeoutMs, timeoutMessage) {
 }
 
 function toCoordinates(locationPayload) {
-  const latitude = Number(locationPayload?.coords?.latitude);
-  const longitude = Number(locationPayload?.coords?.longitude);
+  const rawLatitude = locationPayload?.coords?.latitude;
+  const rawLongitude = locationPayload?.coords?.longitude;
+
+  if (
+    rawLatitude === null ||
+    rawLatitude === undefined ||
+    rawLongitude === null ||
+    rawLongitude === undefined
+  ) {
+    return null;
+  }
+
+  const latitude = Number(rawLatitude);
+  const longitude = Number(rawLongitude);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     return null;
   }
   return { latitude, longitude };
 }
 
-export default function AddressPickerScreen({ navigation }) {
+function parseNullableCoordinate(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+export default function AddressPickerScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
   const geocodeTimerRef = useRef(null);
   const lastGeocodePointRef = useRef(null);
   const geocodeRequestIdRef = useRef(0);
   const geocodeCacheRef = useRef(new Map());
+  const hasManualPinRef = useRef(false);
+  const hasProfilePinRef = useRef(false);
   const addressLabelRef = useRef("Loading address...");
-  const [initialRegion, setInitialRegion] = useState(null);
+  const [initialRegion, setInitialRegion] = useState(DEFAULT_MAP_REGION);
   const [currentCoordinate, setCurrentCoordinate] = useState(null);
   const [addressLabel, setAddressLabel] = useState("Loading address...");
   const [addressCity, setAddressCity] = useState("");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [showUserLocationMarker, setShowUserLocationMarker] = useState(false);
@@ -256,81 +282,100 @@ export default function AddressPickerScreen({ navigation }) {
 
   useEffect(() => {
     (async () => {
-      setLoading(true);
       try {
-        let { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") {
-          setAddressLabel("Permission to access location was denied");
-          setLoading(false);
+        const token = await getAccessToken();
+        if (token) {
+          const profileRes = await fetch(
+            `${API_BASE_URL}/cart/customer-profile`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
+          const profileJson = await profileRes.json().catch(() => ({}));
+          const customer = profileJson?.customer || {};
+          const savedLat = parseNullableCoordinate(customer?.latitude);
+          const savedLng = parseNullableCoordinate(customer?.longitude);
+
+          if (savedLat !== null && savedLng !== null) {
+            hasProfilePinRef.current = true;
+            const savedCoordinate = {
+              latitude: savedLat,
+              longitude: savedLng,
+            };
+            setCurrentCoordinate(savedCoordinate);
+            setInitialRegion({
+              ...savedCoordinate,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            });
+
+            if (customer?.address) {
+              setAddressLabel(String(customer.address));
+            }
+            if (customer?.city) {
+              setAddressCity(String(customer.city));
+            }
+
+            if (!customer?.address || !customer?.city) {
+              reverseGeocode(savedLat, savedLng, {
+                force: true,
+                showLoading: true,
+              });
+            }
+          }
+        }
+
+        let permission = await Location.getForegroundPermissionsAsync();
+        if (permission.status !== "granted") {
+          permission = await Location.requestForegroundPermissionsAsync();
+        }
+        if (permission.status !== "granted") {
+          setAddressLabel(
+            "Location permission denied. Tap map to pin manually.",
+          );
           return;
         }
 
-        let startLocation;
-
-        try {
-          startLocation = await getReliableCurrentLocation({
-            preferFresh: true,
-          });
-        } catch (liveError) {
-          console.warn(
-            "Live location on entry failed, trying profile pin:",
-            liveError,
-          );
-          const token = await getAccessToken();
-          if (token) {
-            const profileRes = await fetch(
-              `${API_BASE_URL}/cart/customer-profile`,
-              {
-                headers: { Authorization: `Bearer ${token}` },
-              },
-            );
-            const profileJson = await profileRes.json().catch(() => ({}));
-            const customer = profileJson?.customer || {};
-            const savedLat = Number(customer?.latitude);
-            const savedLng = Number(customer?.longitude);
-
-            if (Number.isFinite(savedLat) && Number.isFinite(savedLng)) {
-              startLocation = {
-                latitude: savedLat,
-                longitude: savedLng,
-              };
-              if (customer?.address) setAddressLabel(String(customer.address));
-              if (customer?.city) setAddressCity(String(customer.city));
-            }
-          }
-
-          if (!startLocation) {
-            throw liveError;
-          }
-        }
-
-        reverseGeocode(startLocation.latitude, startLocation.longitude, {
-          force: true,
-          showLoading: true,
+        const liveLocation = await getReliableCurrentLocation({
+          preferFresh: true,
         });
 
-        const region = {
-          latitude: startLocation.latitude,
-          longitude: startLocation.longitude,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        };
-
-        setInitialRegion(region);
-        setCurrentCoordinate(startLocation);
-        setUserLocation(startLocation);
+        setUserLocation(liveLocation);
         setShowUserLocationMarker(true);
+
+        if (!hasProfilePinRef.current && !hasManualPinRef.current) {
+          setCurrentCoordinate(liveLocation);
+          setInitialRegion({
+            ...liveLocation,
+            latitudeDelta: 0.008,
+            longitudeDelta: 0.008,
+          });
+          reverseGeocode(liveLocation.latitude, liveLocation.longitude, {
+            force: true,
+            showLoading: true,
+          });
+        }
+
+        if (
+          !hasManualPinRef.current &&
+          !hasProfilePinRef.current &&
+          mapRef.current?.animateToRegion
+        ) {
+          mapRef.current.animateToRegion(
+            {
+              latitude: liveLocation.latitude,
+              longitude: liveLocation.longitude,
+              latitudeDelta: 0.008,
+              longitudeDelta: 0.008,
+            },
+            700,
+          );
+        }
       } catch (error) {
         console.error("Location error:", error);
-        if (
-          String(error?.message || "").includes("location_permission_denied")
-        ) {
-          setAddressLabel("Location permission denied");
-        } else {
-          setAddressLabel("Could not fetch location");
-        }
-      } finally {
-        setLoading(false);
+        setAddressLabel(
+          "Could not fetch live location. Tap map to pin manually.",
+        );
       }
     })();
   }, [getReliableCurrentLocation, reverseGeocode]);
@@ -355,6 +400,7 @@ export default function AddressPickerScreen({ navigation }) {
     const longitude = Number(event?.nativeEvent?.coordinate?.longitude);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 
+    hasManualPinRef.current = true;
     setCurrentCoordinate({ latitude, longitude });
     scheduleReverseGeocode(latitude, longitude, {
       force: true,
@@ -371,15 +417,6 @@ export default function AddressPickerScreen({ navigation }) {
         throw new Error("Session expired");
       }
 
-      const profileRes = await fetch(`${API_BASE_URL}/cart/customer-profile`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const profileJson = await profileRes.json().catch(() => ({}));
-      const existingAddress = String(
-        profileJson?.customer?.address || "",
-      ).trim();
-      const existingCity = String(profileJson?.customer?.city || "").trim();
-
       const saveRes = await fetch(`${API_BASE_URL}/customer/address`, {
         method: "PUT",
         headers: {
@@ -387,8 +424,6 @@ export default function AddressPickerScreen({ navigation }) {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          address: existingAddress || null,
-          city: existingCity || null,
           latitude: currentCoordinate.latitude,
           longitude: currentCoordinate.longitude,
         }),
@@ -398,6 +433,14 @@ export default function AddressPickerScreen({ navigation }) {
         throw new Error(saveJson?.message || "Failed to save location pin");
       }
 
+      const redirectTo = route?.params?.redirectTo;
+      const redirectCartId = route?.params?.cartId;
+
+      if (redirectTo === "Checkout" && redirectCartId) {
+        navigation.replace("Checkout", { cartId: redirectCartId });
+        return;
+      }
+
       navigation.goBack();
     } catch (error) {
       console.error("Error saving address:", error);
@@ -405,40 +448,6 @@ export default function AddressPickerScreen({ navigation }) {
       setSaving(false);
     }
   };
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#06C168" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Select Delivery Address</Text>
-        </View>
-
-        <View style={styles.loadingContainer}>
-          <SkeletonBlock width="92%" height="64%" borderRadius={24} />
-          <View style={styles.loadingBottomSheet}>
-            <SkeletonBlock
-              width="44%"
-              height={14}
-              style={{ marginBottom: 10 }}
-            />
-            <SkeletonBlock
-              width="86%"
-              height={18}
-              style={{ marginBottom: 10 }}
-            />
-            <SkeletonBlock width="100%" height={50} borderRadius={12} />
-          </View>
-          <Text style={styles.loadingText}>Fetching location...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
@@ -454,34 +463,32 @@ export default function AddressPickerScreen({ navigation }) {
       </View>
 
       <View style={styles.mapContainer}>
-        {initialRegion && (
-          <OSMMapView
-            ref={mapRef}
-            style={styles.map}
-            initialRegion={initialRegion}
-            onPress={handleMapPress}
-            onRegionChangeComplete={handleRegionChangeComplete}
-            showsUserLocation={showUserLocationMarker}
-            userLocation={userLocation}
-            markers={
-              currentCoordinate
-                ? [
-                    {
-                      id: "delivery-pin",
-                      coordinate: currentCoordinate,
-                      type: "customer",
-                      title: "Pinned delivery location",
-                      emoji: "",
-                      customHtml: buildPinMarkerHtml(),
-                      iconOnly: true,
-                      iconSize: [52, 52],
-                      iconAnchor: [26, 52],
-                    },
-                  ]
-                : []
-            }
-          />
-        )}
+        <OSMMapView
+          ref={mapRef}
+          style={styles.map}
+          initialRegion={initialRegion}
+          onPress={handleMapPress}
+          onRegionChangeComplete={handleRegionChangeComplete}
+          showsUserLocation={showUserLocationMarker}
+          userLocation={userLocation}
+          markers={
+            currentCoordinate
+              ? [
+                  {
+                    id: "delivery-pin",
+                    coordinate: currentCoordinate,
+                    type: "customer",
+                    title: "Pinned delivery location",
+                    emoji: "",
+                    customHtml: buildPinMarkerHtml(),
+                    iconOnly: true,
+                    iconSize: [52, 52],
+                    iconAnchor: [26, 52],
+                  },
+                ]
+              : []
+          }
+        />
       </View>
 
       {/* Bottom Panel */}
@@ -517,25 +524,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  loadingBottomSheet: {
-    width: "92%",
-    backgroundColor: "#FFFFFF",
-    marginTop: 12,
-    borderRadius: 20,
-    padding: 16,
-  },
-  loadingText: {
-    marginTop: 10,
-    color: colors.textDetails,
-    fontSize: 15,
-    fontWeight: "600",
   },
   header: {
     flexDirection: "row",

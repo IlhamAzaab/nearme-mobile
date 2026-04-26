@@ -35,6 +35,11 @@ const DRIVER_DRAWER_ITEMS = [
     label: "Verify Driver",
     icon: "checkmark-circle-outline",
   },
+  {
+    route: "DriverRenewedDocuments",
+    label: "Renewed Documents",
+    icon: "document-text-outline",
+  },
   { route: "AddDriver", label: "Add Driver", icon: "person-add-outline" },
 ];
 

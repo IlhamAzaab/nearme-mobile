@@ -25,6 +25,37 @@ const MUTED = "#64748B";
 const BORDER = "#F1F5F9";
 const BG = "#F8FAFC";
 
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+function hasValidCoordinates(latitude, longitude) {
+  if (
+    latitude === null ||
+    latitude === undefined ||
+    longitude === null ||
+    longitude === undefined
+  ) {
+    return false;
+  }
+
+  if (
+    (typeof latitude === "string" && latitude.trim() === "") ||
+    (typeof longitude === "string" && longitude.trim() === "")
+  ) {
+    return false;
+  }
+
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
+
 export default function CartScreen({ navigation, route }) {
   const [carts, setCarts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,28 +63,35 @@ export default function CartScreen({ navigation, route }) {
   const [updatingItem, setUpdatingItem] = useState(null);
   const [selectedCartId, setSelectedCartId] = useState(null);
 
+  const safeCarts = asArray(carts);
+
   const selectedCart = useMemo(
-    () => carts.find((c) => c.id === selectedCartId) || null,
-    [carts, selectedCartId],
+    () =>
+      safeCarts.find((c) => String(c?.id) === String(selectedCartId)) || null,
+    [safeCarts, selectedCartId],
   );
 
   const cartCount = useMemo(() => {
-    return (carts || []).reduce((sum, cart) => {
+    return safeCarts.reduce((sum, cart) => {
       return (
-        sum + (cart.items || []).reduce((s, it) => s + (it.quantity || 0), 0)
+        sum +
+        asArray(cart?.items).reduce((s, it) => s + Number(it?.quantity || 0), 0)
       );
     }, 0);
-  }, [carts]);
+  }, [safeCarts]);
 
   // Handle Buy Now navigation — auto-select the specific restaurant cart
   useEffect(() => {
-    if (route?.params?.buyNowTs) {
-      const rid = route?.params?.buyNowRestaurantId;
+    if (route?.params?.buyNowTs || route?.params?.menuCartTs) {
+      const rid =
+        route?.params?.buyNowRestaurantId || route?.params?.restaurantId;
       const cid = route?.params?.buyNowCartId;
       navigation.setParams({
         buyNowCartId: undefined,
         buyNowRestaurantId: undefined,
         buyNowTs: undefined,
+        restaurantId: undefined,
+        menuCartTs: undefined,
       });
       fetchCarts(true, { autoSelectCartId: cid, autoSelectRestaurantId: rid });
     } else {
@@ -75,17 +113,20 @@ export default function CartScreen({ navigation, route }) {
 
   // If Buy Now params arrive while screen is already mounted, handle them
   useEffect(() => {
-    if (route?.params?.buyNowTs) {
-      const rid = route?.params?.buyNowRestaurantId;
+    if (route?.params?.buyNowTs || route?.params?.menuCartTs) {
+      const rid =
+        route?.params?.buyNowRestaurantId || route?.params?.restaurantId;
       const cid = route?.params?.buyNowCartId;
       navigation.setParams({
         buyNowCartId: undefined,
         buyNowRestaurantId: undefined,
         buyNowTs: undefined,
+        restaurantId: undefined,
+        menuCartTs: undefined,
       });
       fetchCarts(true, { autoSelectCartId: cid, autoSelectRestaurantId: rid });
     }
-  }, [route?.params?.buyNowTs]);
+  }, [route?.params?.buyNowTs, route?.params?.menuCartTs]);
 
   const fetchCarts = async (showLoading = true, opts = null) => {
     try {
@@ -117,7 +158,7 @@ export default function CartScreen({ navigation, route }) {
 
       if (!res.ok) throw new Error(data.message || "Failed to fetch cart");
 
-      const fetchedCarts = data.carts || [];
+      const fetchedCarts = asArray(data.carts);
       setCarts(fetchedCarts);
       prefetchImageUrls(
         fetchedCarts
@@ -132,22 +173,42 @@ export default function CartScreen({ navigation, route }) {
       const { autoSelectCartId, autoSelectRestaurantId } = opts || {};
       if (
         autoSelectCartId &&
-        fetchedCarts.some((c) => c.id === autoSelectCartId)
+        fetchedCarts.some((c) => String(c?.id) === String(autoSelectCartId))
       ) {
         setSelectedCartId(autoSelectCartId);
       } else if (autoSelectRestaurantId) {
         const match = fetchedCarts.find(
           (c) => String(c.restaurant_id) === String(autoSelectRestaurantId),
         );
-        if (match) setSelectedCartId(match.id);
+        if (match) {
+          setSelectedCartId(match.id);
+        } else {
+          setSelectedCartId(null);
+        }
       } else {
         const paramCartId = route?.params?.cartId;
-        if (paramCartId && fetchedCarts.some((c) => c.id === paramCartId)) {
+        const paramRestaurantId = route?.params?.restaurantId;
+        if (
+          paramCartId &&
+          fetchedCarts.some((c) => String(c?.id) === String(paramCartId))
+        ) {
           setSelectedCartId(paramCartId);
           navigation.setParams({ cartId: undefined });
+        } else if (paramRestaurantId) {
+          const match = fetchedCarts.find(
+            (c) => String(c.restaurant_id) === String(paramRestaurantId),
+          );
+          if (match) {
+            setSelectedCartId(match.id);
+          } else {
+            setSelectedCartId(null);
+          }
+          navigation.setParams({ restaurantId: undefined });
         } else {
           setSelectedCartId((prev) =>
-            fetchedCarts.some((c) => c.id === prev) ? prev : null,
+            fetchedCarts.some((c) => String(c?.id) === String(prev))
+              ? prev
+              : null,
           );
         }
       }
@@ -196,9 +257,9 @@ export default function CartScreen({ navigation, route }) {
 
       // Instant optimistic UI update
       setCarts((prev) =>
-        prev.map((cart) => ({
+        asArray(prev).map((cart) => ({
           ...cart,
-          items: (cart.items || []).map((item) =>
+          items: asArray(cart?.items).map((item) =>
             item.id === itemId ? { ...item, quantity: newQty } : item,
           ),
         })),
@@ -225,9 +286,9 @@ export default function CartScreen({ navigation, route }) {
       if (text === "" || text === "0") {
         // Allow empty/zero while typing, but don't sync yet
         setCarts((prev) =>
-          prev.map((cart) => ({
+          asArray(prev).map((cart) => ({
             ...cart,
-            items: (cart.items || []).map((item) =>
+            items: asArray(cart?.items).map((item) =>
               item.id === itemId
                 ? { ...item, quantity: text === "" ? "" : 0 }
                 : item,
@@ -263,12 +324,14 @@ export default function CartScreen({ navigation, route }) {
           // Optimistic update: remove the item from UI instantly
           const previousCarts = carts;
           setCarts((prev) =>
-            prev
+            asArray(prev)
               .map((cart) => ({
                 ...cart,
-                items: (cart.items || []).filter((item) => item.id !== itemId),
+                items: asArray(cart?.items).filter(
+                  (item) => item.id !== itemId,
+                ),
               }))
-              .filter((cart) => (cart.items || []).length > 0),
+              .filter((cart) => asArray(cart?.items).length > 0),
           );
 
           try {
@@ -321,8 +384,53 @@ export default function CartScreen({ navigation, route }) {
     ]);
   };
 
-  const goCheckout = (cartId) => {
-    navigation.navigate("Checkout", { cartId });
+  const goCheckout = async (cartId) => {
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        Alert.alert("Login required", "Please login to continue");
+        return;
+      }
+
+      const profileRes = await fetch(`${API_BASE_URL}/cart/customer-profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!profileRes.ok) {
+        navigation.navigate("AddressPicker", {
+          cartId,
+          redirectTo: "Checkout",
+        });
+        return;
+      }
+
+      const profileData = await profileRes.json().catch(() => ({}));
+
+      const customer = profileData?.customer || {};
+      const hasSavedPin = hasValidCoordinates(
+        customer?.latitude,
+        customer?.longitude,
+      );
+
+      if (hasSavedPin) {
+        navigation.navigate("Checkout", { cartId });
+        return;
+      }
+
+      navigation.navigate("AddressPicker", {
+        cartId,
+        redirectTo: "Checkout",
+      });
+    } catch (checkoutNavError) {
+      console.error(
+        "Checkout pre-check failed, redirecting to map pin:",
+        checkoutNavError,
+      );
+      navigation.navigate("AddressPicker", {
+        cartId,
+        redirectTo: "Checkout",
+      });
+    }
   };
 
   // ============================================================================
@@ -481,6 +589,7 @@ export default function CartScreen({ navigation, route }) {
     const itemCount =
       selectedCart?.item_count || selectedCart?.items?.length || 0;
     const itemSubtotal = Number(selectedCart?.cart_total) || 0;
+    const selectedItems = asArray(selectedCart?.items);
 
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -522,13 +631,12 @@ export default function CartScreen({ navigation, route }) {
 
           {/* Food Items */}
           <View style={styles.itemsList}>
-            {(selectedCart.items || []).map((item, idx) => (
+            {selectedItems.map((item, idx) => (
               <View
-                key={item.id}
+                key={String(item?.id || idx)}
                 style={[
                   styles.itemRow,
-                  idx < (selectedCart.items || []).length - 1 &&
-                    styles.itemRowBorder,
+                  idx < selectedItems.length - 1 && styles.itemRowBorder,
                 ]}
               >
                 <OptimizedImage
@@ -685,7 +793,7 @@ export default function CartScreen({ navigation, route }) {
         <Text style={styles.sectionTitle}>Active Restaurants</Text>
 
         <FlatList
-          data={carts}
+          data={safeCarts}
           keyExtractor={(it) => String(it.id)}
           contentContainerStyle={{ paddingBottom: 18 }}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}

@@ -17,7 +17,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import FreeMapView from "../../../components/maps/FreeMapView";
+import OSMMapView from "../../../components/maps/OSMMapView";
 import { API_URL } from "../../../config/env";
 import { getAccessToken } from "../../../lib/authStorage";
 
@@ -26,6 +26,41 @@ const KINNIYA_BUHARI_JUNCTION = {
   latitude: 8.5017,
   longitude: 81.186,
 };
+
+const DEFAULT_MAP_REGION = {
+  latitude: KINNIYA_BUHARI_JUNCTION.latitude,
+  longitude: KINNIYA_BUHARI_JUNCTION.longitude,
+  latitudeDelta: 0.045,
+  longitudeDelta: 0.045,
+};
+
+const GEOCODE_DEBOUNCE_MS = 500;
+const LOCATION_TIMEOUT_MS = 9000;
+
+function toCoordinatePair(locationPayload) {
+  const latitude = Number(locationPayload?.coords?.latitude);
+  const longitude = Number(locationPayload?.coords?.longitude);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
+
+function formatReverseGeocodeResult(place) {
+  if (!place) return "Unknown location";
+
+  const parts = [
+    place.name,
+    place.street,
+    place.city || place.subregion || place.region,
+  ]
+    .filter((value) => String(value || "").trim().length > 0)
+    .map((value) => String(value).trim());
+
+  return parts.join(", ") || "Unknown location";
+}
 
 // Step Progress Bar Component
 function StepProgress({ currentStep, totalSteps }) {
@@ -359,6 +394,8 @@ const timePickerStyles = StyleSheet.create({
 export default function Step2() {
   const navigation = useNavigation();
   const mapRef = useRef(null);
+  const geocodeTimerRef = useRef(null);
+  const mountedRef = useRef(true);
 
   const [form, setForm] = useState({
     restaurantName: "",
@@ -370,13 +407,12 @@ export default function Step2() {
     closeTime: "",
   });
 
+  const [initialRegion, setInitialRegion] = useState(DEFAULT_MAP_REGION);
   const [position, setPosition] = useState(null);
-  const [mapRegion, setMapRegion] = useState({
-    latitude: KINNIYA_BUHARI_JUNCTION.latitude,
-    longitude: KINNIYA_BUHARI_JUNCTION.longitude,
-    latitudeDelta: 0.05,
-    longitudeDelta: 0.05,
-  });
+  const [userLocation, setUserLocation] = useState(null);
+  const [addressLabel, setAddressLabel] = useState("Loading location...");
+  const [addressCity, setAddressCity] = useState("");
+  const [mapLoading, setMapLoading] = useState(true);
 
   const [files, setFiles] = useState({
     logo: null,
@@ -391,28 +427,125 @@ export default function Step2() {
   const [uploading, setUploading] = useState({});
   const [locating, setLocating] = useState(false);
 
-  // Set default position
   useEffect(() => {
-    if (!position) {
-      setPosition(KINNIYA_BUHARI_JUNCTION);
-    }
+    mountedRef.current = true;
+
+    const bootstrapLocation = async () => {
+      setMapLoading(true);
+      try {
+        let permission = await Location.getForegroundPermissionsAsync();
+        if (permission.status !== "granted") {
+          permission = await Location.requestForegroundPermissionsAsync();
+        }
+
+        if (permission.status !== "granted") {
+          setAddressLabel(
+            "Location permission denied. Pin the restaurant manually.",
+          );
+          return;
+        }
+
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+          mayShowUserSettingsDialog: true,
+          timeout: LOCATION_TIMEOUT_MS,
+        });
+
+        const coords = toCoordinatePair(location);
+        if (!coords || !mountedRef.current) return;
+
+        setUserLocation(coords);
+        setInitialRegion({
+          ...coords,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        });
+        setPosition(coords);
+        setAddressLabel("Detecting address...");
+        reverseGeocode(coords.latitude, coords.longitude, { force: true });
+        mapRef.current?.animateToRegion?.(
+          {
+            ...coords,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          },
+          500,
+        );
+      } catch (err) {
+        console.error("Location bootstrap error:", err);
+        if (!mountedRef.current) return;
+        setAddressLabel("Tap on the map to select the restaurant location.");
+      } finally {
+        if (mountedRef.current) {
+          setMapLoading(false);
+        }
+      }
+    };
+
+    bootstrapLocation();
+
+    return () => {
+      mountedRef.current = false;
+      if (geocodeTimerRef.current) {
+        clearTimeout(geocodeTimerRef.current);
+      }
+    };
   }, []);
 
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const reverseGeocode = async (latitude, longitude, options = {}) => {
+    const { force = false } = options;
+
+    if (geocodeTimerRef.current) {
+      clearTimeout(geocodeTimerRef.current);
+    }
+
+    geocodeTimerRef.current = setTimeout(async () => {
+      try {
+        const geocode = await Location.reverseGeocodeAsync({
+          latitude,
+          longitude,
+        });
+
+        if (!mountedRef.current || (!force && !geocode?.length)) return;
+
+        const place = geocode?.[0];
+        const label = formatReverseGeocodeResult(place);
+        const city = String(
+          place?.city || place?.subregion || place?.region || "",
+        );
+
+        setAddressLabel(label);
+        setAddressCity(city);
+        setForm((prev) => ({
+          ...prev,
+          address: label,
+          city,
+        }));
+      } catch (err) {
+        console.error("Reverse geocode error:", err);
+        if (!mountedRef.current) return;
+        setAddressLabel("Selected location");
+      }
+    }, GEOCODE_DEBOUNCE_MS);
+  };
+
   const handleUseMyLocation = async () => {
     setLocating(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      let permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status !== "granted") {
+        permission = await Location.requestForegroundPermissionsAsync();
+      }
 
-      if (status !== "granted") {
+      if (permission.status !== "granted") {
         Alert.alert(
           "Permission Denied",
           "Please enable location permissions to use this feature.",
         );
-        setLocating(false);
         return;
       }
 
@@ -420,17 +553,23 @@ export default function Step2() {
         accuracy: Location.Accuracy.High,
       });
 
-      const { latitude, longitude } = location.coords;
+      const coords = toCoordinatePair(location);
+      if (!coords) {
+        throw new Error("Invalid location coordinates");
+      }
+
+      const { latitude, longitude } = coords;
+      setUserLocation(coords);
       setPosition({ latitude, longitude });
 
       const newRegion = {
-        latitude,
-        longitude,
+        ...coords,
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       };
-      setMapRegion(newRegion);
+      setInitialRegion(newRegion);
       mapRef.current?.animateToRegion(newRegion, 500);
+      reverseGeocode(latitude, longitude, { force: true });
     } catch (err) {
       console.error("Location error:", err);
       Alert.alert(
@@ -443,8 +582,14 @@ export default function Step2() {
   };
 
   const handleMapPress = (event) => {
-    const { latitude, longitude } = event.nativeEvent.coordinate;
-    setPosition({ latitude, longitude });
+    const latitude = Number(event?.nativeEvent?.coordinate?.latitude);
+    const longitude = Number(event?.nativeEvent?.coordinate?.longitude);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+    const coords = { latitude, longitude };
+    setPosition(coords);
+    reverseGeocode(latitude, longitude, { force: true });
   };
 
   const handleImagePick = async (fieldKey) => {
@@ -551,10 +696,15 @@ export default function Step2() {
 
   const handleSubmit = async () => {
     // Validation
+    const resolvedAddress = String(
+      form.address?.trim() || addressLabel || "",
+    ).trim();
+    const resolvedCity = String(form.city?.trim() || addressCity || "").trim();
+
     if (
       !form.restaurantName ||
-      !form.address ||
-      !form.city ||
+      !resolvedAddress ||
+      !resolvedCity ||
       !form.postalCode ||
       !form.openingTime ||
       !form.closeTime
@@ -622,6 +772,8 @@ export default function Step2() {
         },
         body: JSON.stringify({
           ...form,
+          address: resolvedAddress,
+          city: resolvedCity,
           latitude: position.latitude.toString(),
           longitude: position.longitude.toString(),
           logoUrl,
@@ -791,30 +943,39 @@ export default function Step2() {
             <View style={styles.mapSection}>
               <Text style={styles.inputLabel}>Restaurant Location</Text>
               <Text style={styles.mapHint}>
-                Default location is Kinniya Buhari Junction. Tap on map to
-                select location.
+                Allow location access for the current position, then tap the map
+                to pin the restaurant accurately.
               </Text>
 
               <View style={styles.mapContainer}>
-                <FreeMapView
-                  ref={mapRef}
-                  style={styles.map}
-                  region={mapRegion}
-                  onPress={handleMapPress}
-                  markers={
-                    position
-                      ? [
-                          {
-                            id: "restaurant",
-                            coordinate: position,
-                            type: "restaurant",
-                            emoji: "🏪",
-                            title: "Restaurant Location",
-                          },
-                        ]
-                      : []
-                  }
-                />
+                {mapLoading ? (
+                  <View style={styles.mapLoadingWrap}>
+                    <ActivityIndicator size="large" color="#06C168" />
+                    <Text style={styles.mapLoadingText}>Loading map...</Text>
+                  </View>
+                ) : (
+                  <OSMMapView
+                    ref={mapRef}
+                    style={styles.map}
+                    initialRegion={initialRegion}
+                    onPress={handleMapPress}
+                    showsUserLocation={Boolean(userLocation)}
+                    userLocation={userLocation}
+                    markers={
+                      position
+                        ? [
+                            {
+                              id: "restaurant",
+                              coordinate: position,
+                              type: "restaurant",
+                              title: "Pinned restaurant location",
+                              emoji: "",
+                            },
+                          ]
+                        : []
+                    }
+                  />
+                )}
               </View>
 
               <TouchableOpacity
@@ -836,6 +997,16 @@ export default function Step2() {
                   </>
                 )}
               </TouchableOpacity>
+
+              <View style={styles.selectionCard}>
+                <Text style={styles.selectionLabel}>Pinned location</Text>
+                <Text style={styles.selectionValue} numberOfLines={2}>
+                  {addressLabel || "Tap the map to select the restaurant pin"}
+                </Text>
+                {!!addressCity && (
+                  <Text style={styles.selectionMeta}>{addressCity}</Text>
+                )}
+              </View>
 
               {position && (
                 <Text style={styles.coordsText}>
@@ -1020,6 +1191,18 @@ const styles = StyleSheet.create({
   map: {
     flex: 1,
   },
+  mapLoadingWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
+  },
+  mapLoadingText: {
+    marginTop: 10,
+    fontSize: 13,
+    color: "#64748B",
+    fontWeight: "600",
+  },
   locationButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1040,6 +1223,35 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#ffffff",
+  },
+  selectionCard: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#DDE7E2",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  selectionLabel: {
+    fontSize: 12,
+    color: "#0F172A",
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+    marginBottom: 6,
+  },
+  selectionValue: {
+    fontSize: 14,
+    color: "#334155",
+    fontWeight: "600",
+    lineHeight: 20,
+  },
+  selectionMeta: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#06C168",
+    fontWeight: "700",
   },
   coordsText: {
     fontSize: 12,

@@ -21,6 +21,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  DeviceEventEmitter,
   Dimensions,
   Easing,
   Linking,
@@ -49,7 +50,10 @@ import {
   approximateDistanceMeters,
   fetchOSRMRoute as fetchResilientOSRMRoute,
 } from "../../utils/osrmClient";
-import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
+import {
+  isTransientFetchError,
+  rateLimitedFetch,
+} from "../../utils/rateLimitedFetch";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -58,20 +62,30 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 // ============================================================================
 
 const LIVE_TRACKING_INTERVAL = 3000; // 3s - smooth driver marker updates
-const DATA_REFRESH_THRESHOLD = 100; // 100m - only fetch API data after this
-const LIVE_DATA_REFRESH_INTERVAL_MS = 5000;
+const DATA_REFRESH_THRESHOLD = 200; // 200m - only fetch API data after this
+const LIVE_LOCATION_MAX_ACCURACY_METERS = 120;
+const LIVE_LOCATION_SAMPLE_MAX_AGE_MS = 12000;
 const DEFAULT_LOCATION = { latitude: 8.5017, longitude: 81.186 };
 const DRIVER_MAP_CACHE_KEY = "driver_map_cache";
 const DRIVER_MAP_CACHE_TTL_MS = 120000;
 const DRIVER_STATUS_FOCUS_SIGNAL_KEY = "driver_status_focus_signal";
+const DRIVER_DELIVERY_ACTION_EVENT = "driver:delivery_notification_action";
 
-const loadDriverMapCache = async () => {
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const loadDriverMapCache = async (options = {}) => {
+  const { allowStale = false } = options;
   try {
     const raw = await AsyncStorage.getItem(DRIVER_MAP_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed?.timestamp || !parsed?.data) return null;
-    if (Date.now() - parsed.timestamp > DRIVER_MAP_CACHE_TTL_MS) return null;
+    if (
+      !allowStale &&
+      Date.now() - parsed.timestamp > DRIVER_MAP_CACHE_TTL_MS
+    ) {
+      return null;
+    }
     return parsed.data;
   } catch {
     return null;
@@ -155,6 +169,121 @@ function MetricBadge({ type, value, unit }) {
   );
 }
 
+function toSafeMapTarget(latitude, longitude) {
+  const lat = Number.parseFloat(latitude);
+  const lng = Number.parseFloat(longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+
+  return {
+    latitude: lat,
+    longitude: lng,
+  };
+}
+
+function normalizeDeliveryId(value) {
+  if (value == null) return null;
+  const normalized = String(value).trim();
+  return normalized || null;
+}
+
+function normalizeDeliveryStatus(value) {
+  if (!value) return "";
+  return String(value).trim().toLowerCase();
+}
+
+function mapActiveDeliveryToMapItem(delivery) {
+  const status = normalizeDeliveryStatus(delivery?.status);
+  const order = delivery?.order || {};
+  const restaurant = order?.restaurant || {};
+  const deliveryLocation = order?.delivery || order?.delivery_location || {};
+
+  return {
+    delivery_id: delivery?.id,
+    order_id: delivery?.order_id,
+    order_number: order?.order_number || "N/A",
+    status: status || "accepted",
+    restaurant: {
+      name: restaurant?.name || "Restaurant",
+      address: restaurant?.address || "",
+      latitude: restaurant?.latitude || 0,
+      longitude: restaurant?.longitude || 0,
+    },
+    customer: {
+      name: order?.customer?.name || "Customer",
+      phone: order?.customer?.phone || "",
+      address: deliveryLocation?.address || "",
+      latitude: deliveryLocation?.latitude || 0,
+      longitude: deliveryLocation?.longitude || 0,
+    },
+    distance_km: ((delivery?.total_distance || 0) / 1000).toFixed(2),
+    estimated_time_minutes: 0,
+  };
+}
+
+function buildMapDataFromActiveDeliveries(
+  activeDeliveries,
+  preferredDeliveryId = null,
+) {
+  const source = asArray(activeDeliveries);
+  const mapped = source.map(mapActiveDeliveryToMapItem);
+  const pickups = mapped.filter(
+    (item) => normalizeDeliveryStatus(item?.status) === "accepted",
+  );
+  const deliveries = mapped.filter((item) =>
+    ["picked_up", "on_the_way", "at_customer"].includes(
+      normalizeDeliveryStatus(item?.status),
+    ),
+  );
+
+  const preferredId = normalizeDeliveryId(preferredDeliveryId);
+  const allTargets = [...pickups, ...deliveries];
+  const preferredTarget = preferredId
+    ? allTargets.find(
+        (item) => normalizeDeliveryId(item?.delivery_id) === preferredId,
+      )
+    : null;
+
+  const currentTarget = preferredTarget || pickups[0] || deliveries[0] || null;
+  const mode =
+    pickups.length > 0
+      ? "pickup"
+      : deliveries.length > 0
+        ? "deliver"
+        : "pickup";
+
+  return {
+    pickups,
+    deliveries,
+    currentTarget,
+    mode,
+    hasData: pickups.length > 0 || deliveries.length > 0,
+  };
+}
+
+function isFreshAccurateLiveSample(position) {
+  const accuracy = Number(position?.coords?.accuracy || Infinity);
+  const sampleTimestamp = Number(position?.timestamp || Date.now());
+  const sampleAgeMs = Math.max(0, Date.now() - sampleTimestamp);
+
+  if (
+    !Number.isFinite(accuracy) ||
+    accuracy > LIVE_LOCATION_MAX_ACCURACY_METERS
+  ) {
+    return false;
+  }
+
+  if (
+    !Number.isFinite(sampleAgeMs) ||
+    sampleAgeMs > LIVE_LOCATION_SAMPLE_MAX_AGE_MS
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -171,7 +300,11 @@ export default function DriverMapScreen({ route, navigation }) {
   const lastFetchLocationRef = useRef(null);
   const lastBackendUpdateRef = useRef(0);
   const isFetchingRef = useRef(false);
+  const pendingFetchRequestRef = useRef(null);
   const routeFetchLocRef = useRef(null);
+  const modeRef = useRef(initialMode);
+  const pickupsRef = useRef([]);
+  const deliveriesRef = useRef([]);
   const sheetAnim = useRef(new Animated.Value(0)).current;
   const contentFadeAnim = useRef(new Animated.Value(0)).current;
   const sheetHeightAnim = useRef(
@@ -180,6 +313,7 @@ export default function DriverMapScreen({ route, navigation }) {
   const overlayCallbackRef = useRef(null);
   const sheetTouchStartY = useRef(null);
   const hasAutoFitRef = useRef(false);
+  const currentTargetRef = useRef(null);
 
   const [mode, setMode] = useState(initialMode);
   const [pickups, setPickups] = useState([]);
@@ -189,6 +323,7 @@ export default function DriverMapScreen({ route, navigation }) {
   const [targetForMap, setTargetForMap] = useState(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [isMapRefreshing, setIsMapRefreshing] = useState(false);
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeInfo, setRouteInfo] = useState(null);
   const [isTracking, setIsTracking] = useState(false);
@@ -217,34 +352,51 @@ export default function DriverMapScreen({ route, navigation }) {
     };
   }, []);
 
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    pickupsRef.current = asArray(pickups);
+  }, [pickups]);
+
+  useEffect(() => {
+    deliveriesRef.current = asArray(deliveriesList);
+  }, [deliveriesList]);
+
+  useEffect(() => {
+    currentTargetRef.current = currentTarget;
+  }, [currentTarget]);
+
+  const animateBackgroundRefresh = () => {
+    if (loading) return;
+    Animated.sequence([
+      Animated.timing(contentFadeAnim, {
+        toValue: 0.92,
+        duration: 120,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(contentFadeAnim, {
+        toValue: 1,
+        duration: 180,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
   const hydrateFromCacheAndStart = async () => {
-    if (!deliveryId) {
-      const dashboardSnapshot = queryClient.getQueryData([
-        "driver",
-        "dashboard",
-        "snapshot",
-      ]);
-      const cachedActive = Array.isArray(dashboardSnapshot?.activeDeliveries)
-        ? dashboardSnapshot.activeDeliveries
-        : [];
-
-      if (cachedActive.length === 0) {
-        navigation.replace("DriverTabs", { screen: "Dashboard" });
-        return;
-      }
-    }
-
-    const cached = await loadDriverMapCache();
+    let hydratedFromLocalData = false;
+    const cached = await loadDriverMapCache({ allowStale: true });
     if (cached) {
       if (cached.driverLocation) {
         setDriverLocation(cached.driverLocation);
         lastFetchLocationRef.current = cached.driverLocation;
       }
 
-      const cachedPickups = Array.isArray(cached.pickups) ? cached.pickups : [];
-      const cachedDeliveries = Array.isArray(cached.deliveries)
-        ? cached.deliveries
-        : [];
+      const cachedPickups = asArray(cached.pickups);
+      const cachedDeliveries = asArray(cached.deliveries);
 
       setPickups(cachedPickups);
       setDeliveriesList(cachedDeliveries);
@@ -261,6 +413,41 @@ export default function DriverMapScreen({ route, navigation }) {
       }
 
       setLoading(false);
+      hydratedFromLocalData = true;
+    }
+
+    if (!hydratedFromLocalData) {
+      const dashboardSnapshot = queryClient.getQueryData([
+        "driver",
+        "dashboard",
+        "snapshot",
+      ]);
+      const seeded = buildMapDataFromActiveDeliveries(
+        dashboardSnapshot?.activeDeliveries,
+        deliveryId,
+      );
+
+      if (seeded.hasData) {
+        setPickups(seeded.pickups);
+        setDeliveriesList(seeded.deliveries);
+        setMode(seeded.mode);
+        setCurrentTarget(seeded.currentTarget);
+        setLoading(false);
+        hydratedFromLocalData = true;
+
+        await saveDriverMapCache({
+          driverLocation: null,
+          pickups: seeded.pickups,
+          deliveries: seeded.deliveries,
+          mode: seeded.mode,
+          currentTarget: seeded.currentTarget,
+        });
+      }
+    }
+
+    if (!hydratedFromLocalData && !deliveryId) {
+      navigation.replace("DriverTabs", { screen: "Dashboard" });
+      return;
     }
 
     startLocationTracking();
@@ -269,7 +456,7 @@ export default function DriverMapScreen({ route, navigation }) {
   // ============================================================================
   // LOCATION TRACKING
   // Live display: marker updates every 3s (distanceInterval: 0)
-  // Data refresh: API calls only when moved 100m+ from last fetch
+  // Data refresh: API calls only when moved 200m+ from last fetch
   // ============================================================================
 
   const startLocationTracking = async () => {
@@ -283,7 +470,7 @@ export default function DriverMapScreen({ route, navigation }) {
       }
 
       const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
+        accuracy: Location.Accuracy.BestForNavigation,
       });
       const initLoc = {
         latitude: pos.coords.latitude,
@@ -297,11 +484,13 @@ export default function DriverMapScreen({ route, navigation }) {
 
       watchIdRef.current = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.High,
+          accuracy: Location.Accuracy.BestForNavigation,
           timeInterval: LIVE_TRACKING_INTERVAL,
           distanceInterval: 0,
         },
         function (position) {
+          if (!isFreshAccurateLiveSample(position)) return;
+
           let newLoc = {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
@@ -313,7 +502,7 @@ export default function DriverMapScreen({ route, navigation }) {
           // Backend location update (throttled 5s)
           updateBackendLocation(newLoc);
 
-          // Only fetch API data when moved 100m+ from last fetch
+          // Only fetch API data when moved 200m+ from last fetch
           let lastFetch = lastFetchLocationRef.current;
           if (lastFetch) {
             let moved = approximateDistanceMeters(lastFetch, newLoc);
@@ -343,8 +532,20 @@ export default function DriverMapScreen({ route, navigation }) {
   // DATA FETCHING (Correct API endpoints)
   // ============================================================================
 
-  const fetchPickupsAndDeliveries = async (location) => {
-    if (!location || isFetchingRef.current) return;
+  const fetchPickupsAndDeliveries = async (location, options = {}) => {
+    const { force = false, immediate = false } = options;
+    if (!location) return;
+
+    if (isFetchingRef.current) {
+      if (force) {
+        pendingFetchRequestRef.current = {
+          location,
+          immediate,
+        };
+      }
+      return;
+    }
+
     isFetchingRef.current = true;
 
     try {
@@ -353,6 +554,16 @@ export default function DriverMapScreen({ route, navigation }) {
         return;
       }
 
+      const rateLimitConfig = immediate
+        ? {
+            minGap: 0,
+            deduplicate: false,
+            retryOn429: false,
+            timeoutMs: 12000,
+            transientRetries: 0,
+          }
+        : {};
+
       // Fetch pickups
       let pickupsUrl =
         API_BASE_URL +
@@ -360,9 +571,13 @@ export default function DriverMapScreen({ route, navigation }) {
         location.latitude +
         "&driver_longitude=" +
         location.longitude;
-      let pickupsRes = await rateLimitedFetch(pickupsUrl, {
-        headers: { Authorization: "Bearer " + token },
-      });
+      let pickupsRes = await rateLimitedFetch(
+        pickupsUrl,
+        {
+          headers: { Authorization: "Bearer " + token },
+        },
+        rateLimitConfig,
+      );
       let pickupsData = { pickups: [] };
       if (pickupsRes.ok) {
         pickupsData = await pickupsRes.json();
@@ -375,9 +590,13 @@ export default function DriverMapScreen({ route, navigation }) {
         location.latitude +
         "&driver_longitude=" +
         location.longitude;
-      let deliveriesRes = await rateLimitedFetch(deliveriesUrl, {
-        headers: { Authorization: "Bearer " + token },
-      });
+      let deliveriesRes = await rateLimitedFetch(
+        deliveriesUrl,
+        {
+          headers: { Authorization: "Bearer " + token },
+        },
+        rateLimitConfig,
+      );
       let deliveriesData = { deliveries: [] };
       if (deliveriesRes.ok) {
         deliveriesData = await deliveriesRes.json();
@@ -397,6 +616,7 @@ export default function DriverMapScreen({ route, navigation }) {
             {
               headers: { Authorization: "Bearer " + token },
             },
+            rateLimitConfig,
           );
           if (fallbackRes.ok) {
             let fallbackData = await fallbackRes.json();
@@ -510,22 +730,35 @@ export default function DriverMapScreen({ route, navigation }) {
         }
       }
 
+      const hadVisibleTarget = Boolean(currentTargetRef.current);
+      const previousTargetId = normalizeDeliveryId(
+        currentTargetRef.current?.delivery_id,
+      );
+
       setPickups(pList);
       setDeliveriesList(dList);
 
-      let nextMode = mode;
+      let nextMode = modeRef.current;
       let nextTarget = null;
 
       // Auto-select mode and target
       if (pList.length > 0) {
         setMode("pickup");
-        let pTarget = pList[0];
+        let pTarget =
+          pList.find(
+            (item) =>
+              normalizeDeliveryId(item?.delivery_id) === previousTargetId,
+          ) || pList[0];
         setCurrentTarget(pTarget);
         nextMode = "pickup";
         nextTarget = pTarget;
       } else if (dList.length > 0) {
         setMode("deliver");
-        let dTarget = dList[0];
+        let dTarget =
+          dList.find(
+            (item) =>
+              normalizeDeliveryId(item?.delivery_id) === previousTargetId,
+          ) || dList[0];
         setCurrentTarget(dTarget);
         nextMode = "deliver";
         nextTarget = dTarget;
@@ -541,30 +774,187 @@ export default function DriverMapScreen({ route, navigation }) {
         mode: nextMode,
         currentTarget: nextTarget,
       });
+
+      if (hadVisibleTarget) {
+        animateBackgroundRefresh();
+      }
     } catch (err) {
-      console.error("[FETCH] Data error:", err);
+      if (isTransientFetchError(err)) {
+        const staleSnapshot = await loadDriverMapCache({ allowStale: true });
+        const cachedPickups = Array.isArray(staleSnapshot?.pickups)
+          ? staleSnapshot.pickups
+          : [];
+        const cachedDeliveries = Array.isArray(staleSnapshot?.deliveries)
+          ? staleSnapshot.deliveries
+          : [];
+
+        if (cachedPickups.length > 0 || cachedDeliveries.length > 0) {
+          setPickups(cachedPickups);
+          setDeliveriesList(cachedDeliveries);
+
+          if (staleSnapshot?.currentTarget) {
+            setMode(staleSnapshot.mode || "pickup");
+            setCurrentTarget(staleSnapshot.currentTarget);
+          } else if (cachedPickups.length > 0) {
+            setMode("pickup");
+            setCurrentTarget(cachedPickups[0]);
+          } else {
+            setMode("deliver");
+            setCurrentTarget(cachedDeliveries[0]);
+          }
+        }
+
+        if (staleSnapshot?.driverLocation) {
+          setDriverLocation((prev) => prev || staleSnapshot.driverLocation);
+          lastFetchLocationRef.current =
+            lastFetchLocationRef.current || staleSnapshot.driverLocation;
+        }
+
+        console.warn(
+          "[FETCH] Transient network issue, continuing with cached map data:",
+          err?.message || err,
+        );
+      } else {
+        console.error("[FETCH] Data error:", err);
+      }
     } finally {
       isFetchingRef.current = false;
       setLoading(false);
+
+      const queuedRequest = pendingFetchRequestRef.current;
+      if (queuedRequest?.location) {
+        pendingFetchRequestRef.current = null;
+        fetchPickupsAndDeliveries(queuedRequest.location, {
+          immediate: Boolean(queuedRequest.immediate),
+        });
+      }
     }
   };
 
-  useEffect(
-    function () {
-      if (!isTracking) return;
+  const applyOptimisticWorkflow = async ({
+    action,
+    target,
+    promotedDelivery = null,
+  }) => {
+    const targetId = normalizeDeliveryId(target?.delivery_id);
+    const promotedTargetId = normalizeDeliveryId(promotedDelivery?.id);
+    if (!targetId) return;
 
-      const interval = setInterval(function () {
-        const refreshLocation =
-          driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-        fetchPickupsAndDeliveries(refreshLocation);
-      }, LIVE_DATA_REFRESH_INTERVAL_MS);
+    let nextPickups = [...(pickupsRef.current || [])];
+    let nextDeliveries = [...(deliveriesRef.current || [])];
 
-      return function () {
-        clearInterval(interval);
-      };
-    },
-    [isTracking, driverLocation],
-  );
+    if (action === "picked_up") {
+      nextPickups = nextPickups.filter(
+        (delivery) => normalizeDeliveryId(delivery?.delivery_id) !== targetId,
+      );
+
+      const existingIndex = nextDeliveries.findIndex(
+        (delivery) => normalizeDeliveryId(delivery?.delivery_id) === targetId,
+      );
+
+      if (existingIndex >= 0) {
+        nextDeliveries[existingIndex] = {
+          ...nextDeliveries[existingIndex],
+          status:
+            promotedTargetId === targetId
+              ? promotedDelivery?.status || "on_the_way"
+              : "picked_up",
+        };
+      } else {
+        nextDeliveries = [
+          {
+            ...target,
+            status:
+              promotedTargetId === targetId
+                ? promotedDelivery?.status || "on_the_way"
+                : "picked_up",
+          },
+          ...nextDeliveries,
+        ];
+      }
+    }
+
+    if (action === "delivered") {
+      nextPickups = nextPickups.filter(
+        (delivery) => normalizeDeliveryId(delivery?.delivery_id) !== targetId,
+      );
+      nextDeliveries = nextDeliveries.filter(
+        (delivery) => normalizeDeliveryId(delivery?.delivery_id) !== targetId,
+      );
+    }
+
+    const promotedId = normalizeDeliveryId(promotedDelivery?.id);
+    if (promotedId) {
+      let promotedApplied = false;
+
+      nextDeliveries = nextDeliveries.map((delivery) => {
+        if (normalizeDeliveryId(delivery?.delivery_id) !== promotedId) {
+          return delivery;
+        }
+
+        promotedApplied = true;
+        return {
+          ...delivery,
+          status: promotedDelivery?.status || delivery?.status || "on_the_way",
+        };
+      });
+
+      if (!promotedApplied) {
+        const promotedFromPickups = nextPickups.find(
+          (delivery) =>
+            normalizeDeliveryId(delivery?.delivery_id) === promotedId,
+        );
+
+        if (promotedFromPickups) {
+          nextPickups = nextPickups.filter(
+            (delivery) =>
+              normalizeDeliveryId(delivery?.delivery_id) !== promotedId,
+          );
+          nextDeliveries = [
+            {
+              ...promotedFromPickups,
+              status: promotedDelivery?.status || "on_the_way",
+            },
+            ...nextDeliveries,
+          ];
+        }
+      }
+    }
+
+    let nextMode = modeRef.current;
+    let nextTarget = null;
+
+    if (nextPickups.length > 0) {
+      nextMode = "pickup";
+      nextTarget = nextPickups[0];
+    } else if (nextDeliveries.length > 0) {
+      nextMode = "deliver";
+      nextTarget = promotedId
+        ? nextDeliveries.find(
+            (delivery) =>
+              normalizeDeliveryId(delivery?.delivery_id) === promotedId,
+          ) || nextDeliveries[0]
+        : nextDeliveries[0];
+    } else {
+      nextTarget = null;
+    }
+
+    setPickups(nextPickups);
+    setDeliveriesList(nextDeliveries);
+    setMode(nextMode);
+    setCurrentTarget(nextTarget);
+
+    const snapshotLocation =
+      driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+
+    await saveDriverMapCache({
+      driverLocation: snapshotLocation,
+      pickups: nextPickups,
+      deliveries: nextDeliveries,
+      mode: nextMode,
+      currentTarget: nextTarget,
+    });
+  };
 
   // ============================================================================
   // ROUTE + TARGET LOCATION
@@ -578,15 +968,21 @@ export default function DriverMapScreen({ route, navigation }) {
         return;
       }
       if (mode === "pickup" && currentTarget.restaurant) {
-        setTargetForMap({
-          latitude: parseFloat(currentTarget.restaurant.latitude),
-          longitude: parseFloat(currentTarget.restaurant.longitude),
-        });
+        setTargetForMap(
+          toSafeMapTarget(
+            currentTarget.restaurant.latitude,
+            currentTarget.restaurant.longitude,
+          ),
+        );
       } else if (mode === "deliver" && currentTarget.customer) {
-        setTargetForMap({
-          latitude: parseFloat(currentTarget.customer.latitude),
-          longitude: parseFloat(currentTarget.customer.longitude),
-        });
+        setTargetForMap(
+          toSafeMapTarget(
+            currentTarget.customer.latitude,
+            currentTarget.customer.longitude,
+          ),
+        );
+      } else {
+        setTargetForMap(null);
       }
     },
     [currentTarget, mode],
@@ -692,26 +1088,22 @@ export default function DriverMapScreen({ route, navigation }) {
   // ============================================================================
 
   const handlePickedUp = async () => {
-    if (!currentTarget || updating) return;
+    if (!currentTarget || updating || isMapRefreshing) return;
 
-    setOverlayActionType("pickup");
-    setOverlayStatus("processing");
-    setOverlayVisible(true);
+    const actionTarget = currentTarget;
+    const targetId = normalizeDeliveryId(actionTarget?.delivery_id);
+    if (!targetId) return;
+
     setUpdating(true);
+    applyOptimisticWorkflow({ action: "picked_up", target: actionTarget });
 
     try {
       let token = await getAccessToken();
       if (!token) {
-        setOverlayErrorMsg("Authentication session is unavailable");
-        setOverlayStatus("error");
-        overlayCallbackRef.current = () => setUpdating(false);
-        return;
+        throw new Error("Authentication session is unavailable");
       }
       let res = await fetch(
-        API_BASE_URL +
-          "/driver/deliveries/" +
-          currentTarget.delivery_id +
-          "/status",
+        API_BASE_URL + "/driver/deliveries/" + targetId + "/status",
         {
           method: "PATCH",
           headers: {
@@ -726,51 +1118,65 @@ export default function DriverMapScreen({ route, navigation }) {
         },
       );
       if (res.ok) {
-        await pushStatusFocusSignal("picked_up", currentTarget.delivery_id);
+        const data = await res.json().catch(() => ({}));
+        const promotedDelivery = data?.promotedDelivery || null;
 
-        setOverlayStatus("success");
-        overlayCallbackRef.current = async () => {
-          const refreshLocation =
-            driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-          await fetchPickupsAndDeliveries(refreshLocation);
-          setUpdating(false);
-        };
+        if (promotedDelivery?.id) {
+          await applyOptimisticWorkflow({
+            action: "picked_up",
+            target: actionTarget,
+            promotedDelivery,
+          });
+        }
+
+        await pushStatusFocusSignal("picked_up", targetId);
+
+        const refreshLocation =
+          driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+        fetchPickupsAndDeliveries(refreshLocation, {
+          force: true,
+          immediate: true,
+        });
       } else {
         let errData = await res.json().catch(function () {
           return {};
         });
-        setOverlayErrorMsg(errData.message || "Failed to update status");
-        setOverlayStatus("error");
-        overlayCallbackRef.current = () => setUpdating(false);
+        throw new Error(errData.message || "Failed to update status");
       }
     } catch (e) {
-      setOverlayErrorMsg("Failed to mark as picked up");
+      const refreshLocation =
+        driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+      fetchPickupsAndDeliveries(refreshLocation, {
+        force: true,
+        immediate: true,
+      });
+
+      setOverlayActionType("pickup");
+      setOverlayErrorMsg(e?.message || "Failed to mark as picked up");
       setOverlayStatus("error");
-      overlayCallbackRef.current = () => setUpdating(false);
+      setOverlayVisible(true);
+    } finally {
+      setUpdating(false);
     }
   };
 
   const handleDelivered = async () => {
-    if (!currentTarget || updating) return;
+    if (!currentTarget || updating || isMapRefreshing) return;
 
-    setOverlayActionType("deliver");
-    setOverlayStatus("processing");
-    setOverlayVisible(true);
+    const actionTarget = currentTarget;
+    const targetId = normalizeDeliveryId(actionTarget?.delivery_id);
+    if (!targetId) return;
+
     setUpdating(true);
+    applyOptimisticWorkflow({ action: "delivered", target: actionTarget });
 
     try {
       let token = await getAccessToken();
       if (!token) {
-        setOverlayErrorMsg("Authentication session is unavailable");
-        setOverlayStatus("error");
-        overlayCallbackRef.current = () => setUpdating(false);
-        return;
+        throw new Error("Authentication session is unavailable");
       }
       let statusUrl =
-        API_BASE_URL +
-        "/driver/deliveries/" +
-        currentTarget.delivery_id +
-        "/status";
+        API_BASE_URL + "/driver/deliveries/" + targetId + "/status";
       let headers = {
         Authorization: "Bearer " + token,
         "Content-Type": "application/json",
@@ -780,31 +1186,6 @@ export default function DriverMapScreen({ route, navigation }) {
         longitude: driverLocation ? driverLocation.longitude : null,
       };
 
-      // Progress through status steps
-      let currentStatus = currentTarget.status || "";
-      if (currentStatus === "picked_up" || currentStatus === "accepted") {
-        await fetch(statusUrl, {
-          method: "PATCH",
-          headers: headers,
-          body: JSON.stringify(
-            Object.assign({ status: "on_the_way" }, locBody),
-          ),
-        });
-      }
-      if (
-        currentStatus === "picked_up" ||
-        currentStatus === "on_the_way" ||
-        currentStatus === "accepted"
-      ) {
-        await fetch(statusUrl, {
-          method: "PATCH",
-          headers: headers,
-          body: JSON.stringify(
-            Object.assign({ status: "at_customer" }, locBody),
-          ),
-        });
-      }
-      // Final: delivered
       let finalRes = await fetch(statusUrl, {
         method: "PATCH",
         headers: headers,
@@ -812,27 +1193,58 @@ export default function DriverMapScreen({ route, navigation }) {
       });
 
       if (finalRes.ok) {
-        await pushStatusFocusSignal("delivered", currentTarget.delivery_id);
+        const data = await finalRes.json().catch(() => ({}));
+        const promotedDelivery = data?.promotedDelivery || null;
 
-        setOverlayStatus("success");
-        overlayCallbackRef.current = async () => {
-          const refreshLocation =
-            driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-          await fetchPickupsAndDeliveries(refreshLocation);
-          setUpdating(false);
-        };
+        if (promotedDelivery?.id) {
+          await applyOptimisticWorkflow({
+            action: "delivered",
+            target: actionTarget,
+            promotedDelivery,
+          });
+        }
+
+        await pushStatusFocusSignal("delivered", targetId);
+
+        DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+          deliveryId: targetId,
+          action: "delivered",
+          source: "driver_map",
+          location: driverLocation
+            ? {
+                latitude: driverLocation.latitude,
+                longitude: driverLocation.longitude,
+              }
+            : null,
+          triggeredAt: Date.now(),
+        });
+
+        const refreshLocation =
+          driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+        fetchPickupsAndDeliveries(refreshLocation, {
+          force: true,
+          immediate: true,
+        });
       } else {
         let errData = await finalRes.json().catch(function () {
           return {};
         });
-        setOverlayErrorMsg(errData.message || "Failed to mark as delivered");
-        setOverlayStatus("error");
-        overlayCallbackRef.current = () => setUpdating(false);
+        throw new Error(errData.message || "Failed to mark as delivered");
       }
     } catch (e) {
-      setOverlayErrorMsg("Failed to mark as delivered");
+      const refreshLocation =
+        driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+      fetchPickupsAndDeliveries(refreshLocation, {
+        force: true,
+        immediate: true,
+      });
+
+      setOverlayActionType("deliver");
+      setOverlayErrorMsg(e?.message || "Failed to mark as delivered");
       setOverlayStatus("error");
-      overlayCallbackRef.current = () => setUpdating(false);
+      setOverlayVisible(true);
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -850,6 +1262,22 @@ export default function DriverMapScreen({ route, navigation }) {
   const handleRecenter = () => {
     setUserInteracted(false);
     hasAutoFitRef.current = false;
+  };
+
+  const handleMapRefresh = async () => {
+    if (isMapRefreshing) return;
+    setIsMapRefreshing(true);
+
+    try {
+      const refreshLocation =
+        driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+      await fetchPickupsAndDeliveries(refreshLocation, {
+        force: true,
+        immediate: true,
+      });
+    } finally {
+      setIsMapRefreshing(false);
+    }
   };
 
   const handleSheetTouchStart = (e) => {
@@ -1137,6 +1565,25 @@ export default function DriverMapScreen({ route, navigation }) {
         <Text style={styles.navigateBtnText}>Navigate</Text>
       </Pressable>
 
+      <Pressable
+        style={[
+          styles.mapRefreshBtn,
+          {
+            bottom: sheetExpanded
+              ? SCREEN_HEIGHT * 0.6 + mapTabBarHeight + 12
+              : SCREEN_HEIGHT * 0.4 + mapTabBarHeight + 12,
+          },
+        ]}
+        onPress={handleMapRefresh}
+        disabled={isMapRefreshing}
+      >
+        <Ionicons
+          name={isMapRefreshing ? "sync" : "refresh"}
+          size={18}
+          color="#0f766e"
+        />
+      </Pressable>
+
       {/* RECENTER */}
       {userInteracted && (
         <Pressable
@@ -1182,7 +1629,7 @@ export default function DriverMapScreen({ route, navigation }) {
               target={currentTarget}
               onPickedUp={handlePickedUp}
               onNavigate={openGoogleMaps}
-              updating={updating}
+              updating={updating || isMapRefreshing}
               swipeTextStyle={styles.pickupSwipeText}
             />
           ) : (
@@ -1190,7 +1637,7 @@ export default function DriverMapScreen({ route, navigation }) {
               target={currentTarget}
               onDelivered={handleDelivered}
               onCall={handleCall}
-              updating={updating}
+              updating={updating || isMapRefreshing}
             />
           )}
 
@@ -1672,6 +2119,18 @@ var styles = StyleSheet.create({
   },
   navigateBtnIcon: { fontSize: 18 },
   navigateBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  mapRefreshBtn: {
+    position: "absolute",
+    right: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#f0fdfa",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
+    ...SHADOW,
+  },
   recenterBtn: {
     position: "absolute",
     bottom: SCREEN_HEIGHT * 0.4 + 8,

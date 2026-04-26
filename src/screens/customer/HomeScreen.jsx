@@ -12,14 +12,12 @@ import React, {
 import {
   FlatList,
   Image,
-  Keyboard,
   Modal,
   Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -259,6 +257,46 @@ const CATEGORY_IMAGE_BY_KEY = {
   others: require("../../assets/category-images/others.jpg"),
 };
 
+const CLOUDINARY_ASSET_BASE_URL = String(
+  process.env.EXPO_PUBLIC_CLOUDINARY_ASSET_BASE_URL || "",
+)
+  .trim()
+  .replace(/\/+$/, "");
+
+const CLOUDINARY_PROMO_IMAGE_URL = String(
+  process.env.EXPO_PUBLIC_LAUNCH_PROMO_IMAGE_URL || "",
+).trim();
+
+const CATEGORY_CLOUDINARY_PATH_BY_KEY = {
+  koththu: "category-images/koththu.jpg",
+  "fried rice": "category-images/fried-rice.jpg",
+  biriyani: "category-images/biriyani.jpg",
+  bbq: "category-images/bbq.jpg",
+  parotta: "category-images/parotta.jpg",
+  "rice and curry": "category-images/rice-and-curry.jpg",
+  curry: "category-images/curry.jpg",
+  "short eats": "category-images/short-eats.jpg",
+  dolphin: "category-images/dolphin.jpg",
+  "sea food": "category-images/sea-food.jpg",
+  others: "category-images/others.jpg",
+};
+
+function toCloudinaryAssetUrl(relativePath) {
+  if (!CLOUDINARY_ASSET_BASE_URL || !relativePath) return "";
+  return `${CLOUDINARY_ASSET_BASE_URL}/${String(relativePath).replace(/^\/+/, "")}`;
+}
+
+const CATEGORY_CLOUDINARY_IMAGE_BY_KEY = Object.fromEntries(
+  Object.entries(CATEGORY_CLOUDINARY_PATH_BY_KEY).map(([key, path]) => [
+    key,
+    toCloudinaryAssetUrl(path),
+  ]),
+);
+
+const PRELOADABLE_CATEGORY_IMAGE_URLS = Object.values(
+  CATEGORY_CLOUDINARY_IMAGE_BY_KEY,
+).filter((url) => /^https?:\/\//i.test(String(url)));
+
 const FIXED_CATEGORIES = CATEGORY_ORDER.map((name, index) => ({
   id: index + 1,
   name,
@@ -273,15 +311,53 @@ function normalizeCategoryLabel(value) {
 
 const CategoryIcon = ({ category }) => {
   const key = normalizeCategoryLabel(category).toLowerCase();
-  const imageSource =
+  const fallbackSource =
     CATEGORY_IMAGE_BY_KEY[key] || CATEGORY_IMAGE_BY_KEY.others;
+  const remoteUri =
+    CATEGORY_CLOUDINARY_IMAGE_BY_KEY[key] ||
+    CATEGORY_CLOUDINARY_IMAGE_BY_KEY.others ||
+    "";
 
   return (
     <View style={styles.catIconImageWrap}>
-      <Image source={imageSource} style={styles.catImage} resizeMode="cover" />
+      {remoteUri ? (
+        <OptimizedImage
+          uri={remoteUri}
+          style={styles.catImage}
+          transition={80}
+          fallback={
+            <Image
+              source={fallbackSource}
+              style={styles.catImage}
+              resizeMode="cover"
+            />
+          }
+        />
+      ) : (
+        <Image
+          source={fallbackSource}
+          style={styles.catImage}
+          resizeMode="cover"
+        />
+      )}
     </View>
   );
 };
+
+function resolveLaunchPromoHeroUri(launchPromoData) {
+  const backendUrl = String(
+    launchPromoData?.promotion?.banner_image_url ||
+      launchPromoData?.banner_image_url ||
+      "",
+  ).trim();
+
+  if (/^https?:\/\//i.test(backendUrl)) return backendUrl;
+  if (/^https?:\/\//i.test(CLOUDINARY_PROMO_IMAGE_URL)) {
+    return CLOUDINARY_PROMO_IMAGE_URL;
+  }
+
+  return "";
+}
 
 const CategorySection = React.memo(function CategorySection({
   categories,
@@ -373,6 +449,28 @@ export default function HomeScreen({ navigation }) {
   const [acknowledgingPromo, setAcknowledgingPromo] = useState(false);
 
   const categories = useMemo(() => FIXED_CATEGORIES, []);
+  const launchPromoHeroUri = useMemo(
+    () => resolveLaunchPromoHeroUri(launchPromo),
+    [launchPromo],
+  );
+
+  useEffect(() => {
+    if (PRELOADABLE_CATEGORY_IMAGE_URLS.length === 0) return;
+    prefetchImageUrls(PRELOADABLE_CATEGORY_IMAGE_URLS).catch(() => {
+      // Keep UI responsive even if preload fails.
+    });
+  }, []);
+
+  useEffect(() => {
+    const urlsToPreload = [launchPromoHeroUri].filter((url) =>
+      /^https?:\/\//i.test(String(url)),
+    );
+
+    if (urlsToPreload.length === 0) return;
+    prefetchImageUrls(urlsToPreload).catch(() => {
+      // Keep UI responsive even if preload fails.
+    });
+  }, [launchPromoHeroUri]);
 
   const fetchLaunchPromotionStatus = useCallback(async (tokenArg) => {
     try {
@@ -773,51 +871,20 @@ export default function HomeScreen({ navigation }) {
   const onSelectCategory = useCallback(
     (category) => {
       const normalized = normalizeCategoryLabel(category?.name);
-      const filteredByCategory = allFoodsData.filter(
-        (food) => normalizeCategoryLabel(food?.category) === normalized,
-      );
-
-      setSelectedCategory(normalized);
-      setActiveTab("food");
-      setSearchQuery(normalized);
-      setAllFoods(sortFoodsForHome(filteredByCategory));
+      navigation.navigate("HomeSearch", {
+        initialQuery: normalized,
+        initialTab: "food",
+      });
     },
-    [allFoodsData, sortFoodsForHome],
+    [navigation],
   );
 
-  const handleSearchChange = useCallback(
-    (value) => {
-      setSearchQuery(value);
-      if (
-        selectedCategory &&
-        normalizeCategoryLabel(value) !==
-          normalizeCategoryLabel(selectedCategory)
-      ) {
-        setSelectedCategory(null);
-      }
-    },
-    [selectedCategory],
-  );
-
-  const handleClearSearch = useCallback(() => {
-    setSearchQuery("");
-    setSelectedCategory(null);
-
-    // Reset visible list immediately without waiting for debounce.
-    if (activeTab === "food") {
-      setAllFoods(sortFoodsForHome(allFoodsData));
-    } else {
-      setRestaurants(sortRestaurantsForHome(allRestaurants));
-    }
-
-    Keyboard.dismiss();
-  }, [
-    activeTab,
-    allFoodsData,
-    allRestaurants,
-    sortFoodsForHome,
-    sortRestaurantsForHome,
-  ]);
+  const openHomeSearch = useCallback(() => {
+    navigation.navigate("HomeSearch", {
+      initialQuery: String(searchQuery || ""),
+      initialTab: activeTab,
+    });
+  }, [activeTab, navigation, searchQuery]);
 
   const prewarmFoodDetail = useCallback(
     (item) => {
@@ -1151,9 +1218,16 @@ export default function HomeScreen({ navigation }) {
             <View style={styles.promoCard}>
               <View style={styles.promoHeroWrap}>
                 <OptimizedImage
-                  uri="https://images.unsplash.com/photo-1547592166-23ac45744acd?q=80&w=1200&auto=format&fit=crop"
+                  uri={launchPromoHeroUri}
                   style={styles.promoHeroImage}
                   transition={120}
+                  fallback={
+                    <Image
+                      source={CATEGORY_IMAGE_BY_KEY.others}
+                      style={styles.promoHeroImage}
+                      resizeMode="cover"
+                    />
+                  }
                 />
                 <View style={styles.promoHeroFade} />
               </View>
@@ -1227,30 +1301,21 @@ export default function HomeScreen({ navigation }) {
             </View>
 
             {/* Search */}
-            <View style={styles.searchWrap}>
+            <Pressable
+              onPress={openHomeSearch}
+              style={styles.searchWrap}
+              hitSlop={8}
+            >
               <Ionicons
                 name="search"
                 size={26}
                 color="#94A3B8"
                 style={styles.searchIcon}
               />
-              <TextInput
-                value={searchQuery}
-                onChangeText={handleSearchChange}
-                placeholder="Search..."
-                placeholderTextColor="#94A3B8"
-                style={styles.searchInput}
-              />
-              {searchQuery.trim().length > 0 && (
-                <Pressable
-                  onPress={handleClearSearch}
-                  style={styles.searchClearBtn}
-                  hitSlop={8}
-                >
-                  <Ionicons name="close-circle" size={20} color="#94A3B8" />
-                </Pressable>
-              )}
-            </View>
+              <View style={styles.searchInputPressArea}>
+                <Text style={styles.searchInputPlaceholder}>Search...</Text>
+              </View>
+            </Pressable>
 
             {/* Notifications */}
             <Pressable
@@ -1458,9 +1523,17 @@ export default function HomeScreen({ navigation }) {
               pressed && { opacity: 0.9 },
             ]}
           >
-            <Text style={styles.fabText}>
-              🛒 {cartCount} item{cartCount !== 1 ? "s" : ""} →
-            </Text>
+            <View style={styles.fabLeft}>
+              <View style={styles.fabIconWrap}>
+                <Ionicons name="cart" size={18} color="#000" />
+              </View>
+              <Text style={styles.fabText}>
+                {cartCount} item{cartCount !== 1 ? "s" : ""}
+              </Text>
+            </View>
+            <View style={styles.fabArrowWrap}>
+              <Ionicons name="arrow-forward" size={14} color="#000" />
+            </View>
           </Pressable>
         )}
       </View>
@@ -1591,13 +1664,13 @@ const styles = StyleSheet.create({
   promoPriceMain: {
     marginTop: 6,
     color: "#06C168",
-    fontSize: 40,
+    fontSize: 50,
     lineHeight: 46,
     fontWeight: "900",
     letterSpacing: -1,
   },
   promoPriceSuffix: {
-    fontSize: 16,
+    fontSize: 20,
     lineHeight: 22,
     fontWeight: "700",
     color: "#06C168",
@@ -1705,17 +1778,14 @@ const styles = StyleSheet.create({
     borderColor: "#E2E8F0",
   },
   searchIcon: { marginRight: 10 },
-  searchInput: {
+  searchInputPressArea: {
     flex: 1,
-    color: "#111827",
+    justifyContent: "center",
+  },
+  searchInputPlaceholder: {
+    color: "#94A3B8",
     fontSize: 14,
     fontWeight: "500",
-    paddingVertical: 0,
-  },
-  searchClearBtn: {
-    marginLeft: 8,
-    alignItems: "center",
-    justifyContent: "center",
   },
 
   content: { padding: 16, paddingBottom: 100 },
@@ -2153,12 +2223,40 @@ const styles = StyleSheet.create({
     elevation: 8,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "space-between",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
+  },
+  fabLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+  fabIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+  },
+  fabArrowWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.28)",
   },
   fabText: {
-    color: "#fff",
+    color: "#1f1f1f",
     fontWeight: "900",
-    fontSize: 14,
-    letterSpacing: 0.5,
+    fontSize: 16,
+    letterSpacing: 0.3,
   },
 });

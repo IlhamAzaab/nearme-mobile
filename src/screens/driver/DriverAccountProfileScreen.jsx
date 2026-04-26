@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
@@ -9,12 +10,18 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { useAuth } from "../../app/providers/AuthProvider";
 import OptimizedImage from "../../components/common/OptimizedImage";
-import { DriverProfileLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
+import {
+  getDriverProfileScreenCache,
+  setDriverProfileScreenCache,
+} from "../../utils/driverProfileScreenCache";
 
 const DRIVER_PRIVACY_POLICY_URL = "https://frabjous-douhua-6c3f75.netlify.app/";
 const DRIVER_TERMS_URL = "https://friendly-torrone-f06da3.netlify.app/";
@@ -76,11 +83,37 @@ function SectionRow({ icon, title, subtitle, onPress, isLast = false }) {
 }
 
 export default function DriverAccountProfileScreen({ navigation }) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
+  const [cacheHydrated, setCacheHydrated] = useState(false);
+  const userScope = String(user?.id || "anon");
+  const profileQueryKey = useMemo(
+    () => ["driver", userScope, "account-profile"],
+    [userScope],
+  );
+
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        const cached = await getDriverProfileScreenCache("account-profile");
+        if (cached) {
+          queryClient.setQueryData(profileQueryKey, cached);
+        }
+      } finally {
+        if (mounted) setCacheHydrated(true);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [profileQueryKey, queryClient]);
 
   const profileQuery = useQuery({
-    queryKey: ["driver", "account-profile"],
+    queryKey: profileQueryKey,
     queryFn: async () => {
       const token = await getAccessToken();
       if (!token) throw new Error("No authentication token");
@@ -95,7 +128,8 @@ export default function DriverAccountProfileScreen({ navigation }) {
 
       return data?.driver || data;
     },
-    initialData: () => queryClient.getQueryData(["driver", "account-profile"]),
+    enabled: cacheHydrated,
+    initialData: () => queryClient.getQueryData(profileQueryKey),
     staleTime: 2 * 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
     placeholderData: (previousData) => previousData,
@@ -103,8 +137,16 @@ export default function DriverAccountProfileScreen({ navigation }) {
     refetchOnWindowFocus: false,
   });
 
+  useEffect(() => {
+    if (!profileQuery.data) return;
+    setDriverProfileScreenCache("account-profile", profileQuery.data).catch(
+      () => undefined,
+    );
+  }, [profileQuery.data]);
+
   const summary = normalizeDriverSummary(profileQuery.data || {});
-  const loading = profileQuery.isLoading && !profileQuery.data;
+  const loading =
+    !cacheHydrated || (profileQuery.isLoading && !profileQuery.data);
 
   useEffect(() => {
     if (!profileQuery.isError) return;
@@ -130,13 +172,16 @@ export default function DriverAccountProfileScreen({ navigation }) {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <DriverProfileLoadingSkeleton />
+        <View style={styles.loaderWrap}>
+          <ActivityIndicator size="large" color="#06C168" />
+          <Text style={styles.loaderText}>Loading profile...</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -187,6 +232,12 @@ export default function DriverAccountProfileScreen({ navigation }) {
             title="Bank Account Details"
             subtitle="Payout account information"
             onPress={() => navigation.navigate("DriverBankDetails")}
+          />
+          <SectionRow
+            icon="folder-open-outline"
+            title="Documents"
+            subtitle="Upload and view your renewed documents"
+            onPress={() => navigation.navigate("DriverDocuments")}
           />
           <SectionRow
             icon="document-text-outline"
@@ -242,7 +293,9 @@ export default function DriverAccountProfileScreen({ navigation }) {
         </View>
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View
+        style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 8) }]}
+      >
         <TouchableOpacity
           style={styles.logoutButton}
           activeOpacity={0.85}
@@ -259,6 +312,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#F5F7FA",
+  },
+  loaderWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  loaderText: {
+    fontSize: 14,
+    color: "#475569",
+    fontWeight: "600",
   },
   scrollView: {
     flex: 1,

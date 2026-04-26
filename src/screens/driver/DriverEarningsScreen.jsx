@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { LineChart } from "react-native-chart-kit";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../../app/providers/AuthProvider";
 import { DriverDashboardLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
@@ -98,15 +99,23 @@ async function authFetchJson(url) {
 }
 
 export default function DriverEarningsScreen({ navigation }) {
+  const { user } = useAuth();
+  const userScope = String(user?.id || "anon");
   const [period, setPeriod] = useState("all");
   const [chartPeriod, setChartPeriod] = useState("week");
   const [refreshing, setRefreshing] = useState(false);
   const queryClient = useQueryClient();
 
-  const summaryQueryKey = ["driver", "earnings", "summary", period];
-  const allTimeSummaryQueryKey = ["driver", "earnings", "summary", "all"];
-  const historyQueryKey = ["driver", "earnings", "history"];
-  const chartQueryKey = ["driver", "earnings", "chart", chartPeriod];
+  const summaryQueryKey = ["driver", userScope, "earnings", "summary", period];
+  const allTimeSummaryQueryKey = [
+    "driver",
+    userScope,
+    "earnings",
+    "summary",
+    "all",
+  ];
+  const historyQueryKey = ["driver", userScope, "earnings", "history"];
+  const chartQueryKey = ["driver", userScope, "earnings", "chart", chartPeriod];
 
   const cachedSummary = queryClient.getQueryData(summaryQueryKey);
   const cachedAllTimeSummary = queryClient.getQueryData(allTimeSummaryQueryKey);
@@ -166,7 +175,9 @@ export default function DriverEarningsScreen({ navigation }) {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await queryClient.invalidateQueries({ queryKey: ["driver", "earnings"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["driver", userScope, "earnings"],
+      });
     } finally {
       setRefreshing(false);
     }
@@ -318,33 +329,23 @@ export default function DriverEarningsScreen({ navigation }) {
 
   if (loading) {
     return (
-      <SafeAreaView
-        style={s.container}
-        edges={["left", "right", "top"]}
-      >
+      <SafeAreaView style={s.container} edges={["left", "right", "top"]}>
         <DriverDashboardLoadingSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView
-      style={s.container}
-      edges={["left", "right", "top"]}
-    >
+    <SafeAreaView style={s.container} edges={["left", "right", "top"]}>
       <View style={{ flex: 1 }}>
-        <DriverScreenSection
-          screenKey="DriverEarnings"
-          sectionIndex={0}
-          style={s.headerSection}
-        >
+        <View style={s.headerSection}>
           <DriverScreenHeader
             title="Earnings"
             onBackPress={() => navigation.goBack()}
             rightIcon="refresh"
             onRightPress={onRefresh}
           />
-        </DriverScreenSection>
+        </View>
 
         <DriverScreenSection
           screenKey="DriverEarnings"

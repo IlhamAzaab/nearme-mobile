@@ -68,6 +68,12 @@ export default function ProfileScreen({ navigation }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          data?.message ||
+            `Failed to fetch customer profile (HTTP ${res.status})`,
+        );
+      }
       const customer = data?.customer || {};
 
       const resolvedProfilePic =

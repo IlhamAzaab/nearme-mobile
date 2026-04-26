@@ -12,10 +12,17 @@ import {
   startDriverBackgroundLocationTracking,
   stopDriverBackgroundLocationTracking,
 } from "../../services/driverBackgroundLocationService";
+import {
+  DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
+  getCurrentDriverScopedCacheKey,
+} from "../../utils/driverRequestCache";
+import { useSocket } from "../../context/SocketContext";
 
 const LIVE_TRACKING_INTERVAL_MS = 3000;
 const BACKEND_SYNC_INTERVAL_MS = 5000;
 const ACTIVE_DELIVERY_REFRESH_MS = 20000;
+const LIVE_LOCATION_MAX_ACCURACY_METERS = 150;
+const LIVE_LOCATION_SAMPLE_MAX_AGE_MS = 12000;
 
 function isValidCoordinatePair(latitude, longitude) {
   const lat = Number(latitude);
@@ -31,27 +38,43 @@ function isValidCoordinatePair(latitude, longitude) {
   );
 }
 
-function normalizeLocation(coords) {
+function normalizeLocation(sample) {
+  const coords = sample?.coords || sample;
   if (!coords) return null;
 
   const latitude = Number(coords.latitude);
   const longitude = Number(coords.longitude);
   const heading = Number(coords.heading);
   const speed = Number(coords.speed);
+  const accuracy = Number(coords.accuracy || Infinity);
+  const sampleTimestamp = Number(sample?.timestamp || Date.now());
+  const sampleAgeMs = Math.max(0, Date.now() - sampleTimestamp);
 
   if (!isValidCoordinatePair(latitude, longitude)) return null;
+  if (!Number.isFinite(accuracy) || accuracy > LIVE_LOCATION_MAX_ACCURACY_METERS) {
+    return null;
+  }
+  if (!Number.isFinite(sampleAgeMs) || sampleAgeMs > LIVE_LOCATION_SAMPLE_MAX_AGE_MS) {
+    return null;
+  }
 
   return {
     latitude,
     longitude,
     heading: Number.isFinite(heading) ? heading : 0,
     speed: Number.isFinite(speed) ? speed : null,
+    accuracy,
   };
 }
 
 async function patchAvailableDeliveryCacheLocation(location) {
   try {
-    const raw = await AsyncStorage.getItem("available_deliveries_cache");
+    const scopedKey = await getCurrentDriverScopedCacheKey(
+      DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
+    );
+    const raw =
+      (await AsyncStorage.getItem(scopedKey)) ||
+      (await AsyncStorage.getItem(DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY));
     if (!raw) return;
 
     const parsed = JSON.parse(raw);
@@ -69,10 +92,11 @@ async function patchAvailableDeliveryCacheLocation(location) {
       timestamp: Date.now(),
     };
 
-    await AsyncStorage.setItem(
-      "available_deliveries_cache",
-      JSON.stringify(next),
-    );
+    const nextRaw = JSON.stringify(next);
+    await AsyncStorage.multiSet([
+      [scopedKey, nextRaw],
+      [DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY, nextRaw],
+    ]);
   } catch {
     // Ignore cache write failures.
   }
@@ -80,6 +104,7 @@ async function patchAvailableDeliveryCacheLocation(location) {
 
 export default function DriverLiveLocationSync() {
   const queryClient = useQueryClient();
+  const { emit, isConnected } = useSocket();
   const locationWatchRef = useRef(null);
   const appStateRef = useRef(AppState.currentState);
   const lastBackendSyncAtRef = useRef(0);
@@ -88,11 +113,30 @@ export default function DriverLiveLocationSync() {
   const latestLocationRef = useRef(null);
   const syncInFlightRef = useRef(false);
   const backgroundTrackingEnabledRef = useRef(false);
+  const userIdRef = useRef("default");
+  // Track if we've done initial background setup
+  const initialBackgroundSetupDoneRef = useRef(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      const storedUserId = (await AsyncStorage.getItem("userId")) || "default";
+      if (mounted) {
+        userIdRef.current = storedUserId;
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const updateCaches = useCallback(
     async (location) => {
-      queryClient.setQueriesData(
-        { queryKey: ["driver", "available-deliveries"] },
+      const currentUserId = userIdRef.current || "default";
+      queryClient.setQueryData(
+        ["driver", "available-deliveries", currentUserId],
         (prev) => {
           if (!prev || typeof prev !== "object") return prev;
           return {
@@ -105,8 +149,8 @@ export default function DriverLiveLocationSync() {
         },
       );
 
-      queryClient.setQueriesData(
-        { queryKey: ["driver", "active-deliveries"] },
+      queryClient.setQueryData(
+        ["driver", "active-deliveries", currentUserId],
         (prev) => {
           if (!prev || typeof prev !== "object") return prev;
           return {
@@ -185,6 +229,8 @@ export default function DriverLiveLocationSync() {
     if (hasActiveDeliveries) {
       await flushQueuedDriverLocationUpdates();
     }
+
+    initialBackgroundSetupDoneRef.current = true;
   }, [refreshActiveDeliveryIds, setBackgroundTrackingEnabled]);
 
   const syncLocationToBackend = useCallback(async () => {
@@ -249,10 +295,22 @@ export default function DriverLiveLocationSync() {
       if (!location) return;
 
       latestLocationRef.current = location;
+
+      if (isConnected) {
+        emit("driver:location", {
+          lat: location.latitude,
+          lng: location.longitude,
+          heading: location.heading,
+          speed: location.speed,
+          accuracy: location.accuracy,
+          timestamp: Date.now(),
+        });
+      }
+
       await updateCaches(location);
       await syncLocationToBackend();
     },
-    [syncLocationToBackend, updateCaches],
+    [emit, isConnected, syncLocationToBackend, updateCaches],
   );
 
   const startTracking = useCallback(async () => {
@@ -268,21 +326,21 @@ export default function DriverLiveLocationSync() {
     if (permission.status !== "granted") return;
 
     const initial = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.High,
+      accuracy: Location.Accuracy.BestForNavigation,
     }).catch(() => null);
 
     if (initial?.coords) {
-      await handleLocationUpdate(initial.coords);
+      await handleLocationUpdate(initial);
     }
 
     locationWatchRef.current = await Location.watchPositionAsync(
       {
-        accuracy: Location.Accuracy.High,
+        accuracy: Location.Accuracy.BestForNavigation,
         timeInterval: LIVE_TRACKING_INTERVAL_MS,
         distanceInterval: 0,
       },
       (position) => {
-        handleLocationUpdate(position?.coords).catch(() => {});
+        handleLocationUpdate(position).catch(() => {});
       },
     );
   }, [handleLocationUpdate]);
@@ -295,20 +353,38 @@ export default function DriverLiveLocationSync() {
   }, []);
 
   useEffect(() => {
-    startTracking();
-    syncTrackingLifecycle().catch(() => {});
+    // Start background lifecycle FIRST, then start foreground watch.
+    // This ensures background tracking is enabled before the app can go to background.
+    syncTrackingLifecycle()
+      .then(() => {
+        startTracking().catch(() => {});
+      })
+      .catch(() => {
+        // Even if lifecycle sync fails, start foreground tracking anyway
+        startTracking().catch(() => {});
+      });
 
     const appStateSub = AppState.addEventListener("change", (nextAppState) => {
       const previous = appStateRef.current;
       appStateRef.current = nextAppState;
 
       if (previous.match(/inactive|background/) && nextAppState === "active") {
+        // App returned to foreground:
+        // 1. Restart foreground watch
+        // 2. Re-sync lifecycle (checks for new deliveries, flushes queue)
         startTracking().catch(() => {});
         syncTrackingLifecycle().catch(() => {});
       }
 
       if (nextAppState.match(/inactive|background/)) {
+        // App going to background:
+        // 1. Stop foreground watch (saves battery, background task handles GPS)
         stopTracking();
+        // 2. Ensure background tracking is started if not already done
+        //    This handles the race condition where syncTrackingLifecycle hasn't finished yet
+        if (!initialBackgroundSetupDoneRef.current) {
+          syncTrackingLifecycle().catch(() => {});
+        }
       }
     });
 
@@ -328,9 +404,9 @@ export default function DriverLiveLocationSync() {
       networkSub?.();
       clearInterval(lifecycleInterval);
 
-      if (activeDeliveryIdsRef.current.length === 0) {
-        setBackgroundTrackingEnabled(false).catch(() => {});
-      }
+      // Don't stop background tracking on unmount — it should keep running
+      // for active deliveries even when navigating between screens.
+      // Background tracking will auto-stop when no active deliveries remain.
     };
   }, [
     setBackgroundTrackingEnabled,

@@ -53,6 +53,22 @@ const CHECKOUT_ADDRESS_PIN_HTML =
 const PIN_REQUIRED_ALERT_MESSAGE = "Pin your delivery location on the map.";
 
 function hasValidCoordinates(latitude, longitude) {
+  if (
+    latitude === null ||
+    latitude === undefined ||
+    longitude === null ||
+    longitude === undefined
+  ) {
+    return false;
+  }
+
+  if (
+    (typeof latitude === "string" && latitude.trim() === "") ||
+    (typeof longitude === "string" && longitude.trim() === "")
+  ) {
+    return false;
+  }
+
   const lat = Number(latitude);
   const lng = Number(longitude);
   return (
@@ -63,6 +79,14 @@ function hasValidCoordinates(latitude, longitude) {
     lng >= -180 &&
     lng <= 180
   );
+}
+
+function parseNullableCoordinate(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 // ============================================================================
@@ -272,7 +296,12 @@ export default function CheckoutScreen({ route, navigation }) {
       const syncCustomerProfileAddress = async () => {
         try {
           const token = await getAccessToken();
-          if (!token) return;
+          if (!token) {
+            setPosition(null);
+            setHasExplicitDeliveryLocation(false);
+            setIsProfilePinMissing(true);
+            return;
+          }
 
           const profileRes = await fetch(
             `${API_BASE_URL}/cart/customer-profile`,
@@ -285,8 +314,8 @@ export default function CheckoutScreen({ route, navigation }) {
 
           const profileAddress = String(customer?.address || "").trim();
           const profileCity = String(customer?.city || "").trim();
-          const profileLat = Number(customer?.latitude);
-          const profileLng = Number(customer?.longitude);
+          const profileLat = parseNullableCoordinate(customer?.latitude);
+          const profileLng = parseNullableCoordinate(customer?.longitude);
 
           setAddress(profileAddress);
           setCity(profileCity);
@@ -316,6 +345,10 @@ export default function CheckoutScreen({ route, navigation }) {
           }
         } catch (error) {
           console.error("Error syncing profile address on checkout:", error);
+          // Fail-safe: treat profile sync failures as missing pin so user is redirected to pin.
+          setPosition(null);
+          setHasExplicitDeliveryLocation(false);
+          setIsProfilePinMissing(true);
         }
       };
 
@@ -504,8 +537,12 @@ export default function CheckoutScreen({ route, navigation }) {
           profileData.customer.address || "",
         ).trim();
         const profileCity = String(profileData.customer.city || "").trim();
-        const profileLat = Number(profileData.customer.latitude);
-        const profileLng = Number(profileData.customer.longitude);
+        const profileLat = parseNullableCoordinate(
+          profileData.customer.latitude,
+        );
+        const profileLng = parseNullableCoordinate(
+          profileData.customer.longitude,
+        );
 
         setPhone(profilePhone);
         setAddress(profileAddress);
@@ -679,6 +716,28 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   }, [isProfilePinMissing]);
 
+  const hasValidPinnedCoordinates = useMemo(
+    () => hasValidCoordinates(position?.latitude, position?.longitude),
+    [position?.latitude, position?.longitude],
+  );
+
+  const shouldRedirectToPinScreen = useMemo(() => {
+    if (loading) return false;
+    if (!cartId) return false;
+    return !hasValidPinnedCoordinates;
+  }, [loading, cartId, hasValidPinnedCoordinates]);
+
+  useEffect(() => {
+    if (!shouldRedirectToPinScreen) return;
+    if (hasShownMissingPinAlertRef.current) return;
+
+    hasShownMissingPinAlertRef.current = true;
+    navigation.replace("AddressPicker", {
+      cartId,
+      redirectTo: "Checkout",
+    });
+  }, [shouldRedirectToPinScreen, cartId, navigation]);
+
   const handlePlaceOrder = async () => {
     try {
       if (checkoutBlockReason) {
@@ -708,7 +767,8 @@ export default function CheckoutScreen({ route, navigation }) {
             Number.isFinite(effectiveDistanceKm) && effectiveDistanceKm > 0
               ? Number(Number(effectiveDistanceKm).toFixed(2))
               : undefined,
-          estimated_duration_min: estimatedDeliveryWindow?.midpoint || undefined,
+          estimated_duration_min:
+            estimatedDeliveryWindow?.midpoint || undefined,
         }),
       });
 
@@ -963,13 +1023,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
     if (!isSubtotalValid || deliveryFee === null) return null;
     return subtotal + serviceFee + deliveryFee;
-  }, [
-    deliveryFee,
-    isSubtotalValid,
-    quoteTotalAmount,
-    serviceFee,
-    subtotal,
-  ]);
+  }, [deliveryFee, isSubtotalValid, quoteTotalAmount, serviceFee, subtotal]);
 
   const finalTotal = useMemo(() => {
     if (Number.isFinite(quoteTotalAmount)) return quoteTotalAmount;
@@ -1411,9 +1465,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
           <Row
             label="Delivery fee"
-            value={
-              deliveryFee !== null ? formatPrice(deliveryFee) : "--"
-            }
+            value={deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
           />
           <Row
             label="Service fee"
@@ -1456,18 +1508,18 @@ export default function CheckoutScreen({ route, navigation }) {
             {placing
               ? "Placing..."
               : routeLoading && !Number.isFinite(quoteDistanceKm)
-                      ? "Calculating..."
-                      : !hasExplicitDeliveryLocation
-                        ? "Location not provided"
-                        : !String(city || "").trim()
-                          ? "Add city to continue"
-                          : !isDistanceWithinLimit && routeInfo
-                            ? `Not available beyond ${maxOrderDistanceKm} km`
-                            : !isSubtotalValid
-                              ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
-                              : finalTotal !== null
-                                ? `Place Order • ${formatPrice(finalTotal)}`
-                                : "Place Order"}
+                ? "Calculating..."
+                : !hasExplicitDeliveryLocation
+                  ? "Location not provided"
+                  : !String(city || "").trim()
+                    ? "Add city to continue"
+                    : !isDistanceWithinLimit && routeInfo
+                      ? `Not available beyond ${maxOrderDistanceKm} km`
+                      : !isSubtotalValid
+                        ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
+                        : finalTotal !== null
+                          ? `Place Order • ${formatPrice(finalTotal)}`
+                          : "Place Order"}
           </Text>
         </Pressable>
       </View>

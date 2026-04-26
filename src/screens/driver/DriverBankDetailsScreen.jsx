@@ -1,16 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DriverProfileLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
+import {
+  getDriverProfileScreenCache,
+  setDriverProfileScreenCache,
+} from "../../utils/driverProfileScreenCache";
 
 function formatDateTime(value) {
   if (!value) return "-";
@@ -23,14 +21,6 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function maskAccountNumber(value) {
-  const text = String(value || "").replace(/\s+/g, "");
-  if (!text) return "-";
-  if (text.length <= 4) return text;
-  const hidden = "*".repeat(Math.max(text.length - 4, 4));
-  return `${hidden}${text.slice(-4)}`;
 }
 
 function DetailRow({ label, value, isLast = false }) {
@@ -47,8 +37,8 @@ export default function DriverBankDetailsScreen({ navigation }) {
   const [notFound, setNotFound] = useState(false);
   const [bank, setBank] = useState(null);
 
-  const loadBankDetails = useCallback(async () => {
-    setLoading(true);
+  const loadBankDetails = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setNotFound(false);
 
     try {
@@ -67,6 +57,10 @@ export default function DriverBankDetailsScreen({ navigation }) {
       if (res.status === 404) {
         setNotFound(true);
         setBank(null);
+        await setDriverProfileScreenCache("bank-details", {
+          bank: null,
+          notFound: true,
+        });
         return;
       }
 
@@ -75,34 +69,51 @@ export default function DriverBankDetailsScreen({ navigation }) {
         throw new Error(payload?.message || "Failed to load bank details");
       }
 
-      setBank(payload?.bankAccount || null);
+      const nextBank = payload?.bankAccount || null;
+      setBank(nextBank);
+      await setDriverProfileScreenCache("bank-details", {
+        bank: nextBank,
+        notFound: !nextBank,
+      });
     } catch (error) {
-      Alert.alert("Error", error?.message || "Unable to load bank details.");
+      if (!silent) {
+        Alert.alert("Error", error?.message || "Unable to load bank details.");
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadBankDetails();
-  }, [loadBankDetails]);
+    let mounted = true;
 
-  const accountNumber = useMemo(
-    () => maskAccountNumber(bank?.account_number),
-    [bank?.account_number],
-  );
+    (async () => {
+      const cached = await getDriverProfileScreenCache("bank-details");
+      if (cached && mounted) {
+        setBank(cached.bank || null);
+        setNotFound(!!cached.notFound);
+        setLoading(false);
+        loadBankDetails({ silent: true });
+        return;
+      }
+      loadBankDetails();
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [loadBankDetails]);
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={["top"]}>
-        <ActivityIndicator size="large" color="#111827" />
-        <Text style={styles.loadingText}>Loading bank details...</Text>
+      <SafeAreaView style={styles.loadingContainer} edges={["top", "bottom"]}>
+        <DriverProfileLoadingSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.headerButton}
@@ -161,7 +172,10 @@ export default function DriverBankDetailsScreen({ navigation }) {
           />
           <DetailRow label="Bank Name" value={bank.bank_name || "-"} />
           <DetailRow label="Branch" value={bank.branch || "-"} />
-          <DetailRow label="Account Number" value={accountNumber} />
+          <DetailRow
+            label="Account Number"
+            value={bank.account_number || "-"}
+          />
           <DetailRow
             label="Saved On"
             value={formatDateTime(bank.created_at)}

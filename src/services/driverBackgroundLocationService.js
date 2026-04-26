@@ -2,6 +2,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { API_BASE_URL } from "../constants/api";
 import { getAccessToken } from "../lib/authStorage";
+import {
+  DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
+  getCurrentDriverScopedCacheKey,
+} from "../utils/driverRequestCache";
 
 let TaskManager = null;
 try {
@@ -15,11 +19,15 @@ export const DRIVER_BACKGROUND_LOCATION_TASK =
 
 const BACKGROUND_SYNC_MIN_INTERVAL_MS = 15000;
 const LAST_SYNC_AT_KEY = "@driver_bg_last_sync_at";
-const AVAILABLE_CACHE_KEY = "available_deliveries_cache";
+const AVAILABLE_CACHE_KEY = DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY;
 const ACTIVE_DELIVERY_CACHE_KEY = "@driver_bg_active_delivery_ids";
 const LOCATION_UPLOAD_QUEUE_KEY = "@driver_location_upload_queue";
 const ACTIVE_DELIVERY_CACHE_MAX_AGE_MS = 90000;
 const MAX_QUEUED_LOCATION_UPDATES = 60;
+
+// Track consecutive failures to avoid premature stop
+let consecutiveEmptyFetches = 0;
+const MAX_EMPTY_FETCHES_BEFORE_STOP = 3;
 
 function getTaskManagerApi() {
   if (!TaskManager) return null;
@@ -175,7 +183,11 @@ async function enqueueLocationUpdate(location) {
 
 async function patchAvailableCache(location) {
   try {
-    const raw = await AsyncStorage.getItem(AVAILABLE_CACHE_KEY);
+    const scopedCacheKey =
+      await getCurrentDriverScopedCacheKey(AVAILABLE_CACHE_KEY);
+    const raw =
+      (await AsyncStorage.getItem(scopedCacheKey)) ||
+      (await AsyncStorage.getItem(AVAILABLE_CACHE_KEY));
     if (!raw) return;
 
     const parsed = JSON.parse(raw);
@@ -193,7 +205,11 @@ async function patchAvailableCache(location) {
       timestamp: Date.now(),
     };
 
-    await AsyncStorage.setItem(AVAILABLE_CACHE_KEY, JSON.stringify(next));
+    const nextRaw = JSON.stringify(next);
+    await AsyncStorage.multiSet([
+      [scopedCacheKey, nextRaw],
+      [AVAILABLE_CACHE_KEY, nextRaw],
+    ]);
   } catch {
     // Ignore cache update errors in background task.
   }
@@ -237,6 +253,7 @@ async function getActiveDeliveryIds(token) {
     });
 
     if (!response.ok) {
+      // API failed — don't return empty, use stale cache if available
       return cached?.ids || [];
     }
 
@@ -256,6 +273,7 @@ async function getActiveDeliveryIds(token) {
 
     return writeActiveDeliveryCache(activeIds);
   } catch {
+    // Network error — use stale cache to keep tracking alive
     return cached?.ids || [];
   }
 }
@@ -323,9 +341,21 @@ async function syncLocationToBackend(location) {
 
   const activeDeliveryIds = await getActiveDeliveryIds(token);
   if (!activeDeliveryIds.length) {
-    await stopDriverBackgroundLocationTracking().catch(() => {});
+    // Don't stop immediately — might be a temporary API failure.
+    // Only stop after multiple consecutive empty fetches.
+    consecutiveEmptyFetches += 1;
+    if (consecutiveEmptyFetches >= MAX_EMPTY_FETCHES_BEFORE_STOP) {
+      consecutiveEmptyFetches = 0;
+      await stopDriverBackgroundLocationTracking().catch(() => {});
+    } else {
+      // Queue the location in case we get IDs next time
+      await enqueueLocationUpdate(location);
+    }
     return;
   }
+
+  // Reset consecutive empty counter on success
+  consecutiveEmptyFetches = 0;
 
   const uploaded = await uploadLocationToDeliveries({
     token,
@@ -397,17 +427,24 @@ export async function startDriverBackgroundLocationTracking() {
     return { ok: true, reason: "already_started" };
   }
 
+  // Reset consecutive empty counter when starting fresh
+  consecutiveEmptyFetches = 0;
+
   await Location.startLocationUpdatesAsync(DRIVER_BACKGROUND_LOCATION_TASK, {
     accuracy: Location.Accuracy.BestForNavigation,
     timeInterval: 15000,
-    deferredUpdatesInterval: 15000,
+    deferredUpdatesInterval: 10000,
     distanceInterval: 10,
     pausesUpdatesAutomatically: false,
     showsBackgroundLocationIndicator: true,
+    // Android: use motorized vehicle activity type for best GPS behavior
+    activityType: Location.ActivityType.AutomotiveNavigation,
     foregroundService: {
       notificationTitle: "Meezo Driver Tracking",
       notificationBody: "Live location is active during deliveries",
       notificationColor: "#06C168",
+      // Keep the foreground service alive even when user swipes the app away
+      killServiceOnDestroy: false,
     },
   });
 
@@ -426,6 +463,9 @@ export async function stopDriverBackgroundLocationTracking() {
   if (started) {
     await Location.stopLocationUpdatesAsync(DRIVER_BACKGROUND_LOCATION_TASK);
   }
+
+  // Reset counter
+  consecutiveEmptyFetches = 0;
 
   await Promise.allSettled([
     AsyncStorage.removeItem(LAST_SYNC_AT_KEY),

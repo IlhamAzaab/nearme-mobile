@@ -21,9 +21,14 @@ import {
   useState,
 } from "react";
 import { API_BASE_URL } from "../constants/api";
+import {
+  DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
+  getCurrentDriverScopedCacheKey,
+} from "../utils/driverRequestCache";
 import { useSocket } from "./SocketContext";
 
-const AVAILABLE_DELIVERIES_CACHE_KEY = "available_deliveries_cache";
+const AVAILABLE_DELIVERIES_CACHE_KEY =
+  DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY;
 const DRIVER_STATUS_ENDPOINT = "/driver/working-hours-status";
 const DRIVER_POPUP_SOUND_AUTO_STOP_MS = 30000;
 
@@ -94,9 +99,12 @@ export function DriverDeliveryNotificationProvider({ children }) {
   const enrichWithCachedAvailableDelivery = useCallback(
     async (deliveryData) => {
       try {
-        const cachedRaw = await AsyncStorage.getItem(
+        const scopedCacheKey = await getCurrentDriverScopedCacheKey(
           AVAILABLE_DELIVERIES_CACHE_KEY,
         );
+        const cachedRaw =
+          (await AsyncStorage.getItem(scopedCacheKey)) ||
+          (await AsyncStorage.getItem(AVAILABLE_DELIVERIES_CACHE_KEY));
         if (!cachedRaw) return deliveryData;
 
         const parsed = JSON.parse(cachedRaw);

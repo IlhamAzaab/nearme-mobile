@@ -327,11 +327,21 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
-      const total = (data.carts || []).reduce(
-        (sum, cart) =>
-          sum + (cart.items || []).reduce((s, item) => s + item.quantity, 0),
-        0,
-      );
+      const total = (data.carts || []).reduce((sum, cart) => {
+        const cartRestaurantId = String(
+          cart?.restaurant_id || cart?.restaurant?.id || "",
+        );
+        if (cartRestaurantId !== String(restaurantId)) {
+          return sum;
+        }
+        return (
+          sum +
+          (cart.items || []).reduce(
+            (s, item) => s + Number(item.quantity || 0),
+            0,
+          )
+        );
+      }, 0);
       setCartCount(total);
     } catch (err) {
       console.error("Fetch cart error:", err);
@@ -403,6 +413,19 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
       foodId: food.id,
     });
   };
+
+  const openRestaurantCart = useCallback(() => {
+    navigation.navigate("MainTabs", {
+      screen: "Cart",
+      params: {
+        screen: "CartMain",
+        params: {
+          restaurantId,
+          menuCartTs: Date.now(),
+        },
+      },
+    });
+  }, [navigation, restaurantId]);
 
   // ─── Food card renderer ───
   const renderFoodCard = useCallback(
@@ -630,24 +653,14 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* Cart icon */}
-        <Pressable
-          onPress={() =>
-            navigation.navigate("MainTabs", {
-              screen: "Cart",
-              params: { screen: "CartMain" },
-            })
-          }
-          style={styles.cartBtn}
-        >
-          <Ionicons name="cart-outline" size={22} color={GREEN} />
-          {cartCount > 0 && (
-            <View style={styles.cartBadge}>
-              <Text style={styles.cartBadgeText}>
-                {cartCount > 9 ? "9+" : cartCount}
-              </Text>
-            </View>
-          )}
+        {/* Cart CTA */}
+        <Pressable onPress={openRestaurantCart} style={styles.cartBtn}>
+          <Ionicons name="cart" size={18} color="#fff" />
+          <Text style={styles.cartBtnLabel}>
+            Cart
+            {cartCount > 0 ? ` (${cartCount > 99 ? "99+" : cartCount})` : ""}
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color="#fff" />
         </Pressable>
       </View>
 
@@ -862,22 +875,34 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
       {/* ── Floating cart button ── */}
       {cartCount > 0 && (
         <Pressable
-          onPress={() =>
-            navigation.navigate("MainTabs", {
-              screen: "Cart",
-              params: { screen: "CartMain" },
-            })
-          }
+          onPress={openRestaurantCart}
           style={({ pressed }) => [
             styles.floatingCart,
-            pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] },
+            pressed && { opacity: 0.95, transform: [{ scale: 0.985 }] },
           ]}
         >
-          <Ionicons name="cart" size={20} color="#fff" />
-          <Text style={styles.floatingCartText}>
-            {cartCount} item{cartCount !== 1 ? "s" : ""}
-          </Text>
-          <Ionicons name="chevron-forward" size={16} color="#fff" />
+          <LinearGradient
+            colors={["#06C168", "#059B56"]}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.floatingCartGradient}
+          >
+            <View style={styles.floatingCartLeft}>
+              <View style={styles.floatingCartIconCircle}>
+                <Ionicons name="cart" size={19} color="#fff" />
+              </View>
+              <View>
+                <Text style={styles.floatingCartTitle}>View cart</Text>
+                <Text style={styles.floatingCartSubtext}>
+                  {cartCount} item{cartCount !== 1 ? "s" : ""} from this
+                  restaurant
+                </Text>
+              </View>
+            </View>
+            <View style={styles.floatingCartArrowWrap}>
+              <Ionicons name="arrow-forward" size={16} color="#fff" />
+            </View>
+          </LinearGradient>
         </Pressable>
       )}
     </SafeAreaView>
@@ -995,29 +1020,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cartBtn: {
-    width: 42,
     height: 42,
-    borderRadius: 21,
-    backgroundColor: "#E6F9EE",
+    borderRadius: 14,
+    backgroundColor: "#06B060",
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.28)",
+    shadowColor: GREEN,
+    shadowOpacity: 0.28,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
-  cartBadge: {
-    position: "absolute",
-    top: -2,
-    right: -2,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: GREEN,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 4,
-  },
-  cartBadgeText: {
+  cartBtnLabel: {
     color: "#fff",
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "800",
+    letterSpacing: 0.2,
   },
 
   /* ── Cover image ── */
@@ -1206,6 +1229,7 @@ const styles = StyleSheet.create({
   /* ── Food grid ── */
   listContent: {
     padding: CARD_PADDING,
+    paddingBottom: 112,
   },
   columnWrapper: {
     justifyContent: "space-between",
@@ -1384,24 +1408,59 @@ const styles = StyleSheet.create({
   /* ── Floating cart ── */
   floatingCart: {
     position: "absolute",
-    bottom: 20,
+    bottom: 18,
+    left: 16,
     right: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: GREEN,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderRadius: 999,
+    borderRadius: 18,
+    overflow: "hidden",
     shadowColor: GREEN,
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
+    shadowOpacity: 0.34,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 8,
   },
-  floatingCartText: {
+  floatingCartGradient: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  floatingCartLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexShrink: 1,
+  },
+  floatingCartIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.26)",
+  },
+  floatingCartTitle: {
     color: "#fff",
     fontWeight: "800",
     fontSize: 14,
+  },
+  floatingCartSubtext: {
+    color: "rgba(255,255,255,0.92)",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  floatingCartArrowWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
   },
 });

@@ -1,17 +1,22 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { WebView } from "react-native-webview";
+import { DriverProfileLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
+import { useAuth } from "../../app/providers/AuthProvider";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
+import {
+  getDriverProfileScreenCache,
+  setDriverProfileScreenCache,
+} from "../../utils/driverProfileScreenCache";
 
 function formatDateTime(value) {
   if (!value) return "-";
@@ -26,13 +31,63 @@ function formatDateTime(value) {
   });
 }
 
+function decodeHtmlEntities(text) {
+  if (!text) return "";
+  return String(text)
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function htmlToReadableParagraphs(html) {
+  if (!html) return ["Contract content is unavailable."];
+
+  const normalized = String(html)
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\s*\/\s*p\s*>/gi, "\n\n")
+    .replace(/<\s*\/\s*li\s*>/gi, "\n")
+    .replace(/<\s*li\b[^>]*>/gi, "- ")
+    .replace(/<\s*\/\s*h[1-6]\s*>/gi, "\n\n")
+    .replace(/<\s*h[1-6]\b[^>]*>/gi, "")
+    .replace(/<[^>]+>/g, "");
+
+  const decoded = decodeHtmlEntities(normalized)
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!decoded) return ["Contract content is unavailable."];
+
+  return decoded
+    .split(/\n\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function isHeadingLine(line) {
+  if (!line) return false;
+  const cleaned = line.replace(/[\s:.-]+$/g, "").trim();
+  if (!cleaned) return false;
+  const compact = cleaned.replace(/[^a-zA-Z]/g, "");
+  if (compact.length < 4 || compact.length > 70) return false;
+  const uppercaseRatio =
+    compact.split("").filter((ch) => ch === ch.toUpperCase()).length /
+    compact.length;
+  return /^\d+(\.\d+)*\s+/.test(cleaned) || uppercaseRatio > 0.75;
+}
+
 export default function DriverContractScreen({ navigation }) {
+  const { user } = useAuth();
+  const userScope = String(user?.id || "anon");
   const [loading, setLoading] = useState(true);
   const [contract, setContract] = useState(null);
   const [notFound, setNotFound] = useState(false);
 
-  const loadContract = useCallback(async () => {
-    setLoading(true);
+  const loadContract = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setNotFound(false);
 
     try {
@@ -51,6 +106,10 @@ export default function DriverContractScreen({ navigation }) {
       if (res.status === 404) {
         setNotFound(true);
         setContract(null);
+        await setDriverProfileScreenCache("contract-details", {
+          contract: null,
+          notFound: true,
+        });
         return;
       }
 
@@ -59,86 +118,60 @@ export default function DriverContractScreen({ navigation }) {
         throw new Error(payload?.message || "Failed to load contract");
       }
 
-      setContract(payload?.contract || null);
+      const nextContract = payload?.contract || null;
+      setContract(nextContract);
+      await setDriverProfileScreenCache("contract-details", {
+        contract: nextContract,
+        notFound: !nextContract,
+      });
     } catch (error) {
-      Alert.alert("Error", error?.message || "Unable to load contract.");
+      if (!silent) {
+        Alert.alert("Error", error?.message || "Unable to load contract.");
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadContract();
-  }, [loadContract]);
+    let mounted = true;
 
-  const contractDocument = useMemo(() => {
-    const body =
-      contract?.contract_html || "<p>Contract content is unavailable.</p>";
+    setContract(null);
+    setNotFound(false);
+    setLoading(true);
 
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <style>
-            :root {
-              color-scheme: light;
-            }
-            body {
-              margin: 0;
-              background: #f8fafc;
-              color: #111827;
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-              line-height: 1.7;
-              font-size: 15px;
-            }
-            .wrap {
-              max-width: 820px;
-              margin: 0 auto;
-              padding: 22px 18px 26px;
-            }
-            h1, h2, h3, h4 {
-              color: #0f172a;
-              margin-top: 0;
-            }
-            h1, h2 {
-              margin-top: 8px;
-              margin-bottom: 10px;
-            }
-            p {
-              margin: 0 0 12px;
-            }
-            ul, ol {
-              padding-left: 22px;
-              margin: 0 0 12px;
-            }
-            li {
-              margin-bottom: 6px;
-            }
-            strong {
-              color: #0f172a;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="wrap">${body}</div>
-        </body>
-      </html>
-    `;
-  }, [contract?.contract_html]);
+    (async () => {
+      const cached = await getDriverProfileScreenCache("contract-details");
+      if (cached && mounted) {
+        setContract(cached.contract || null);
+        setNotFound(!!cached.notFound);
+        setLoading(false);
+        loadContract({ silent: true });
+        return;
+      }
+      loadContract();
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [loadContract, userScope]);
+
+  const contractParagraphs = useMemo(
+    () => htmlToReadableParagraphs(contract?.contract_html),
+    [contract?.contract_html],
+  );
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={["top"]}>
-        <ActivityIndicator size="large" color="#111827" />
-        <Text style={styles.loadingText}>Loading contract...</Text>
+      <SafeAreaView style={styles.loadingContainer} edges={["top", "bottom"]}>
+        <DriverProfileLoadingSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.headerButton}
@@ -170,6 +203,11 @@ export default function DriverContractScreen({ navigation }) {
       ) : (
         <View style={styles.contentWrap}>
           <View style={styles.metaCard}>
+            <View style={styles.badgeRow}>
+              <View style={styles.badgePill}>
+                <Text style={styles.badgeText}>DRIVER AGREEMENT</Text>
+              </View>
+            </View>
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>Version</Text>
               <Text style={styles.metaValue}>
@@ -184,16 +222,24 @@ export default function DriverContractScreen({ navigation }) {
             </View>
           </View>
 
-          <View style={styles.webWrap}>
-            <WebView
-              source={{ html: contractDocument }}
-              style={styles.webView}
-              originWhitelist={["*"]}
-              startInLoadingState
-              javaScriptEnabled
-              domStorageEnabled
+          <View style={styles.contractCard}>
+            <ScrollView
+              contentContainerStyle={styles.contractScroll}
               showsVerticalScrollIndicator={false}
-            />
+            >
+              {contractParagraphs.map((line, index) => (
+                <Text
+                  key={`${index}:${line.slice(0, 16)}`}
+                  style={
+                    isHeadingLine(line)
+                      ? styles.contractHeading
+                      : styles.contractParagraph
+                  }
+                >
+                  {line}
+                </Text>
+              ))}
+            </ScrollView>
           </View>
         </View>
       )}
@@ -250,8 +296,27 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 12,
+  },
+  badgeRow: {
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F7",
+    marginBottom: 6,
+  },
+  badgePill: {
+    alignSelf: "flex-start",
+    backgroundColor: "#DCFCE7",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  badgeText: {
+    color: "#166534",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.3,
   },
   metaRow: {
     flexDirection: "row",
@@ -268,7 +333,7 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     fontWeight: "700",
   },
-  webWrap: {
+  contractCard: {
     flex: 1,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
@@ -276,9 +341,21 @@ const styles = StyleSheet.create({
     borderColor: "#E5E7EB",
     overflow: "hidden",
   },
-  webView: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
+  contractScroll: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 10,
+  },
+  contractHeading: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginTop: 2,
+  },
+  contractParagraph: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: "#334155",
   },
   emptyWrap: {
     flex: 1,

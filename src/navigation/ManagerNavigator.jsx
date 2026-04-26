@@ -22,6 +22,7 @@ import VerifyDepositScreen from "../screens/manager/VerifyDepositScreen";
 import AddDriverScreen from "../screens/manager/drivers/AddDriverScreen";
 import DriverManagementScreen from "../screens/manager/drivers/DriverManagementScreen";
 import DriverPaymentsScreen from "../screens/manager/drivers/DriverPaymentsScreen";
+import DriverRenewedDocumentsScreen from "../screens/manager/drivers/DriverRenewedDocumentsScreen";
 import DriverVerificationScreen from "../screens/manager/drivers/DriverVerificationScreen";
 import ProcessDriverPaymentScreen from "../screens/manager/drivers/ProcessDriverPaymentScreen";
 
@@ -89,6 +90,10 @@ function DriversStack() {
       <DriversStackNav.Screen
         name="DriverVerification"
         component={DriverVerificationScreen}
+      />
+      <DriversStackNav.Screen
+        name="DriverRenewedDocuments"
+        component={DriverRenewedDocumentsScreen}
       />
       <DriversStackNav.Screen
         name="DriverPayments"

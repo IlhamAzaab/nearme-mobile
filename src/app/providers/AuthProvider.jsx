@@ -14,6 +14,7 @@ import {
   SIGNUP_FLOW_STATE_KEY,
   sanitizeSignupFlowState,
 } from "../../constants/signupFlowState";
+import { mobileQueryClient } from "../../lib/queryClient";
 
 const AuthContext = createContext(null);
 
@@ -49,6 +50,8 @@ export function AuthProvider({ children }) {
     } catch (error) {
       console.error("Auth clear session failed:", error);
     }
+
+    mobileQueryClient.clear();
 
     setUser(null);
     setUserRole(null);

@@ -31,8 +31,7 @@ import Svg, { Path } from "react-native-svg";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
 const WEB_CARD_MAX_WIDTH = 560;
-const TERMS_AND_CONDITIONS_URL =
-  "https://tranquil-medovik-7b2e45.netlify.app/";
+const TERMS_AND_CONDITIONS_URL = "https://tranquil-medovik-7b2e45.netlify.app/";
 
 const UserIcon = ({ size = 20, color = "#9CA3AF" }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -87,6 +86,8 @@ export default function CompleteProfileScreen({ navigation, route }) {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    address: "",
+    city: "",
     password: "",
   });
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -151,9 +152,11 @@ export default function CompleteProfileScreen({ navigation, route }) {
     if (
       !formData.name.trim() ||
       !formData.email.trim() ||
+      !formData.address.trim() ||
+      !formData.city.trim() ||
       !formData.password.trim()
     ) {
-      setError("Name, email and password are required");
+      setError("Name, email, address, city and password are required");
       triggerShake();
       return;
     }
@@ -196,6 +199,8 @@ export default function CompleteProfileScreen({ navigation, route }) {
         body: JSON.stringify({
           name: formData.name.trim(),
           email: normalizedEmail,
+          address: formData.address.trim(),
+          city: formData.city.trim(),
           password: formData.password.trim(),
         }),
       });
@@ -321,11 +326,43 @@ export default function CompleteProfileScreen({ navigation, route }) {
                 />
 
                 <FloatingLabelInput
+                  label="Address"
+                  value={formData.address}
+                  onChangeText={(v) => handleChange("address", v)}
+                  inactivePlaceholder="Address"
+                  activePlaceholder="Eg: 123 Main Street"
+                  autoCapitalize="words"
+                  leftIcon={
+                    <Ionicons
+                      name="location-outline"
+                      size={20}
+                      color="#9CA3AF"
+                    />
+                  }
+                />
+
+                <FloatingLabelInput
+                  label="Area or City"
+                  value={formData.city}
+                  onChangeText={(v) => handleChange("city", v)}
+                  inactivePlaceholder="Area or City"
+                  activePlaceholder="Eg: Periye Kinniya"
+                  autoCapitalize="words"
+                  leftIcon={
+                    <Ionicons
+                      name="business-outline"
+                      size={20}
+                      color="#9CA3AF"
+                    />
+                  }
+                />
+
+                <FloatingLabelInput
                   label="Email"
                   value={formData.email}
                   onChangeText={(v) => handleChange("email", v)}
                   inactivePlaceholder="Email"
-                  activePlaceholder="Eg: customer1@gmail.com"
+                  activePlaceholder="Eg: user@gmail.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
                   leftIcon={<EmailIcon size={20} color="#9CA3AF" />}

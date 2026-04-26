@@ -3,7 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect } from "@react-navigation/native";
+import { StackActions, useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import {
   DeviceEventEmitter,
@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CartScreen from "../screens/customer/CartScreen";
 import FoodDetailScreen from "../screens/customer/FoodDetailScreen";
 import HomeScreen from "../screens/customer/HomeScreen";
+import HomeSearchScreen from "../screens/customer/HomeSearchScreen";
 import NotificationsScreen from "../screens/customer/NotificationsScreen";
 import PlacingOrderScreen from "../screens/customer/PlacingOrderScreen";
 import OrderReceivedScreen from "../screens/customer/OrderReceivedScreen";
@@ -46,6 +47,7 @@ const CartStack = createNativeStackNavigator();
 const ProfileStack = createNativeStackNavigator();
 
 const HomeScreenAnimated = wrapCustomerScreen(HomeScreen);
+const HomeSearchScreenAnimated = wrapCustomerScreen(HomeSearchScreen);
 const CartScreenAnimated = wrapCustomerScreen(CartScreen);
 const OrdersScreenAnimated = wrapCustomerScreen(OrdersScreen);
 const ProfileScreenAnimated = wrapCustomerScreen(ProfileScreen);
@@ -83,6 +85,10 @@ function HomeStackScreen() {
   return (
     <HomeStack.Navigator screenOptions={customerStackScreenOptions}>
       <HomeStack.Screen name="HomeMain" component={HomeScreenAnimated} />
+      <HomeStack.Screen
+        name="HomeSearch"
+        component={HomeSearchScreenAnimated}
+      />
       <HomeStack.Screen
         name="RestaurantFoods"
         component={RestaurantFoodsScreenAnimated}
@@ -295,7 +301,18 @@ function UberEatsTabBar({ state, descriptors, navigation, insets }) {
         canPreventDefault: true,
       });
 
-      if (!isFocused && !event.defaultPrevented) {
+      if (!event.defaultPrevented) {
+        if (isFocused) {
+          const nestedNavigatorKey = route?.state?.key;
+          if (nestedNavigatorKey) {
+            navigation.dispatch({
+              ...StackActions.popToTop(),
+              target: nestedNavigatorKey,
+            });
+            return;
+          }
+        }
+
         navigation.navigate(route.name, route.params);
       }
     };

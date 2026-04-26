@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { clearDriverRequestCaches } from "../utils/driverRequestCache";
 
 let SecureStore = null;
 let secureStoreModuleLoadErrorMessage = null;
@@ -147,17 +148,20 @@ export async function persistAuthSession(session = {}, options = {}) {
 }
 
 export async function clearAuthSession() {
+  const currentUserId = await AsyncStorage.getItem(USER_ID_KEY);
+
   await clearAccessToken();
-  await AsyncStorage.multiRemove([
-    REFRESH_TOKEN_KEY,
-    ROLE_KEY,
-    USER_ID_KEY,
-    USER_NAME_KEY,
-    USER_EMAIL_KEY,
-    PROFILE_COMPLETED_KEY,
-    "@saved_address",
-    "@profile_pic",
-    "@profile_phone",
-    "@order_display_totals",
-  ]);
+
+  // Clear all AsyncStorage data so a different login on the same device
+  // cannot hydrate stale user-specific cache (any role).
+  try {
+    await AsyncStorage.clear();
+  } catch {
+    const keys = await AsyncStorage.getAllKeys();
+    if (Array.isArray(keys) && keys.length > 0) {
+      await AsyncStorage.multiRemove(keys);
+    }
+  }
+
+  await clearDriverRequestCaches(currentUserId);
 }

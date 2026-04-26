@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
@@ -11,8 +10,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import OptimizedImage from "../../components/common/OptimizedImage";
+import { DriverProfileLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
+import {
+  getDriverProfileScreenCache,
+  setDriverProfileScreenCache,
+} from "../../utils/driverProfileScreenCache";
 
 function pickFirstValue(source, keys, fallback = "-") {
   for (const key of keys) {
@@ -71,8 +75,8 @@ export default function DriverPersonalInfoScreen({ navigation }) {
     return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase();
   }, [details.full_name]);
 
-  const loadPersonalInfo = useCallback(async () => {
-    setLoading(true);
+  const loadPersonalInfo = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
 
     try {
       const token = await getAccessToken();
@@ -94,7 +98,7 @@ export default function DriverPersonalInfoScreen({ navigation }) {
 
       const driver = payload?.driver || payload?.data || payload || {};
 
-      setDetails({
+      const nextDetails = {
         email: pickFirstValue(driver, ["email"]),
         phone: pickFirstValue(driver, [
           "phone",
@@ -128,32 +132,52 @@ export default function DriverPersonalInfoScreen({ navigation }) {
           "home_address",
           "current_address",
         ]),
-      });
+      };
+
+      setDetails(nextDetails);
+      await setDriverProfileScreenCache("personal-info", nextDetails);
     } catch (error) {
-      Alert.alert(
-        "Error",
-        error?.message || "Unable to load personal information.",
-      );
+      if (!silent) {
+        Alert.alert(
+          "Error",
+          error?.message || "Unable to load personal information.",
+        );
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadPersonalInfo();
+    let mounted = true;
+
+    (async () => {
+      const cached = await getDriverProfileScreenCache("personal-info");
+      if (cached && mounted) {
+        setDetails((prev) => ({ ...prev, ...cached }));
+        setLoading(false);
+        loadPersonalInfo({ silent: true });
+        return;
+      }
+
+      loadPersonalInfo();
+    })();
+
+    return () => {
+      mounted = false;
+    };
   }, [loadPersonalInfo]);
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={["top"]}>
-        <ActivityIndicator size="large" color="#111827" />
-        <Text style={styles.loadingText}>Loading personal info...</Text>
+      <SafeAreaView style={styles.loadingContainer} edges={["top", "bottom"]}>
+        <DriverProfileLoadingSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.headerButton}
@@ -187,10 +211,6 @@ export default function DriverPersonalInfoScreen({ navigation }) {
           <InfoRow label="Email" value={details.email} />
           <InfoRow label="Phone" value={details.phone} />
           <InfoRow label="Full name" value={details.full_name} />
-          <InfoRow
-            label="Profile photo URL"
-            value={details.profile_photo_url || "-"}
-          />
           <InfoRow label="NIC number" value={details.nic_number} />
           <InfoRow label="City" value={details.city} />
           <InfoRow label="Working time" value={details.working_time} />

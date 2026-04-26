@@ -18,6 +18,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../../app/providers/AuthProvider";
 import { DriverDashboardLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
@@ -25,6 +26,8 @@ import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
 
 export default function DriverDepositsScreen({ navigation }) {
+  const { user } = useAuth();
+  const userScope = String(user?.id || "anon");
   const isFocused = useIsFocused();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
@@ -32,9 +35,10 @@ export default function DriverDepositsScreen({ navigation }) {
   const [amount, setAmount] = useState("");
   const [proofFile, setProofFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const depositsQueryKey = ["driver", userScope, "deposits", "overview"];
 
   const depositsQuery = useQuery({
-    queryKey: ["driver", "deposits", "overview"],
+    queryKey: depositsQueryKey,
     queryFn: async () => {
       const token = await getAccessToken();
       if (!token) {
@@ -81,8 +85,7 @@ export default function DriverDepositsScreen({ navigation }) {
         managerBank: normalizedManagerBank,
       };
     },
-    initialData: () =>
-      queryClient.getQueryData(["driver", "deposits", "overview"]),
+    initialData: () => queryClient.getQueryData(depositsQueryKey),
     staleTime: 60 * 1000,
     refetchInterval: isFocused ? 60 * 1000 : false,
     placeholderData: (previousData) => previousData,
@@ -98,7 +101,7 @@ export default function DriverDepositsScreen({ navigation }) {
     setRefreshing(true);
     try {
       await queryClient.invalidateQueries({
-        queryKey: ["driver", "deposits", "overview"],
+        queryKey: depositsQueryKey,
       });
     } finally {
       setRefreshing(false);
@@ -154,7 +157,7 @@ export default function DriverDepositsScreen({ navigation }) {
         setAmount("");
         setProofFile(null);
         await queryClient.invalidateQueries({
-          queryKey: ["driver", "deposits", "overview"],
+          queryKey: depositsQueryKey,
         });
       } else {
         Alert.alert("Error", data.message || "Failed to submit deposit");
@@ -186,28 +189,22 @@ export default function DriverDepositsScreen({ navigation }) {
 
   if (loading)
     return (
-      <SafeAreaView
-        style={s.container}
-        edges={["left", "right", "top"]}
-      >
+      <SafeAreaView style={s.container} edges={["left", "right", "top"]}>
         <DriverDashboardLoadingSkeleton />
       </SafeAreaView>
     );
 
   return (
-    <SafeAreaView
-      style={s.container}
-      edges={["left", "right", "top"]}
-    >
+    <SafeAreaView style={s.container} edges={["left", "right", "top"]}>
       <View style={{ flex: 1 }}>
-        <DriverScreenSection screenKey="DriverDeposits" sectionIndex={0}>
+        <View style={s.headerSection}>
           <DriverScreenHeader
             title="Deposit to Meezo"
             rightIcon="refresh"
             onBackPress={() => navigation.goBack()}
             onRightPress={onRefresh}
           />
-        </DriverScreenSection>
+        </View>
         <DriverScreenSection
           screenKey="DriverDeposits"
           sectionIndex={1}
@@ -492,6 +489,13 @@ export default function DriverDepositsScreen({ navigation }) {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
+  headerSection: {
+    zIndex: 20,
+    elevation: 6,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
   scroll: { padding: 16, paddingBottom: 40 },
   errorBanner: {
     flexDirection: "row",

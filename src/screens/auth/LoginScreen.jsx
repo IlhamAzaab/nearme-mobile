@@ -27,6 +27,7 @@ import { persistAuthSession } from "../../lib/authStorage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
+const IS_ANDROID = Platform.OS === "android";
 const WEB_CARD_MAX_WIDTH = 560;
 const WEB_LOGO_SIZE = 220;
 
@@ -62,6 +63,15 @@ const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path
       d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C11.74 7.13 12.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.804 11.804 0 001 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"
+      fill={color}
+    />
+  </Svg>
+);
+
+const UserPlusIcon = ({ size = 20, color = "#FFFFFF" }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M12 12c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5zm0 2c-3.339 0-10 1.672-10 5v2h12v-2c0-1.37.448-2.646 1.207-3.69C14.197 15.82 12.596 14 12 14zm8-2V8h-2v2h-2v2h2v2h2v-2h2v-2h-2z"
       fill={color}
     />
   </Svg>
@@ -175,7 +185,7 @@ export default function LoginScreen({ navigation }) {
   async function handleLogin() {
     if (!email.trim() || !password.trim()) {
       triggerShake();
-      Alert.alert("Missing fields", "Please enter email and password.");
+      Alert.alert("Missing fields", "Enter your email or phone and password");
       return;
     }
 
@@ -277,7 +287,7 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <View style={styles.rootContainer}>
-      <SafeAreaView style={styles.pageContainer} edges={["top"]}>
+      <SafeAreaView style={styles.pageContainer} edges={["bottom"]}>
         <KeyboardAvoidingView
           style={styles.pageContainer}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -303,7 +313,19 @@ export default function LoginScreen({ navigation }) {
                 colors={["#04753E", "#059B52", "#06C168"]}
                 start={{ x: 0.5, y: 0 }}
                 end={{ x: 0.5, y: 1 }}
-                style={[styles.greenSection, IS_WEB && styles.greenSectionWeb]}
+                style={[
+                  styles.greenSection,
+                  IS_WEB && styles.greenSectionWeb,
+                  IS_ANDROID && styles.greenSectionAndroid,
+                  {
+                    paddingTop:
+                      Platform.OS === "web"
+                        ? 52
+                        : IS_ANDROID
+                          ? insets.top + 6
+                          : insets.top + 14,
+                  },
+                ]}
               >
                 {/* Decorative circles */}
                 <View style={styles.bgCircle1} />
@@ -312,8 +334,8 @@ export default function LoginScreen({ navigation }) {
                 {/* Meezo SVG Logo */}
                 <View style={styles.logoWrap}>
                   <Svg
-                    width={IS_WEB ? WEB_LOGO_SIZE : 280}
-                    height={IS_WEB ? WEB_LOGO_SIZE : 280}
+                    width={IS_WEB ? WEB_LOGO_SIZE : IS_ANDROID ? 240 : 280}
+                    height={IS_WEB ? WEB_LOGO_SIZE : IS_ANDROID ? 240 : 280}
                     viewBox="0 0 1080 1080"
                   >
                     <Rect
@@ -390,8 +412,65 @@ export default function LoginScreen({ navigation }) {
               >
                 {/* Form content */}
                 <View style={[styles.formWrap, IS_WEB && styles.formWrapWeb]}>
-                  <Text style={styles.cardTitle}>Welcome Back!</Text>
-                  <Text style={styles.cardSub}>Please sign in to continue</Text>
+                  <View style={styles.newUserCard}>
+                    <Text
+                      style={[
+                        styles.newUserTitle,
+                        IS_ANDROID && styles.newUserTitleAndroid,
+                      ]}
+                    >
+                      New to Meezo?
+                    </Text>
+                    <Text style={styles.newUserSub}>
+                      Create account with Meezo, and start ordering!
+                    </Text>
+
+                    <View style={styles.newUserActions}>
+                      <Pressable
+                        onPress={() => navigation.navigate("Signup")}
+                        style={({ pressed }) => [
+                          styles.createAccountBtn,
+                          (pressed || isLoading) && {
+                            opacity: 0.92,
+                            transform: [{ scale: 0.985 }],
+                          },
+                        ]}
+                      >
+                        <LinearGradient
+                          colors={["#06C168", "#059B52", "#04753E"]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                          style={styles.createAccountGradient}
+                        >
+                          <UserPlusIcon size={18} color="#FFFFFF" />
+                          <Text style={styles.createAccountText}>
+                            Create Account
+                          </Text>
+                        </LinearGradient>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  <View style={styles.dividerRow}>
+                    <View style={styles.dividerLine} />
+                    <Text style={styles.dividerText}>OR SIGN IN</Text>
+                    <View style={styles.dividerLine} />
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.cardTitle,
+                      IS_ANDROID && styles.cardTitleAndroid,
+                    ]}
+                  >
+                    Sign in to continue!
+                  </Text>
+                  <View
+                    style={[
+                      styles.cardTitleGap,
+                      IS_ANDROID && styles.cardTitleGapAndroid,
+                    ]}
+                  />
 
                   {/* Username */}
                   <FloatingLabelInput
@@ -436,31 +515,32 @@ export default function LoginScreen({ navigation }) {
                     disabled={isLoading}
                     style={({ pressed }) => [
                       styles.loginBtn,
+                      IS_ANDROID && styles.loginBtnAndroid,
                       (pressed || isLoading) && {
                         opacity: 0.88,
                         transform: [{ scale: 0.985 }],
                       },
                     ]}
                   >
-                    <LinearGradient
-                      colors={["#06C168", "#059B52", "#04753E"]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.loginBtnGradient}
-                    >
+                    <View style={styles.loginBtnSurface}>
                       {isLoading ? (
                         <View style={styles.loadingRow}>
-                          <ActivityIndicator color="#fff" />
+                          <ActivityIndicator color="#06C168" />
                           <Text style={styles.loginBtnText}>Signing in...</Text>
                         </View>
                       ) : (
-                        <Text style={styles.loginBtnText}>Log In</Text>
+                        <Text style={styles.loginBtnText}>Sign In</Text>
                       )}
-                    </LinearGradient>
+                    </View>
                   </Pressable>
 
                   {/* Signup link */}
-                  <View style={styles.footerRow}>
+                  <View
+                    style={[
+                      styles.footerRow,
+                      IS_ANDROID && styles.footerRowAndroid,
+                    ]}
+                  >
                     <Text style={styles.footerText}>
                       Do not have an account?{" "}
                     </Text>
@@ -515,14 +595,19 @@ const styles = StyleSheet.create({
 
   /* ═══ GREEN TOP SECTION ═══ */
   greenSection: {
-    paddingTop: Platform.OS === "ios" ? 60 : 48,
-    paddingBottom: 10,
+    minHeight: 82,
+    justifyContent: "center",
+    paddingBottom: 4,
     alignItems: "center",
     overflow: "hidden",
   },
+  greenSectionAndroid: {
+    minHeight: 60,
+    paddingBottom: 2,
+  },
   greenSectionWeb: {
-    paddingTop: 34,
-    paddingBottom: 8,
+    minHeight: 170,
+    paddingBottom: 6,
   },
 
   /* Decorative background circles */
@@ -548,11 +633,12 @@ const styles = StyleSheet.create({
   /* Logo */
   logoWrap: {
     alignItems: "center",
+    marginTop: 0,
   },
   appSubtitle: {
     color: "rgba(255,255,255,0.85)",
-    marginTop: 0,
-    fontSize: 15,
+    marginTop: -14,
+    fontSize: 13,
     fontWeight: "500",
     letterSpacing: 0.5,
   },
@@ -569,15 +655,15 @@ const styles = StyleSheet.create({
   /* ═══ WHITE BOTTOM SECTION ═══ */
   whiteSection: {
     backgroundColor: "#FFFFFF",
-    paddingHorizontal: 24,
-    paddingBottom: 40,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
   },
   whiteSectionWeb: {
     paddingHorizontal: 30,
     paddingBottom: 30,
   },
   formWrap: {
-    paddingTop: 8,
+    paddingTop: 4,
   },
   formWrapWeb: {
     width: "100%",
@@ -585,21 +671,97 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
 
+  newUserCard: {
+    marginBottom: 12,
+    padding: 18,
+    borderRadius: 24,
+    backgroundColor: "#F6FFF9",
+    borderWidth: 1,
+    borderColor: "rgba(6, 193, 104, 0.14)",
+    shadowColor: "#06C168",
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+  newUserTitle: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: "#111827",
+    textAlign: "left",
+    letterSpacing: -0.2,
+  },
+  newUserTitleAndroid: {
+    fontSize: 22,
+  },
+  newUserSub: {
+    fontSize: 14,
+    color: "#6B7280",
+    textAlign: "left",
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  newUserActions: {
+    marginTop: 14,
+  },
+  createAccountBtn: {
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#06C168",
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  createAccountGradient: {
+    minHeight: 54,
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  createAccountText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 16,
+    letterSpacing: 0.4,
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#E5E7EB",
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    color: "#6B7280",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 1.4,
+  },
+
   /* Titles */
   cardTitle: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: "800",
     color: "#111827",
     textAlign: "center",
     letterSpacing: -0.3,
   },
-  cardSub: {
-    fontSize: 14,
-    color: "#6B7280",
-    textAlign: "center",
-    marginTop: 8,
-    marginBottom: 28,
-    fontWeight: "400",
+  cardTitleAndroid: {
+    fontSize: 22,
+  },
+  cardTitleGap: {
+    height: 10,
+  },
+  cardTitleGapAndroid: {
+    height: 6,
   },
 
   passwordEyeBtn: {
@@ -609,23 +771,24 @@ const styles = StyleSheet.create({
 
   /* Login button */
   loginBtn: {
-    marginTop: 24,
+    marginTop: 16,
     borderRadius: 16,
     overflow: "hidden",
-    shadowColor: "#06C168",
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
   },
-  loginBtnGradient: {
+  loginBtnAndroid: {
+    marginTop: 12,
+  },
+  loginBtnSurface: {
     height: 56,
     borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#06C168",
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
   loginBtnText: {
-    color: "#FFFFFF",
+    color: "#06C168",
     fontWeight: "800",
     fontSize: 17,
     letterSpacing: 0.5,
@@ -636,8 +799,11 @@ const styles = StyleSheet.create({
   footerRow: {
     flexDirection: "row",
     justifyContent: "center",
-    marginTop: 24,
+    marginTop: 16,
     alignItems: "center",
+  },
+  footerRowAndroid: {
+    marginTop: 10,
   },
   footerText: {
     color: "#6B7280",

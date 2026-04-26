@@ -44,6 +44,10 @@ import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNoti
 import { useSocket } from "../../context/SocketContext";
 import { approximateDistanceMeters } from "../../utils/osrmClient";
 import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
+import {
+  DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
+  buildDriverScopedCacheKey,
+} from "../../utils/driverRequestCache";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -51,15 +55,26 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 // CONSTANTS
 // ============================================================================
 
-const CACHE_KEY = "available_deliveries_cache";
 const CACHE_EXPIRY = 60000; // 1 minute cache
 const DATA_REFRESH_THRESHOLD = 200; // Only fetch API data when driver moves 200m+
 const LIVE_TRACKING_INTERVAL = 3000; // 3 seconds - smooth driver marker updates
-const LIVE_DELIVERIES_REFRESH_INTERVAL_MS = 5000;
+const LIVE_DELIVERIES_MAX_BACKOFF_MS = 45000;
+const LIVE_DELIVERIES_504_BACKOFF_MAX_MS = 120000;
 const LOCATION_MAX_ACCURACY_METERS = 250;
+const LIVE_LOCATION_MAX_ACCURACY_METERS = 120;
+const LIVE_LOCATION_SAMPLE_MAX_AGE_MS = 12000;
 const LOCATION_MAX_RETRIES = 3;
 const LOCATION_RETRY_DELAY_MS = 1200;
 const DRIVER_DELIVERY_ACTION_EVENT = "driver:delivery_notification_action";
+const DELIVERY_COMPLETED_RECALCULATE_REASON = "delivery_completed_recalculate";
+const ACTIVE_DELIVERY_BLOCK_MESSAGE = "Complete your picked up delivery first.";
+const ACTIVE_DELIVERY_BLOCKING_STATUSES = new Set([
+  "picked_up",
+  "on_the_way",
+  "at_customer",
+]);
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
 
 // Default driver location (Kinniya, Sri Lanka)
 const DEFAULT_DRIVER_LOCATION = {
@@ -78,9 +93,10 @@ let hasVisitedAvailableDeliveriesScreen = false;
 // CACHE HELPERS
 // ============================================================================
 
-const loadCachedData = async () => {
+const loadCachedData = async (cacheKey) => {
   try {
-    const cached = await AsyncStorage.getItem(CACHE_KEY);
+    if (!cacheKey) return null;
+    const cached = await AsyncStorage.getItem(cacheKey);
     if (cached) {
       const { data, timestamp } = JSON.parse(cached);
       if (Date.now() - timestamp < CACHE_EXPIRY) {
@@ -93,10 +109,11 @@ const loadCachedData = async () => {
   return null;
 };
 
-const saveCacheData = async (data) => {
+const saveCacheData = async (cacheKey, data) => {
   try {
+    if (!cacheKey) return;
     await AsyncStorage.setItem(
-      CACHE_KEY,
+      cacheKey,
       JSON.stringify({ data, timestamp: Date.now() }),
     );
   } catch (e) {
@@ -126,6 +143,28 @@ const toValidLocation = (lat, lng) => {
     longitude: Number.parseFloat(lng),
   };
   return isValidLocation(parsed) ? parsed : null;
+};
+
+const isFreshAccurateLiveSample = (position) => {
+  const accuracy = Number(position?.coords?.accuracy || Infinity);
+  const sampleTimestamp = Number(position?.timestamp || Date.now());
+  const sampleAgeMs = Math.max(0, Date.now() - sampleTimestamp);
+
+  if (
+    !Number.isFinite(accuracy) ||
+    accuracy > LIVE_LOCATION_MAX_ACCURACY_METERS
+  ) {
+    return false;
+  }
+
+  if (
+    !Number.isFinite(sampleAgeMs) ||
+    sampleAgeMs > LIVE_LOCATION_SAMPLE_MAX_AGE_MS
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 const normalizeDeliveryId = (value) => {
@@ -173,9 +212,17 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     [viewportHeight],
   );
 
-  const [userId, setUserId] = useState("default");
+  const [userId, setUserId] = useState(null);
   const deliveriesQueryKey = useMemo(
-    () => ["driver", "available-deliveries", userId],
+    () => ["driver", "available-deliveries", userId || "default"],
+    [userId],
+  );
+  const availableCacheKey = useMemo(
+    () =>
+      buildDriverScopedCacheKey(
+        DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
+        userId || "default",
+      ),
     [userId],
   );
 
@@ -208,8 +255,16 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   const [fetchError, setFetchError] = useState(null);
   const [showNewDeliveryBanner, setShowNewDeliveryBanner] = useState(false);
   const [isLoadingAfterAccept, setIsLoadingAfterAccept] = useState(false);
+  const [isPostCompleteHardLoading, setIsPostCompleteHardLoading] =
+    useState(false);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [currentVisibleIndex, setCurrentVisibleIndex] = useState(0);
+  const hasCompletedFirstFetchRef = useRef(false);
+  const deliveriesRef = useRef([]);
+  const currentRouteRef = useRef({
+    total_stops: 0,
+    active_deliveries: 0,
+  });
   const deliveryMetaRef = useRef(new Map());
   const arrivalSeqRef = useRef(0);
   const viewabilityConfigRef = useRef({ itemVisiblePercentThreshold: 60 });
@@ -230,7 +285,135 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   const fetchPendingDeliveriesRef = useRef(null);
   const locationSubscriptionRef = useRef(null);
   const fetchInFlightRef = useRef(false);
+  const pendingFetchRequestRef = useRef(null);
   const focusHandledKeyRef = useRef(null);
+  const deliveriesSyncRetryStateRef = useRef({
+    consecutiveFailures: 0,
+    nextAllowedAt: 0,
+  });
+
+  useEffect(() => {
+    currentRouteRef.current = currentRoute;
+  }, [currentRoute]);
+
+  useEffect(() => {
+    deliveriesRef.current = Array.isArray(deliveries) ? deliveries : [];
+  }, [deliveries]);
+
+  const trimDeclinedIds = useCallback((nextDeliveries) => {
+    setDeclinedIds((prev) => {
+      const availableIds = new Set(
+        (nextDeliveries || [])
+          .map((delivery) => normalizeDeliveryId(delivery?.delivery_id))
+          .filter(Boolean),
+      );
+
+      return new Set(
+        [...prev].filter((id) => {
+          const normalizedId = normalizeDeliveryId(id);
+          return normalizedId ? availableIds.has(normalizedId) : false;
+        }),
+      );
+    });
+  }, []);
+
+  const syncAvailableSnapshot = useCallback(
+    (nextDeliveries, options = {}) => {
+      const validDeliveries = (nextDeliveries || []).filter(
+        hasValidDeliveryCoordinates,
+      );
+      const sortedDeliveries = applyPrioritizedSort(validDeliveries);
+      const nextRoute = options.currentRoute ||
+        currentRouteRef.current || {
+          total_stops: 0,
+          active_deliveries: 0,
+        };
+
+      const nextDriverLocation =
+        (isValidLocation(options.driverLocation) && options.driverLocation) ||
+        (isValidLocation(driverLocationRef.current) &&
+          driverLocationRef.current) ||
+        (isValidLocation(lastFetchLocationRef.current) &&
+          lastFetchLocationRef.current) ||
+        null;
+
+      if (options.currentRoute) {
+        currentRouteRef.current = nextRoute;
+        setCurrentRoute(nextRoute);
+      }
+
+      if (isValidLocation(nextDriverLocation)) {
+        setDriverLocation(nextDriverLocation);
+        setIsLocationResolved(true);
+      }
+
+      trimDeclinedIds(sortedDeliveries);
+      setDeliveries(sortedDeliveries);
+
+      const snapshot = {
+        deliveries: sortedDeliveries,
+        currentRoute: nextRoute,
+        driverLocation: nextDriverLocation,
+      };
+
+      queryClient.setQueryData(deliveriesQueryKey, snapshot);
+      void saveCacheData(availableCacheKey, snapshot);
+
+      return sortedDeliveries;
+    },
+    [
+      applyPrioritizedSort,
+      availableCacheKey,
+      deliveriesQueryKey,
+      queryClient,
+      trimDeclinedIds,
+    ],
+  );
+
+  const mutateAvailableDeliveries = useCallback(
+    (mutator) => {
+      setDeliveries((prevDeliveries) => {
+        const baseDeliveries = Array.isArray(prevDeliveries)
+          ? prevDeliveries
+          : [];
+        const mutatedDeliveries = mutator(baseDeliveries);
+        const validDeliveries = (mutatedDeliveries || []).filter(
+          hasValidDeliveryCoordinates,
+        );
+        const sortedDeliveries = applyPrioritizedSort(validDeliveries);
+
+        trimDeclinedIds(sortedDeliveries);
+
+        const snapshotLocation =
+          (isValidLocation(driverLocationRef.current) &&
+            driverLocationRef.current) ||
+          (isValidLocation(lastFetchLocationRef.current) &&
+            lastFetchLocationRef.current) ||
+          null;
+
+        const snapshot = {
+          deliveries: sortedDeliveries,
+          currentRoute: currentRouteRef.current || {
+            total_stops: 0,
+            active_deliveries: 0,
+          },
+          driverLocation: snapshotLocation,
+        };
+
+        queryClient.setQueryData(deliveriesQueryKey, snapshot);
+        void saveCacheData(availableCacheKey, snapshot);
+
+        return sortedDeliveries;
+      });
+    },
+    [
+      applyPrioritizedSort,
+      availableCacheKey,
+      deliveriesQueryKey,
+      queryClient,
+      trimDeclinedIds,
+    ],
+  );
 
   const syncDeliveryMeta = useCallback((incomingDeliveries) => {
     const meta = deliveryMetaRef.current;
@@ -270,21 +453,6 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   // ============================================================================
 
   useEffect(() => {
-    initScreen();
-    return () => cleanup();
-  }, []);
-
-  useEffect(() => {
-    if (!isFocused || !isLocationResolved || !hasCompletedFirstFetch) return;
-    fetchDeliveriesWithCurrentLocation(true, "screen_focus");
-  }, [
-    isFocused,
-    isLocationResolved,
-    hasCompletedFirstFetch,
-    fetchDeliveriesWithCurrentLocation,
-  ]);
-
-  useEffect(() => {
     let mounted = true;
 
     (async () => {
@@ -300,10 +468,65 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   }, []);
 
   useEffect(() => {
+    if (!userId) return;
+    initScreen();
+    return () => cleanup();
+  }, [userId]);
+
+  useEffect(() => {
+    if (!isFocused || !hasCompletedFirstFetch) return;
+
+    let cancelled = false;
+
+    const maybeSyncOnFocus = async () => {
+      const modeCheck = await checkDeliveringMode();
+      if (cancelled || modeCheck?.restricted) return;
+
+      const focusLocation = await getLocation();
+      if (cancelled || !isValidLocation(focusLocation)) return;
+
+      setDriverLocation(focusLocation);
+      setIsLocationResolved(true);
+
+      const lastFetchedLocation = lastFetchLocationRef.current;
+
+      if (!isValidLocation(lastFetchedLocation)) {
+        lastFetchLocationRef.current = focusLocation;
+        await fetchPendingDeliveriesRef.current?.(
+          focusLocation,
+          true,
+          "screen_focus_first_sync",
+        );
+        return;
+      }
+
+      const movedDistance = approximateDistanceMeters(
+        lastFetchedLocation,
+        focusLocation,
+      );
+
+      if (movedDistance >= DATA_REFRESH_THRESHOLD) {
+        lastFetchLocationRef.current = focusLocation;
+        await fetchPendingDeliveriesRef.current?.(
+          focusLocation,
+          true,
+          "screen_focus_movement_200m",
+        );
+      }
+    };
+
+    maybeSyncOnFocus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isFocused, hasCompletedFirstFetch]);
+
+  useEffect(() => {
     const cachedQueryData = queryClient.getQueryData(deliveriesQueryKey);
     if (!cachedQueryData) return;
 
-    const cachedDeliveries = cachedQueryData.deliveries || [];
+    const cachedDeliveries = asArray(cachedQueryData.deliveries);
     setDeliveries(applyPrioritizedSort(cachedDeliveries));
     setCurrentRoute(
       cachedQueryData.currentRoute || { total_stops: 0, active_deliveries: 0 },
@@ -325,7 +548,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
 
     const querySnapshot = queryClient.getQueryData(deliveriesQueryKey);
     if (querySnapshot?.deliveries?.length) {
-      const cachedDeliveries = (querySnapshot.deliveries || []).filter(
+      const cachedDeliveries = asArray(querySnapshot.deliveries).filter(
         hasValidDeliveryCoordinates,
       );
       setDeliveries(applyPrioritizedSort(cachedDeliveries));
@@ -339,9 +562,9 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     }
 
     if (!hydratedFromCache) {
-      const storageSnapshot = await loadCachedData();
+      const storageSnapshot = await loadCachedData(availableCacheKey);
       if (storageSnapshot?.deliveries?.length) {
-        const cachedDeliveries = (storageSnapshot.deliveries || []).filter(
+        const cachedDeliveries = asArray(storageSnapshot.deliveries).filter(
           hasValidDeliveryCoordinates,
         );
         setDeliveries(applyPrioritizedSort(cachedDeliveries));
@@ -382,8 +605,15 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     setIsLocationResolved(true);
     lastFetchLocationRef.current = location;
 
-    // Check if driver is in delivering mode
-    await checkDeliveringMode(location);
+    // Block nearby requests only after pickup/delivering starts.
+    const modeCheck = await checkDeliveringMode(location);
+    if (modeCheck?.restricted) {
+      setHasCompletedFirstFetch(true);
+      setInitialLoading(false);
+      hasVisitedAvailableDeliveriesScreen = true;
+      startLocationTracking();
+      return;
+    }
 
     if (!hydratedFromCache) {
       await fetchPendingDeliveriesWithLocation(location, true, "screen_init");
@@ -394,7 +624,11 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   };
 
   useEffect(() => {
-    if (!hasCompletedFirstFetch || initialLoading || deliveries.length === 0) {
+    if (
+      !hasCompletedFirstFetch ||
+      initialLoading ||
+      asArray(deliveries).length === 0
+    ) {
       listFadeAnim.setValue(0);
       return;
     }
@@ -404,7 +638,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       duration: 220,
       useNativeDriver: true,
     }).start();
-  }, [deliveries.length, hasCompletedFirstFetch, initialLoading, listFadeAnim]);
+  }, [deliveries, hasCompletedFirstFetch, initialLoading, listFadeAnim]);
 
   const cleanup = () => {
     if (locationIntervalRef.current) {
@@ -497,11 +731,13 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       // distanceInterval: 0 so marker updates continuously
       locationSubscriptionRef.current = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.High,
+          accuracy: Location.Accuracy.BestForNavigation,
           timeInterval: LIVE_TRACKING_INTERVAL, // 3 seconds
           distanceInterval: 0, // Always fire for smooth marker updates
         },
         (position) => {
+          if (!isFreshAccurateLiveSample(position)) return;
+
           const location = {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
@@ -544,20 +780,52 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       locationIntervalRef.current = setInterval(async () => {
         const location = await getLocation();
         if (!isValidLocation(location)) return;
+
         setDriverLocation(location);
         setIsLocationResolved(true);
+
+        if (lastFetchLocationRef.current) {
+          const distanceMoved = approximateDistanceMeters(
+            lastFetchLocationRef.current,
+            location,
+          );
+
+          if (distanceMoved >= DATA_REFRESH_THRESHOLD && isFocusedRef.current) {
+            lastFetchLocationRef.current = location;
+            fetchPendingDeliveriesRef.current?.(
+              location,
+              true,
+              "movement_200m",
+            );
+          }
+        }
       }, LIVE_TRACKING_INTERVAL);
     }
   };
 
   const fetchDeliveriesWithCurrentLocation = useCallback(
     async (isBackgroundRefresh = false, triggerReason = "manual") => {
-      const location = await getLocation();
+      const canReuseKnownLocation =
+        triggerReason === "socket_new_delivery_fallback" ||
+        triggerReason === "socket_tip_update_fallback";
+
+      const knownLocation =
+        (isValidLocation(driverLocationRef.current) &&
+          driverLocationRef.current) ||
+        (isValidLocation(lastFetchLocationRef.current) &&
+          lastFetchLocationRef.current);
+
+      let location = canReuseKnownLocation ? knownLocation : null;
+
+      if (!isValidLocation(location)) {
+        location = await getLocation();
+      }
+
       if (!isValidLocation(location)) {
         setFetchError(
           "Unable to confirm your location. Please enable GPS and retry.",
         );
-        if (!hasCompletedFirstFetch) {
+        if (!hasCompletedFirstFetchRef.current) {
           setHasCompletedFirstFetch(true);
           setInitialLoading(false);
         }
@@ -566,18 +834,22 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       setDriverLocation(location);
       setIsLocationResolved(true);
       lastFetchLocationRef.current = location;
-      await fetchPendingDeliveriesWithLocation(
+      await fetchPendingDeliveriesRef.current?.(
         location,
         isBackgroundRefresh,
         triggerReason,
       );
     },
-    [hasCompletedFirstFetch],
+    [],
   );
 
   useEffect(() => {
     driverLocationRef.current = driverLocation;
   }, [driverLocation]);
+
+  useEffect(() => {
+    hasCompletedFirstFetchRef.current = hasCompletedFirstFetch;
+  }, [hasCompletedFirstFetch]);
 
   // ============================================================================
   // CHECK DELIVERING MODE
@@ -586,55 +858,71 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   const checkDeliveringMode = async (verifiedLocation) => {
     try {
       const token = await AsyncStorage.getItem("token");
-      const currentLoc =
-        verifiedLocation && isValidLocation(verifiedLocation)
-          ? verifiedLocation
-          : driverLocation;
+      if (!token) return { restricted: false, preferredDelivery: null };
 
-      if (!isValidLocation(currentLoc)) {
-        return;
-      }
-
-      const res = await rateLimitedFetch(
-        `${API_BASE_URL}/driver/deliveries/pickups?driver_latitude=${currentLoc.latitude}&driver_longitude=${currentLoc.longitude}`,
+      const activeRes = await rateLimitedFetch(
+        `${API_BASE_URL}/driver/deliveries/active`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
 
-      if (res.ok) {
-        const data = await res.json();
-        if (!data.pickups || data.pickups.length === 0) {
-          const activeRes = await rateLimitedFetch(
-            `${API_BASE_URL}/driver/deliveries/active`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            },
-          );
-          if (activeRes.ok) {
-            const activeData = await activeRes.json();
-            const hasDeliveringOrders = activeData.deliveries?.some((d) =>
-              ["picked_up", "on_the_way", "at_customer"].includes(d.status),
-            );
-            if (hasDeliveringOrders) {
-              setInDeliveringMode(true);
-              const preferredDelivery =
-                activeData.deliveries?.find((d) =>
-                  ["picked_up", "on_the_way", "at_customer"].includes(d.status),
-                ) || activeData.deliveries?.[0];
-              setTimeout(
-                () =>
-                  navigation.navigate("DriverMap", {
-                    deliveryId: preferredDelivery?.delivery_id,
-                  }),
-                100,
-              );
-            }
-          }
-        }
+      if (!activeRes.ok) {
+        return { restricted: false, preferredDelivery: null };
       }
+
+      const activeData = await activeRes.json();
+      const activeDeliveries = Array.isArray(activeData?.deliveries)
+        ? activeData.deliveries
+        : [];
+
+      const preferredDelivery =
+        activeDeliveries.find((delivery) =>
+          ACTIVE_DELIVERY_BLOCKING_STATUSES.has(
+            String(delivery?.status || "")
+              .trim()
+              .toLowerCase(),
+          ),
+        ) || activeDeliveries[0];
+
+      const isRestricted = Boolean(preferredDelivery);
+
+      if (isRestricted) {
+        setInDeliveringMode(true);
+        setDeliveries([]);
+        setDeclinedIds(new Set());
+
+        const nextRoute = {
+          total_stops: activeDeliveries.length,
+          active_deliveries: activeDeliveries.length,
+        };
+
+        currentRouteRef.current = nextRoute;
+        setCurrentRoute(nextRoute);
+        setFetchError(ACTIVE_DELIVERY_BLOCK_MESSAGE);
+
+        const snapshot = {
+          deliveries: [],
+          currentRoute: nextRoute,
+          driverLocation:
+            (verifiedLocation && isValidLocation(verifiedLocation)
+              ? verifiedLocation
+              : driverLocationRef.current) || null,
+        };
+
+        queryClient.setQueryData(deliveriesQueryKey, snapshot);
+        void saveCacheData(availableCacheKey, snapshot);
+      } else {
+        setInDeliveringMode(false);
+        setFetchError((prev) =>
+          prev === ACTIVE_DELIVERY_BLOCK_MESSAGE ? null : prev,
+        );
+      }
+
+      return { restricted: isRestricted, preferredDelivery };
     } catch (e) {
       console.error("Failed to check delivering mode:", e);
+      return { restricted: false, preferredDelivery: null };
     }
   };
 
@@ -647,13 +935,42 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     showLoading = true,
     triggerReason = "manual",
   ) => {
+    if (inDeliveringMode) {
+      setInitialLoading(false);
+      setIsRefreshing(false);
+      return;
+    }
+
     if (!isValidLocation(location)) {
       setFetchError("Cannot fetch deliveries without a valid driver location.");
       setInitialLoading(false);
       return;
     }
 
-    if (fetchInFlightRef.current) return;
+    const now = Date.now();
+    const retryState = deliveriesSyncRetryStateRef.current;
+    const backoffEligibleReasons = new Set([
+      "movement_200m",
+      "screen_focus_movement_200m",
+      "socket_new_delivery_fallback",
+      "socket_tip_update_fallback",
+    ]);
+    if (
+      backoffEligibleReasons.has(triggerReason) &&
+      now < Number(retryState.nextAllowedAt || 0)
+    ) {
+      return;
+    }
+
+    if (fetchInFlightRef.current) {
+      const previous = pendingFetchRequestRef.current;
+      pendingFetchRequestRef.current = {
+        location,
+        showLoading: Boolean(showLoading || previous?.showLoading),
+        triggerReason,
+      };
+      return;
+    }
 
     // Cancel any pending request
     if (abortControllerRef.current) {
@@ -700,7 +1017,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         current_route: data.current_route,
       });
 
-      const deliveriesArray = data.available_deliveries || [];
+      const deliveriesArray = asArray(data.available_deliveries);
       const validDeliveries = deliveriesArray.filter(
         hasValidDeliveryCoordinates,
       );
@@ -713,26 +1030,10 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         );
       }
 
-      setDeclinedIds((prev) => {
-        const availableIds = new Set(
-          validDeliveries
-            .map((d) => normalizeDeliveryId(d.delivery_id))
-            .filter(Boolean),
-        );
-        return new Set(
-          [...prev].filter((id) => {
-            const normalizedId = normalizeDeliveryId(id);
-            return normalizedId ? availableIds.has(normalizedId) : false;
-          }),
-        );
-      });
-      setDeliveries(applyPrioritizedSort(validDeliveries));
-
       const newCurrentRoute = data.current_route || {
         total_stops: 0,
         active_deliveries: 0,
       };
-      setCurrentRoute(newCurrentRoute);
 
       const newDriverLocation = isValidLocation(currentLoc)
         ? currentLoc
@@ -740,36 +1041,55 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
             data?.driver_location?.latitude,
             data?.driver_location?.longitude,
           );
-      setDriverLocation(newDriverLocation);
-      setIsLocationResolved(true);
-
-      // Save to cache
-      await saveCacheData({
-        deliveries: validDeliveries,
-        currentRoute: newCurrentRoute,
-        driverLocation: newDriverLocation,
-      });
-
-      queryClient.setQueryData(deliveriesQueryKey, {
+      syncAvailableSnapshot(validDeliveries, {
         deliveries: validDeliveries,
         currentRoute: newCurrentRoute,
         driverLocation: newDriverLocation,
       });
 
       setFetchError(null);
+      deliveriesSyncRetryStateRef.current = {
+        consecutiveFailures: 0,
+        nextAllowedAt: 0,
+      };
       setHasCompletedFirstFetch(true);
       hasVisitedAvailableDeliveriesScreen = true;
     } catch (e) {
       if (e.name === "AbortError") return;
       console.error("❌ [FRONTEND] Failed to fetch deliveries:", e);
 
+      const consecutiveFailures =
+        Number(deliveriesSyncRetryStateRef.current.consecutiveFailures || 0) +
+        1;
+      const isGatewayTimeout =
+        e.message.includes("HTTP 504") ||
+        e.message.toLowerCase().includes("504");
+      const maxBackoffMs = isGatewayTimeout
+        ? LIVE_DELIVERIES_504_BACKOFF_MAX_MS
+        : LIVE_DELIVERIES_MAX_BACKOFF_MS;
+      const baseBackoffMs = isGatewayTimeout ? 6000 : 3000;
+      const backoffMs = Math.min(
+        maxBackoffMs,
+        Math.pow(2, Math.min(consecutiveFailures, 5)) * baseBackoffMs,
+      );
+
+      deliveriesSyncRetryStateRef.current = {
+        consecutiveFailures,
+        nextAllowedAt: backoffEligibleReasons.has(triggerReason)
+          ? Date.now() + backoffMs
+          : 0,
+      };
+
       const errorMessage = e.message.includes("NetworkError")
         ? "No internet connection. Retrying..."
-        : e.message.includes("HTTP 500")
-          ? "Server error. Please try again."
-          : e.message.includes("HTTP 401")
-            ? "Authentication failed. Please log in again."
-            : e.message || "Failed to fetch deliveries";
+        : e.message.includes("HTTP 504") ||
+            e.message.toLowerCase().includes("504")
+          ? "Server is busy. Showing cached requests and retrying with backoff..."
+          : e.message.includes("HTTP 500")
+            ? "Server error. Please try again."
+            : e.message.includes("HTTP 401")
+              ? "Authentication failed. Please log in again."
+              : e.message || "Failed to fetch deliveries";
 
       setFetchError(errorMessage);
       if (!hasCompletedFirstFetch) {
@@ -781,6 +1101,16 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       setInitialLoading(false);
       setIsRefreshing(false);
       fetchInFlightRef.current = false;
+
+      const pendingRequest = pendingFetchRequestRef.current;
+      if (pendingRequest?.location) {
+        pendingFetchRequestRef.current = null;
+        void fetchPendingDeliveriesWithLocation(
+          pendingRequest.location,
+          Boolean(pendingRequest.showLoading),
+          pendingRequest.triggerReason || "queued_refresh",
+        );
+      }
     }
   };
 
@@ -788,56 +1118,83 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   fetchPendingDeliveriesRef.current = fetchPendingDeliveriesWithLocation;
 
   useEffect(() => {
-    if (!isFocused || !isLocationResolved) return;
-
-    const interval = setInterval(() => {
-      if (!isFocusedRef.current) return;
-
-      const location =
-        (isValidLocation(driverLocationRef.current) &&
-          driverLocationRef.current) ||
-        lastFetchLocationRef.current;
-
-      if (!isValidLocation(location)) return;
-
-      fetchPendingDeliveriesRef.current?.(location, true, "live_location_tick");
-    }, LIVE_DELIVERIES_REFRESH_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [isFocused, isLocationResolved]);
-
-  useEffect(() => {
     setIsSocketConnected(Boolean(isConnected));
   }, [isConnected]);
 
   useEffect(() => {
+    if (!isFocused) return;
+    if (inDeliveringMode) return;
     if (!on || !off) return;
 
-    const handleNewDelivery = () => {
+    const handleNewDelivery = (payload) => {
       if (!isFocusedRef.current) return;
       setShowNewDeliveryBanner(true);
-      fetchDeliveriesWithCurrentLocation(true, "socket_new_delivery");
+
+      const normalizedId = normalizeDeliveryId(payload?.delivery_id);
+      const hasCoordinates = hasValidDeliveryCoordinates(payload);
+
+      if (normalizedId && hasCoordinates) {
+        mutateAvailableDeliveries((prev) => {
+          const withoutIncoming = prev.filter(
+            (delivery) =>
+              normalizeDeliveryId(delivery?.delivery_id) !== normalizedId,
+          );
+          return [payload, ...withoutIncoming];
+        });
+        return;
+      }
+
+      fetchDeliveriesWithCurrentLocation(true, "socket_new_delivery_fallback");
     };
 
-    const handleTipUpdated = () => {
+    const handleTipUpdated = (payload) => {
       if (!isFocusedRef.current) return;
-      fetchDeliveriesWithCurrentLocation(true, "socket_tip_update");
+
+      const normalizedId = normalizeDeliveryId(payload?.delivery_id);
+      if (!normalizedId) return;
+
+      const hasMatch = deliveriesRef.current.some(
+        (delivery) =>
+          normalizeDeliveryId(delivery?.delivery_id) === normalizedId,
+      );
+
+      if (hasMatch) {
+        mutateAvailableDeliveries((prev) =>
+          prev.map((delivery) => {
+            if (normalizeDeliveryId(delivery?.delivery_id) !== normalizedId) {
+              return delivery;
+            }
+
+            const incomingTip = Number.parseFloat(payload?.tip_amount);
+            const currentTip = Number.parseFloat(delivery?.pricing?.tip_amount);
+            const resolvedTip = Number.isFinite(incomingTip)
+              ? incomingTip
+              : Number.isFinite(currentTip)
+                ? currentTip
+                : 0;
+
+            return {
+              ...delivery,
+              pricing: {
+                ...(delivery?.pricing || {}),
+                tip_amount: resolvedTip,
+              },
+            };
+          }),
+        );
+        return;
+      }
+
+      fetchDeliveriesWithCurrentLocation(true, "socket_tip_update_fallback");
     };
 
     const handleDeliveryTaken = (payload) => {
       const takenId = normalizeDeliveryId(payload?.delivery_id);
       if (!takenId) return;
 
-      setDeliveries((prev) =>
+      mutateAvailableDeliveries((prev) =>
         prev.filter((d) => normalizeDeliveryId(d?.delivery_id) !== takenId),
       );
-
-      setDeclinedIds((prev) => {
-        if (!prev.has(takenId)) return prev;
-        const next = new Set(prev);
-        next.delete(takenId);
-        return next;
-      });
     };
 
     on("delivery:new", handleNewDelivery);
@@ -852,11 +1209,10 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   }, [
     on,
     off,
-    queryClient,
-    deliveriesQueryKey,
-    currentRoute,
-    driverLocation,
+    isFocused,
+    inDeliveringMode,
     fetchDeliveriesWithCurrentLocation,
+    mutateAvailableDeliveries,
   ]);
 
   useEffect(() => {
@@ -867,37 +1223,18 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         const action = String(payload?.action || "")
           .trim()
           .toLowerCase();
+        const eventLocation = isValidLocation(payload?.location)
+          ? payload.location
+          : null;
 
         if (!deliveryId) return;
 
-        setDeliveries((prev) =>
+        mutateAvailableDeliveries((prev) =>
           prev.filter(
             (delivery) =>
               normalizeDeliveryId(delivery?.delivery_id) !== deliveryId,
           ),
         );
-
-        setDeclinedIds((prev) => {
-          if (!prev.has(deliveryId)) return prev;
-          const next = new Set(prev);
-          next.delete(deliveryId);
-          return next;
-        });
-
-        queryClient.setQueryData(deliveriesQueryKey, (existing) => {
-          if (!existing || typeof existing !== "object") return existing;
-          const existingDeliveries = Array.isArray(existing.deliveries)
-            ? existing.deliveries
-            : [];
-
-          return {
-            ...existing,
-            deliveries: existingDeliveries.filter(
-              (delivery) =>
-                normalizeDeliveryId(delivery?.delivery_id) !== deliveryId,
-            ),
-          };
-        });
 
         if (action === "accepted" && isFocusedRef.current) {
           const location =
@@ -913,20 +1250,44 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
             );
           }
         }
+
+        if (action === "delivered") {
+          setIsPostCompleteHardLoading(true);
+          setDeliveries([]);
+          setDeclinedIds(new Set());
+
+          const fallbackLocation =
+            eventLocation ||
+            (isValidLocation(driverLocationRef.current) &&
+              driverLocationRef.current) ||
+            lastFetchLocationRef.current ||
+            null;
+
+          void fetchDeliveriesWithCurrentLocation(
+            true,
+            DELIVERY_COMPLETED_RECALCULATE_REASON,
+          ).finally(() => {
+            if (isValidLocation(fallbackLocation)) {
+              setDriverLocation(fallbackLocation);
+              setIsLocationResolved(true);
+            }
+            setIsPostCompleteHardLoading(false);
+          });
+        }
       },
     );
 
     return () => {
       subscription?.remove();
     };
-  }, [deliveriesQueryKey, queryClient]);
+  }, [mutateAvailableDeliveries]);
 
   // ============================================================================
   // ACTIONS
   // ============================================================================
 
   const handleAcceptDelivery = async (deliveryId, deliverySnapshot = null) => {
-    if (isDeliveriesSyncing || isLoadingAfterAccept) {
+    if (isLoadingAfterAccept || accepting) {
       showToast("Updating requests...", "error");
       return;
     }
@@ -1049,8 +1410,19 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   };
 
   const onRefresh = useCallback(() => {
-    fetchDeliveriesWithCurrentLocation(true, "pull_to_refresh");
-  }, []);
+    if (inDeliveringMode) {
+      setIsRefreshing(false);
+      showToast(ACTIVE_DELIVERY_BLOCK_MESSAGE, "error");
+      return;
+    }
+
+    setIsRefreshing(true);
+    deliveriesSyncRetryStateRef.current = {
+      consecutiveFailures: 0,
+      nextAllowedAt: 0,
+    };
+    fetchDeliveriesWithCurrentLocation(false, "pull_to_refresh");
+  }, [fetchDeliveriesWithCurrentLocation, inDeliveringMode]);
 
   const getTipAmount = useCallback((delivery) => {
     return Number.parseFloat(delivery?.pricing?.tip_amount || 0);
@@ -1200,7 +1572,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         mapViewportHeight={mapViewportHeight}
         tabBarHeight={tabBarHeight}
         accepting={accepting === item.delivery_id}
-        isSyncing={isDeliveriesSyncing || isLoadingAfterAccept}
+        isSyncing={isLoadingAfterAccept}
         onAccept={handleAcceptDelivery}
         onDecline={handleDecline}
         hasActiveDeliveries={currentRoute.active_deliveries > 0}
@@ -1284,6 +1656,12 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         </View>
       )}
 
+      {isDeliveriesSyncing && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>⟳ Updating latest requests...</Text>
+        </View>
+      )}
+
       <DriverScreenSection
         screenKey="AvailableDeliveries"
         sectionIndex={0}
@@ -1295,7 +1673,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
             <Text style={styles.deliveringEmoji}></Text>
             <Text style={styles.deliveringTitle}>Currently Delivering</Text>
             <Text style={styles.deliveringSubtitle}>
-              Complete current deliveries first
+              {ACTIVE_DELIVERY_BLOCK_MESSAGE}
             </Text>
             <Pressable
               style={styles.goToActiveBtn}
@@ -1309,6 +1687,8 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         ) : !hasVisitedAvailableDeliveriesScreen &&
           initialLoading &&
           !hasCompletedFirstFetch ? (
+          <DriverMapSheetLoadingSkeleton />
+        ) : isPostCompleteHardLoading ? (
           <DriverMapSheetLoadingSkeleton />
         ) : deliveries.length === 0 ? (
           <View style={styles.emptyContainer}>
@@ -1368,7 +1748,9 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
               data={sortedDeliveries}
               renderItem={renderDeliveryCard}
               scrollEnabled={true}
-              keyExtractor={(item) => item.delivery_id.toString()}
+              keyExtractor={(item, index) =>
+                String(item?.delivery_id || `delivery-${index}`)
+              }
               showsVerticalScrollIndicator={false}
               pagingEnabled={true}
               snapToInterval={viewportHeight}
@@ -1448,6 +1830,7 @@ function DeliveryCard({
   totalAvailable = 1,
   isMapActive = true,
 }) {
+  const safeDelivery = delivery && typeof delivery === "object" ? delivery : {};
   const {
     delivery_id,
     order_number,
@@ -1462,7 +1845,7 @@ function DeliveryCard({
     restaurant_to_customer_route,
     order_items = [],
     total_delivery_distance_km = 0,
-  } = delivery;
+  } = safeDelivery;
 
   // Extract route impact fields
   const {
@@ -1482,7 +1865,7 @@ function DeliveryCard({
   const mapHeight = mapViewportHeight || Math.round(cardHeight * 0.41);
   const overlayHeight = Math.max(370, cardHeight - mapHeight);
   const contentBottomInset = Math.max(18, Math.round(tabBarHeight + 10));
-  const totalItems = order_items.reduce(
+  const totalItems = asArray(order_items).reduce(
     (sum, item) => sum + (item.quantity || 0),
     0,
   );

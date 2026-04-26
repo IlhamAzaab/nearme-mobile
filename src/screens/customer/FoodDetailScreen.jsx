@@ -265,8 +265,9 @@ export default function FoodDetailScreen({ route, navigation }) {
         return;
       }
 
-      Alert.alert("Success", "Item added to cart!");
-      navigation.goBack();
+      navigation.replace("RestaurantFoods", {
+        restaurantId,
+      });
     } catch (e) {
       Alert.alert("Error", e.message || "Failed to add to cart");
     } finally {

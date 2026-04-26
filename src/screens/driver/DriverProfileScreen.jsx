@@ -15,7 +15,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { SvgXml } from "react-native-svg";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../app/providers/AuthProvider";
-import { DriverProfileLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import DriverScreenSection from "../../components/driver/DriverScreenSection";
 import { NEARME_LOGO_ARTBOARD5_XML } from "../../assets/NearMeLogoArtboard5Xml";
 import { API_URL } from "../../config/env";
@@ -31,7 +30,9 @@ const WORKING_TIME_LABELS = {
 
 export default function DriverProfileScreen({ navigation }) {
   const queryClient = useQueryClient();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
+  const userScope = String(user?.id || "anon");
+  const profileQueryKey = ["driver", userScope, "profile"];
 
   const [authReady, setAuthReady] = useState(false);
   const [profile, setProfile] = useState(null);
@@ -68,10 +69,10 @@ export default function DriverProfileScreen({ navigation }) {
   }, [navigation]);
 
   const profileQuery = useQuery({
-    queryKey: ["driver", "profile"],
+    queryKey: profileQueryKey,
     enabled: authReady,
     staleTime: 2 * 60 * 1000,
-    initialData: () => queryClient.getQueryData(["driver", "profile"]),
+    initialData: () => queryClient.getQueryData(profileQueryKey),
     placeholderData: (previousData) => previousData,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
@@ -133,7 +134,7 @@ export default function DriverProfileScreen({ navigation }) {
     onSuccess: () => {
       setMessage("Password updated! Redirecting to onboarding...");
       setError(null);
-      queryClient.setQueryData(["driver", "profile"], (current) =>
+      queryClient.setQueryData(profileQueryKey, (current) =>
         current ? { ...current, profile_completed: true } : current,
       );
       setTimeout(() => {
@@ -197,7 +198,8 @@ export default function DriverProfileScreen({ navigation }) {
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <DriverProfileLoadingSkeleton />
+        <ActivityIndicator size="large" color="#06C168" />
+        <Text style={styles.loadingText}>Loading profile...</Text>
       </SafeAreaView>
     );
   }
@@ -462,6 +464,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#f0fdf4",
+  },
+  loadingText: {
+    marginTop: 10,
+    color: "#64748b",
+    fontSize: 14,
+    fontWeight: "600",
   },
   setupContainer: { flex: 1, backgroundColor: "#06C168" },
   setupScroll: { flexGrow: 1, paddingHorizontal: 18, paddingVertical: 16 },

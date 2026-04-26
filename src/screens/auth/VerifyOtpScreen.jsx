@@ -331,15 +331,22 @@ export default function VerifyOtpScreen({ navigation, route }) {
     setError("");
 
     try {
-      const { error: resendError } = await supabase.auth.signInWithOtp({
-        phone: normalizedPhone,
-        options: {
-          channel: "sms",
+      const resendResponse = await fetch(
+        `${API_BASE_URL}/auth/phone/request-otp`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-client-platform": "react-native",
+          },
+          body: JSON.stringify({ phone: normalizedPhone }),
         },
-      });
+      );
 
-      if (resendError) {
-        setError(resendError?.message || "Failed to resend OTP");
+      const resendData = await resendResponse.json().catch(() => ({}));
+
+      if (!resendResponse.ok) {
+        setError(resendData?.message || "Failed to resend OTP");
         triggerShake();
       } else {
         setResendTimer(60);

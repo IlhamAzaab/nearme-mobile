@@ -11,7 +11,7 @@ const BRAND_ASSETS = {
 
 export default {
   expo: {
-    name: "nearme-mobile",
+    name: "Meezo",
     slug: "nearme-mobile",
     version: "1.0.1",
     orientation: "portrait",

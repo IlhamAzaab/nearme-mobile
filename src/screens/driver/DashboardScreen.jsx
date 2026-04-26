@@ -40,7 +40,14 @@ import { getAccessToken } from "../../lib/authStorage";
 import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNotificationContext";
 import { useSocket } from "../../context/SocketContext";
 import { approximateDistanceMeters } from "../../utils/osrmClient";
-import { rateLimitedFetch } from "../../utils/rateLimitedFetch";
+import {
+  isTransientFetchError,
+  rateLimitedFetch,
+} from "../../utils/rateLimitedFetch";
+import {
+  DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
+  buildDriverScopedCacheKey,
+} from "../../utils/driverRequestCache";
 
 // Working time display labels
 const WORKING_TIME_LABELS = {
@@ -50,7 +57,7 @@ const WORKING_TIME_LABELS = {
 };
 
 // Default driver location (Kinniya, Sri Lanka)
-const AVAILABLE_CACHE_KEY = "available_deliveries_cache";
+const AVAILABLE_CACHE_BASE_KEY = DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY;
 const AVAILABLE_CACHE_EXPIRY = 60000;
 const DASHBOARD_ASYNC_CACHE_KEY = "driver_dashboard_snapshot_cache";
 const DASHBOARD_ASYNC_CACHE_EXPIRY = 120000;
@@ -61,11 +68,14 @@ const DRIVER_STATUS_ENDPOINT = "/driver/working-hours-status";
 const NEARBY_PAGE_SIZE = 5;
 const DASHBOARD_CACHE_KEY = ["driver", "dashboard", "snapshot"];
 const AVAILABLE_SYNC_MOVEMENT_THRESHOLD = 200;
-const LIVE_LOCATION_NEARBY_REFRESH_INTERVAL_MS = 5000;
+const LIVE_LOCATION_NEARBY_BACKOFF_MAX_MS = 45000;
+const LIVE_LOCATION_NEARBY_504_BACKOFF_MAX_MS = 120000;
 const DRIVER_STATUS_FOCUS_SIGNAL_KEY = "driver_status_focus_signal";
 const DRIVER_STATUS_FOCUS_WINDOW_MS = 120000;
 const DRIVER_PROFILE_CACHE_KEY = "driver_profile_cache";
 const DASHBOARD_UI_CACHE_KEY = ["driver", "dashboard", "ui-state"];
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
 
 // Full-screen skeleton should only appear on the first visit to this screen.
 let hasVisitedDriverDashboardScreen = false;
@@ -104,9 +114,16 @@ const hasValidDeliveryCoordinates = (delivery) => {
   return Boolean(restaurantPoint && customerPoint);
 };
 
-const loadAvailableCache = async () => {
+const normalizeDeliveryId = (value) => {
+  if (value == null) return null;
+  const normalized = String(value).trim();
+  return normalized || null;
+};
+
+const loadAvailableCache = async (cacheKey) => {
   try {
-    const raw = await AsyncStorage.getItem(AVAILABLE_CACHE_KEY);
+    if (!cacheKey) return null;
+    const raw = await AsyncStorage.getItem(cacheKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed?.data || !parsed?.timestamp) return null;
@@ -119,10 +136,11 @@ const loadAvailableCache = async () => {
   }
 };
 
-const saveAvailableCache = async (payload) => {
+const saveAvailableCache = async (cacheKey, payload) => {
   try {
+    if (!cacheKey) return;
     await AsyncStorage.setItem(
-      AVAILABLE_CACHE_KEY,
+      cacheKey,
       JSON.stringify({ data: payload, timestamp: Date.now() }),
     );
   } catch (e) {
@@ -210,6 +228,7 @@ export default function DashboardScreen({ navigation }) {
   const [statusMessage, setStatusMessage] = useState("");
   const [togglingStatus, setTogglingStatus] = useState(false);
   const [hasDashboardSnapshot, setHasDashboardSnapshot] = useState(false);
+  const [driverUserId, setDriverUserId] = useState("default");
   const [alert, setAlert] = useState({
     visible: false,
     type: "info",
@@ -226,6 +245,49 @@ export default function DashboardScreen({ navigation }) {
   const nearbyLastSyncLocationRef = useRef(null);
   const hasInitializedRef = useRef(false);
   const nearbySyncInFlightRef = useRef(false);
+  const nearbySyncBackoffRef = useRef({
+    consecutiveFailures: 0,
+    nextAllowedAt: 0,
+  });
+  const hasNearbyInitialSyncCompletedRef = useRef(false);
+  const availableDeliveriesRef = useRef([]);
+  const lastDashboardRefreshAtRef = useRef(0);
+
+  const safeRecentDeliveries = asArray(recentDeliveries);
+  const safeActiveDeliveries = asArray(activeDeliveries);
+  const safeAvailableDeliveries = asArray(availableDeliveries);
+
+  const availableCacheKey = useMemo(
+    () => buildDriverScopedCacheKey(AVAILABLE_CACHE_BASE_KEY, driverUserId),
+    [driverUserId],
+  );
+
+  const persistNearbyDeliveriesCache = useCallback(
+    (nextDeliveries, currentRouteOverride = null, locationOverride = null) => {
+      const queryKey = ["driver", "available-deliveries", driverUserId];
+      const existingSnapshot = queryClient.getQueryData(queryKey);
+
+      const payload = {
+        deliveries: (nextDeliveries || []).filter(hasValidDeliveryCoordinates),
+        currentRoute: currentRouteOverride ||
+          existingSnapshot?.currentRoute || {
+            total_stops: 0,
+            active_deliveries: 0,
+          },
+        driverLocation:
+          (isValidLocation(locationOverride) && locationOverride) ||
+          (isValidLocation(driverLocationRef.current) &&
+            driverLocationRef.current) ||
+          existingSnapshot?.driverLocation ||
+          null,
+      };
+
+      queryClient.setQueryData(queryKey, payload);
+      saveAvailableCache(availableCacheKey, payload).catch(() => {});
+      return payload;
+    },
+    [availableCacheKey, driverUserId, queryClient],
+  );
 
   const isFullTimeDriver = useMemo(() => {
     const workingTime = String(
@@ -251,8 +313,8 @@ export default function DashboardScreen({ navigation }) {
 
     setStats(snapshot.stats || { todayEarnings: 0, todayDeliveries: 0 });
     setMonthlyStats(snapshot.monthlyStats || { earnings: 0, deliveries: 0 });
-    setRecentDeliveries(snapshot.recentDeliveries || []);
-    setActiveDeliveries(snapshot.activeDeliveries || []);
+    setRecentDeliveries(asArray(snapshot.recentDeliveries));
+    setActiveDeliveries(asArray(snapshot.activeDeliveries));
     setBalanceToReceive(Number(snapshot.balanceToReceive || 0));
     setHasDashboardSnapshot(true);
   }, []);
@@ -287,6 +349,37 @@ export default function DashboardScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      const storedUserId = (await AsyncStorage.getItem("userId")) || "default";
+      if (mounted) {
+        setDriverUserId(storedUserId);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    hasNearbyInitialSyncCompletedRef.current = hasNearbyInitialSyncCompleted;
+  }, [hasNearbyInitialSyncCompleted]);
+
+  useEffect(() => {
+    availableDeliveriesRef.current = Array.isArray(availableDeliveries)
+      ? availableDeliveries
+      : [];
+  }, [availableDeliveries]);
+
+  useEffect(() => {
+    if (isValidLocation(driverLocation)) {
+      driverLocationRef.current = driverLocation;
+    }
+  }, [driverLocation]);
+
+  useEffect(() => {
     const applySnapshot = (snapshot) => {
       if (!snapshot || !Array.isArray(snapshot.deliveries)) return;
 
@@ -302,6 +395,7 @@ export default function DashboardScreen({ navigation }) {
       const key = query.queryKey;
       if (!Array.isArray(key)) return;
       if (key[0] !== "driver" || key[1] !== "available-deliveries") return;
+      if (String(key[2] || "") !== String(driverUserId)) return;
 
       const data = query.state?.data;
       if (!data) return;
@@ -309,7 +403,7 @@ export default function DashboardScreen({ navigation }) {
     });
 
     const existing = queryClient.getQueriesData({
-      queryKey: ["driver", "available-deliveries"],
+      queryKey: ["driver", "available-deliveries", driverUserId],
     });
     for (let i = existing.length - 1; i >= 0; i -= 1) {
       const snapshot = existing[i]?.[1];
@@ -320,7 +414,7 @@ export default function DashboardScreen({ navigation }) {
     }
 
     return () => unsubscribe();
-  }, [queryClient]);
+  }, [driverUserId, queryClient]);
 
   // Alert helpers
   const showAlertMessage = (type, message) => {
@@ -529,6 +623,27 @@ export default function DashboardScreen({ navigation }) {
         });
       }
     } catch (error) {
+      if (isTransientFetchError(error)) {
+        try {
+          const cachedProfileRaw = await AsyncStorage.getItem(
+            DRIVER_PROFILE_CACHE_KEY,
+          );
+          if (cachedProfileRaw) {
+            const cachedProfile = JSON.parse(cachedProfileRaw);
+            if (cachedProfile && typeof cachedProfile === "object") {
+              setDriverProfile((prev) => prev || cachedProfile);
+            }
+          }
+        } catch {
+          // Keep existing in-memory profile state.
+        }
+
+        console.warn(
+          "Profile request is slow/unavailable, using cached profile data",
+        );
+        return;
+      }
+
       console.error("Profile fetch error:", error);
     }
   }, [logout, withinWorkingHours, writeDashboardUiState]);
@@ -675,6 +790,11 @@ export default function DashboardScreen({ navigation }) {
     async (token, reason = "dashboard_open", options = {}) => {
       if (nearbySyncInFlightRef.current) return;
 
+      const now = Date.now();
+      if (now < Number(nearbySyncBackoffRef.current.nextAllowedAt || 0)) {
+        return;
+      }
+
       const forceSync = Boolean(options?.forceSync);
       const forceFreshLocation = Boolean(options?.forceFreshLocation);
 
@@ -701,7 +821,7 @@ export default function DashboardScreen({ navigation }) {
       const shouldSync =
         forceSync ||
         forceReasons.has(reason) ||
-        !hasNearbyInitialSyncCompleted ||
+        !hasNearbyInitialSyncCompletedRef.current ||
         movedDistance >= AVAILABLE_SYNC_MOVEMENT_THRESHOLD;
 
       if (!shouldSync) {
@@ -739,32 +859,51 @@ export default function DashboardScreen({ navigation }) {
         );
 
         setAvailableDeliveries(nextAvailable);
-
-        const payload = {
-          deliveries: nextAvailable,
-          currentRoute: deliveriesData.current_route || {
+        persistNearbyDeliveriesCache(
+          nextAvailable,
+          deliveriesData.current_route || {
             total_stops: 0,
             active_deliveries: 0,
           },
-          driverLocation: currentLocation,
-        };
-
-        await saveAvailableCache(payload);
-        queryClient.setQueriesData(
-          { queryKey: ["driver", "available-deliveries"] },
-          payload,
+          currentLocation,
         );
         setHasNearbyInitialSyncCompleted(true);
         nearbyLastSyncLocationRef.current = currentLocation;
+        nearbySyncBackoffRef.current = {
+          consecutiveFailures: 0,
+          nextAllowedAt: 0,
+        };
       } catch (error) {
         console.error("Available deliveries background sync error:", error);
-        setNearbySyncError(error.message || "Failed to update nearby requests");
+        const rawMessage = String(error?.message || "");
+        const isGatewayTimeout =
+          rawMessage.includes("(504)") || rawMessage.includes(" 504");
+        setNearbySyncError(
+          isGatewayTimeout
+            ? "Server is busy. Showing cached requests and retrying with backoff..."
+            : error.message || "Failed to update nearby requests",
+        );
+
+        const consecutiveFailures =
+          Number(nearbySyncBackoffRef.current.consecutiveFailures || 0) + 1;
+        const maxBackoffMs = isGatewayTimeout
+          ? LIVE_LOCATION_NEARBY_504_BACKOFF_MAX_MS
+          : LIVE_LOCATION_NEARBY_BACKOFF_MAX_MS;
+        const baseBackoffMs = isGatewayTimeout ? 6000 : 3000;
+        const backoffMs = Math.min(
+          maxBackoffMs,
+          Math.pow(2, Math.min(consecutiveFailures, 5)) * baseBackoffMs,
+        );
+        nearbySyncBackoffRef.current = {
+          consecutiveFailures,
+          nextAllowedAt: Date.now() + backoffMs,
+        };
       } finally {
         setIsNearbySyncing(false);
         nearbySyncInFlightRef.current = false;
       }
     },
-    [queryClient, resolveVerifiedDriverLocation, hasNearbyInitialSyncCompleted],
+    [persistNearbyDeliveriesCache, resolveVerifiedDriverLocation],
   );
 
   const fetchDashboardData = useCallback(async () => {
@@ -791,13 +930,18 @@ export default function DashboardScreen({ navigation }) {
         }
       }
 
-      const cachedAvailable = await loadAvailableCache();
+      const cachedAvailable = await loadAvailableCache(availableCacheKey);
       if (Array.isArray(cachedAvailable?.data?.deliveries)) {
         const cachedDeliveries = (cachedAvailable.data.deliveries || []).filter(
           hasValidDeliveryCoordinates,
         );
         setAvailableDeliveries(cachedDeliveries);
         setHasNearbyInitialSyncCompleted(true);
+
+        if (isValidLocation(cachedAvailable?.data?.driverLocation)) {
+          setDriverLocation(cachedAvailable.data.driverLocation);
+          driverLocationRef.current = cachedAvailable.data.driverLocation;
+        }
       }
 
       const headers = { Authorization: `Bearer ${token}` };
@@ -809,8 +953,8 @@ export default function DashboardScreen({ navigation }) {
         earnings: 0,
         deliveries: 0,
       };
-      let nextRecentDeliveries = cachedDashboard?.recentDeliveries || [];
-      let nextActiveDeliveries = cachedDashboard?.activeDeliveries || [];
+      let nextRecentDeliveries = asArray(cachedDashboard?.recentDeliveries);
+      let nextActiveDeliveries = asArray(cachedDashboard?.activeDeliveries);
       let nextBalanceToReceive = Number(cachedDashboard?.balanceToReceive || 0);
 
       // Batch all dashboard API calls in parallel
@@ -852,13 +996,13 @@ export default function DashboardScreen({ navigation }) {
 
       if (recentRes.ok) {
         const recentData = await recentRes.json();
-        nextRecentDeliveries = recentData.deliveries || [];
+        nextRecentDeliveries = asArray(recentData.deliveries);
         setRecentDeliveries(nextRecentDeliveries);
       }
 
       if (activeDeliveriesRes.ok) {
         const activeDeliveriesData = await activeDeliveriesRes.json();
-        nextActiveDeliveries = activeDeliveriesData.deliveries || [];
+        nextActiveDeliveries = asArray(activeDeliveriesData.deliveries);
         setActiveDeliveries(nextActiveDeliveries);
       }
 
@@ -903,12 +1047,26 @@ export default function DashboardScreen({ navigation }) {
       setRefreshing(false);
     }
   }, [
-    navigation,
     queryClient,
     syncAvailableDeliveriesInBackground,
     applyDashboardSnapshot,
     consumeStatusFocusSignal,
+    availableCacheKey,
   ]);
+
+  const refreshDashboardOnDemand = useCallback(
+    async (options = {}) => {
+      const force = Boolean(options?.force);
+      const now = Date.now();
+      if (!force && now - lastDashboardRefreshAtRef.current < 2500) {
+        return;
+      }
+
+      lastDashboardRefreshAtRef.current = now;
+      await Promise.all([fetchStatusInfo(), fetchDashboardData()]);
+    },
+    [fetchDashboardData, fetchStatusInfo],
+  );
 
   // ============================================================================
   // APP STATE LISTENER - Re-fetch status when app returns to foreground
@@ -922,101 +1080,117 @@ export default function DashboardScreen({ navigation }) {
         nextAppState === "active"
       ) {
         // App came to foreground - re-fetch server status (source of truth)
-        fetchStatusInfo();
-        fetchDashboardData();
+        refreshDashboardOnDemand();
       }
       appStateRef.current = nextAppState;
     });
     return () => subscription?.remove();
-  }, [fetchStatusInfo, fetchDashboardData]);
+  }, [refreshDashboardOnDemand]);
 
   useEffect(() => {
     if (!isFocused) return;
 
-    fetchStatusInfo();
-    fetchDashboardData();
-  }, [isFocused, fetchStatusInfo, fetchDashboardData]);
+    refreshDashboardOnDemand();
+  }, [isFocused, refreshDashboardOnDemand]);
 
   useEffect(() => {
-    fetchDriverProfile();
-    fetchStatusInfo();
-    fetchDashboardData();
-
-    // Polling only runs when this tab is focused
-    // Status info: every 60 seconds (was 30s)
-    // Dashboard data: every 60 seconds (was 30s)
-    const statusInterval = setInterval(() => {
-      if (isFocused) fetchStatusInfo();
-    }, 60000);
-    const dataInterval = setInterval(() => {
-      if (isFocused) fetchDashboardData();
-    }, 60000);
-
-    return () => {
-      clearInterval(statusInterval);
-      clearInterval(dataInterval);
-    };
-  }, [fetchDriverProfile, fetchStatusInfo, fetchDashboardData, isFocused]);
+    (async () => {
+      await fetchDriverProfile();
+      await refreshDashboardOnDemand({ force: true });
+    })();
+  }, [fetchDriverProfile, refreshDashboardOnDemand]);
 
   useEffect(() => {
     if (!isFocused) return;
-
-    const interval = setInterval(async () => {
-      const token = await getAccessToken();
-      if (!token) return;
-
-      syncAvailableDeliveriesInBackground(token, "live_location_tick", {
-        forceSync: true,
-        forceFreshLocation: true,
-      });
-    }, LIVE_LOCATION_NEARBY_REFRESH_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [isFocused, syncAvailableDeliveriesInBackground]);
-
-  useEffect(() => {
     if (!on || !off) return;
 
-    const handleNewDelivery = async () => {
+    const handleNewDelivery = async (payload) => {
       if (!isFocused) return;
+
+      const incomingId = normalizeDeliveryId(payload?.delivery_id);
+      const canHydrateFromPayload =
+        incomingId && hasValidDeliveryCoordinates(payload);
+
+      if (canHydrateFromPayload) {
+        setAvailableDeliveries((prev) => {
+          const next = [
+            payload,
+            ...(prev || []).filter(
+              (delivery) =>
+                normalizeDeliveryId(delivery?.delivery_id) !== incomingId,
+            ),
+          ];
+          persistNearbyDeliveriesCache(next);
+          return next;
+        });
+        setHasNearbyInitialSyncCompleted(true);
+        return;
+      }
+
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
-      syncAvailableDeliveriesInBackground(token, "new_delivery");
+      syncAvailableDeliveriesInBackground(token, "new_delivery", {
+        forceSync: true,
+      });
     };
 
-    const handleTipUpdated = async () => {
+    const handleTipUpdated = async (payload) => {
       if (!isFocused) return;
+
+      const targetId = normalizeDeliveryId(payload?.delivery_id);
+      if (!targetId) return;
+
+      const hasMatch = availableDeliveriesRef.current.some(
+        (delivery) => normalizeDeliveryId(delivery?.delivery_id) === targetId,
+      );
+
+      if (hasMatch) {
+        setAvailableDeliveries((prev) => {
+          const next = (prev || []).map((delivery) => {
+            if (normalizeDeliveryId(delivery?.delivery_id) !== targetId) {
+              return delivery;
+            }
+
+            const incomingTip = Number.parseFloat(payload?.tip_amount);
+            const currentTip = Number.parseFloat(delivery?.pricing?.tip_amount);
+            const resolvedTip = Number.isFinite(incomingTip)
+              ? incomingTip
+              : Number.isFinite(currentTip)
+                ? currentTip
+                : 0;
+
+            return {
+              ...delivery,
+              pricing: {
+                ...(delivery?.pricing || {}),
+                tip_amount: resolvedTip,
+              },
+            };
+          });
+
+          persistNearbyDeliveriesCache(next);
+          return next;
+        });
+        return;
+      }
+
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
-      syncAvailableDeliveriesInBackground(token, "tip_updated");
+      syncAvailableDeliveriesInBackground(token, "tip_updated", {
+        forceSync: true,
+      });
     };
 
     const handleDeliveryTaken = (payload) => {
-      const deliveryId = payload?.delivery_id;
+      const deliveryId = normalizeDeliveryId(payload?.delivery_id);
       if (!deliveryId) return;
 
       setAvailableDeliveries((prev) => {
-        const next = prev.filter((d) => d.delivery_id !== deliveryId);
-        const cachedSnapshots = queryClient.getQueriesData({
-          queryKey: ["driver", "available-deliveries"],
-        });
-        const latestSnapshot =
-          cachedSnapshots?.[cachedSnapshots.length - 1]?.[1];
-
-        const payloadForCache = {
-          deliveries: next,
-          currentRoute: latestSnapshot?.currentRoute || {
-            total_stops: 0,
-            active_deliveries: 0,
-          },
-          driverLocation: driverLocationRef.current,
-        };
-
-        queryClient.setQueriesData(
-          { queryKey: ["driver", "available-deliveries"] },
-          payloadForCache,
+        const next = (prev || []).filter(
+          (delivery) =>
+            normalizeDeliveryId(delivery?.delivery_id) !== deliveryId,
         );
-        saveAvailableCache(payloadForCache).catch(() => {});
+        persistNearbyDeliveriesCache(next);
         return next;
       });
     };
@@ -1030,7 +1204,13 @@ export default function DashboardScreen({ navigation }) {
       off("delivery:tip_updated", handleTipUpdated);
       off("delivery:taken", handleDeliveryTaken);
     };
-  }, [on, off, isFocused, queryClient, syncAvailableDeliveriesInBackground]);
+  }, [
+    on,
+    off,
+    isFocused,
+    persistNearbyDeliveriesCache,
+    syncAvailableDeliveriesInBackground,
+  ]);
 
   // ============================================================================
   // WORKING HOURS CHECK (every minute)
@@ -1126,11 +1306,6 @@ export default function DashboardScreen({ navigation }) {
   // ============================================================================
 
   const handleAcceptDelivery = async (deliveryId) => {
-    if (isNearbySyncing) {
-      showError("Requests are updating. Please wait a moment.");
-      return;
-    }
-
     setAcceptingOrder(deliveryId);
     try {
       const token = await getAccessToken();
@@ -1365,7 +1540,7 @@ export default function DashboardScreen({ navigation }) {
     const seen = new Set();
     const unique = [];
 
-    for (const delivery of availableDeliveries || []) {
+    for (const delivery of safeAvailableDeliveries) {
       const id = delivery?.delivery_id;
       if (!id || seen.has(id)) continue;
       seen.add(id);
@@ -1373,7 +1548,7 @@ export default function DashboardScreen({ navigation }) {
     }
 
     return unique;
-  }, [availableDeliveries]);
+  }, [safeAvailableDeliveries]);
 
   const visibleNearbyDeliveries = useMemo(
     () => nearbyDeliveries.slice(0, nearbyVisibleCount),
@@ -1398,12 +1573,30 @@ export default function DashboardScreen({ navigation }) {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    Promise.all([
-      fetchDriverProfile(),
-      fetchStatusInfo(),
-      fetchDashboardData(),
-    ]);
-  }, [fetchDashboardData, fetchDriverProfile, fetchStatusInfo]);
+    nearbySyncBackoffRef.current = {
+      consecutiveFailures: 0,
+      nextAllowedAt: 0,
+    };
+
+    (async () => {
+      await fetchDriverProfile();
+      await refreshDashboardOnDemand({ force: true });
+
+      const token = await getAccessToken();
+      if (token) {
+        await syncAvailableDeliveriesInBackground(token, "pull_to_refresh", {
+          forceSync: true,
+          forceFreshLocation: true,
+        });
+      }
+    })().finally(() => {
+      setRefreshing(false);
+    });
+  }, [
+    fetchDriverProfile,
+    refreshDashboardOnDemand,
+    syncAvailableDeliveriesInBackground,
+  ]);
 
   useEffect(() => {
     if (!statusMessage) {
@@ -1778,18 +1971,18 @@ export default function DashboardScreen({ navigation }) {
             </View>
 
             {/* Active Deliveries Section */}
-            {activeDeliveries.length > 0 && (
+            {safeActiveDeliveries.length > 0 && (
               <>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>
-                    Active Deliveries ({activeDeliveries.length})
+                    Active Deliveries ({safeActiveDeliveries.length})
                   </Text>
                   <TouchableOpacity onPress={openActiveMap}>
                     <Text style={styles.sectionLink}>View All</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={styles.section}>
-                  {activeDeliveries.slice(0, 3).map((delivery) => (
+                  {safeActiveDeliveries.slice(0, 3).map((delivery) => (
                     <TouchableOpacity
                       key={String(delivery.delivery_id || delivery.id)}
                       style={styles.activeDeliveryCard}
@@ -1840,7 +2033,7 @@ export default function DashboardScreen({ navigation }) {
                     </TouchableOpacity>
                   ))}
                 </View>
-                {!isOnline && activeDeliveries.length > 0 && (
+                {!isOnline && safeActiveDeliveries.length > 0 && (
                   <View style={styles.warningBanner}>
                     <Ionicons
                       name="information-circle"
@@ -1970,7 +2163,7 @@ export default function DashboardScreen({ navigation }) {
 
                   return (
                     <View
-                      key={delivery.delivery_id}
+                      key={String(delivery?.delivery_id || index)}
                       style={styles.deliveryCard}
                     >
                       <View style={styles.deliveryHeader}>
@@ -2046,17 +2239,13 @@ export default function DashboardScreen({ navigation }) {
                       <TouchableOpacity
                         style={[
                           styles.acceptButton,
-                          (acceptingOrder === delivery.delivery_id ||
-                            isNearbySyncing) &&
+                          acceptingOrder === delivery.delivery_id &&
                             styles.acceptButtonDisabled,
                         ]}
                         onPress={() =>
                           handleAcceptDelivery(delivery.delivery_id)
                         }
-                        disabled={
-                          acceptingOrder === delivery.delivery_id ||
-                          isNearbySyncing
-                        }
+                        disabled={acceptingOrder === delivery.delivery_id}
                       >
                         {acceptingOrder === delivery.delivery_id ? (
                           <>
@@ -2122,13 +2311,13 @@ export default function DashboardScreen({ navigation }) {
             </View>
 
             {/* Recent Deliveries Section */}
-            {recentDeliveries.length > 0 && (
+            {safeRecentDeliveries.length > 0 && (
               <>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>Recent Deliveries</Text>
                 </View>
                 <View style={styles.section}>
-                  {recentDeliveries.map((delivery) => (
+                  {safeRecentDeliveries.map((delivery) => (
                     <View key={delivery.id} style={styles.recentDeliveryCard}>
                       <View style={styles.recentDeliveryIcon}>
                         <Ionicons

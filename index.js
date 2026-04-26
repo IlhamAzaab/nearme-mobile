@@ -11,6 +11,21 @@ LogBox.ignoreLogs([
   "VirtualizedList: You have a large list that is slow to update",
 ]);
 
+if (global.ErrorUtils?.setGlobalHandler) {
+  const previousHandler = global.ErrorUtils.getGlobalHandler?.();
+  global.ErrorUtils.setGlobalHandler((error, isFatal) => {
+    console.error("[GlobalError] Uncaught JS error:", error);
+    console.error("[GlobalError] Fatal:", Boolean(isFatal));
+    if (error?.stack) {
+      console.error("[GlobalError] Stack:\n" + error.stack);
+    }
+
+    if (typeof previousHandler === "function") {
+      previousHandler(error, isFatal);
+    }
+  });
+}
+
 const App = require("./src/app/App").default;
 
 enableScreens(true);

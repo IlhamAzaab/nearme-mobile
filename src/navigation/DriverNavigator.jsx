@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDriverDeliveryNotifications } from "../context/DriverDeliveryNotificationContext";
 import AvailableDeliveriesScreen from "../screens/driver/AvailableDeliveriesScreen";
@@ -17,6 +17,7 @@ import DriverPendingScreen from "../screens/driver/DriverPendingScreen";
 import DriverAccountProfileScreen from "../screens/driver/DriverAccountProfileScreen";
 import DriverBankDetailsScreen from "../screens/driver/DriverBankDetailsScreen";
 import DriverContractScreen from "../screens/driver/DriverContractScreen";
+import DriverDocumentsScreen from "../screens/driver/DriverDocumentsScreen";
 import DriverPersonalInfoScreen from "../screens/driver/DriverPersonalInfoScreen";
 import DriverProfileScreen from "../screens/driver/DriverProfileScreen";
 import DriverVehicleDetailsScreen from "../screens/driver/DriverVehicleDetailsScreen";
@@ -33,6 +34,8 @@ import {
   markDriverAvailableDeliveriesSeen,
   syncDriverAvailableUnseenState,
 } from "../utils/driverAvailableUnseen";
+import { API_BASE_URL } from "../constants/api";
+import { getAccessToken } from "../lib/authStorage";
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -84,6 +87,41 @@ function DriverTabs() {
   const [userId, setUserId] = useState("default");
   const [availableBadgeCount, setAvailableBadgeCount] = useState(0);
   const [isAvailableTabFocused, setIsAvailableTabFocused] = useState(false);
+
+  const guardAvailableTabAccess = useCallback(async (navigation) => {
+    const token = await getAccessToken();
+    if (!token) return false;
+
+    const res = await fetch(`${API_BASE_URL}/driver/deliveries/active`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return false;
+
+    const data = await res.json().catch(() => ({}));
+    const activeDeliveries = Array.isArray(data?.deliveries)
+      ? data.deliveries
+      : [];
+
+    const restrictedDelivery = activeDeliveries.find((delivery) => {
+      const normalizedStatus = String(delivery?.status || "")
+        .trim()
+        .toLowerCase();
+      return ["picked_up", "on_the_way", "at_customer"].includes(
+        normalizedStatus,
+      );
+    });
+
+    if (!restrictedDelivery) {
+      return false;
+    }
+
+    Alert.alert("Unavailable", "Complete your picked up delivery first.");
+
+    navigation.navigate("DriverMap", {
+      deliveryId: restrictedDelivery?.delivery_id,
+    });
+    return true;
+  }, []);
 
   const refreshAvailableBadge = useCallback(() => {
     setAvailableBadgeCount(getDriverAvailableUnseenCount(userId));
@@ -172,10 +210,19 @@ function DriverTabs() {
       <Tab.Screen
         name="Available"
         component={AvailableDeliveriesScreen}
-        listeners={{
+        listeners={({ navigation }) => ({
+          tabPress: async (e) => {
+            const blocked = await guardAvailableTabAccess(navigation);
+            if (blocked) {
+              e.preventDefault();
+              return;
+            }
+
+            handleAvailableTabFocused();
+          },
           focus: handleAvailableTabFocused,
           blur: handleAvailableTabBlurred,
-        }}
+        })}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon
@@ -272,6 +319,10 @@ export default function DriverNavigator() {
         <Stack.Screen
           name="DriverBankDetails"
           component={DriverBankDetailsScreen}
+        />
+        <Stack.Screen
+          name="DriverDocuments"
+          component={DriverDocumentsScreen}
         />
         <Stack.Screen name="DriverContract" component={DriverContractScreen} />
         <Stack.Screen name="DriverProfile" component={DriverProfileScreen} />

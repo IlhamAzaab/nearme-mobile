@@ -36,6 +36,9 @@ const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 2000;
 const SLOW_ENDPOINTS = new Set([
   "/driver/deliveries/available/v2",
   "/driver/deliveries/pickups",
+  "/driver/deliveries/deliveries-route",
+  "/driver/deliveries/active",
+  "/driver/profile",
 ]);
 
 const isTimeoutOrNetworkError = (error) => {
@@ -45,6 +48,18 @@ const isTimeoutOrNetworkError = (error) => {
     message.includes("request timeout") ||
     message.includes("network request failed") ||
     message.includes("failed to fetch")
+  );
+};
+
+export const isTransientFetchError = (error) => {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.name === "TimeoutError" ||
+    error?.code === "E_TIMEOUT" ||
+    message.includes("request timeout") ||
+    message.includes("network request failed") ||
+    message.includes("failed to fetch") ||
+    message.includes("timeout")
   );
 };
 
@@ -216,7 +231,10 @@ export async function rateLimitedFetch(url, options = {}, config = {}) {
       }
 
       if (error?.name === "TimeoutError") {
-        throw new Error(`Request timeout for ${endpointKey}`);
+        const timeoutError = new Error(`Request timeout for ${endpointKey}`);
+        timeoutError.code = "E_TIMEOUT";
+        timeoutError.endpoint = endpointKey;
+        throw timeoutError;
       }
 
       throw error;

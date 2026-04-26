@@ -1,17 +1,22 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DriverProfileLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
+import {
+  getDriverProfileScreenCache,
+  setDriverProfileScreenCache,
+} from "../../utils/driverProfileScreenCache";
 
 function pickFirstValue(source, keys, fallback = "-") {
   for (const key of keys) {
@@ -34,6 +39,16 @@ function formatDateValue(value) {
   });
 }
 
+function toInputDate(value) {
+  if (!value || value === "-") return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    const text = String(value).trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+  }
+  return date.toISOString().slice(0, 10);
+}
+
 function InfoRow({ label, value, isLast = false }) {
   return (
     <View style={[styles.infoRow, isLast && styles.infoRowLast]}>
@@ -48,18 +63,19 @@ function InfoRow({ label, value, isLast = false }) {
 
 export default function DriverVehicleDetailsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [details, setDetails] = useState({
     vehicle_type: "-",
     vehicle_model: "-",
     vehicle_number: "-",
-    insurance_expiry: "-",
-    vehicle_license_expiry: "-",
+    insurance_expiry: "",
+    vehicle_license_expiry: "",
     driving_license_number: "-",
-    license_expiry_date: "-",
+    license_expiry_date: "",
   });
 
-  const loadVehicleDetails = useCallback(async () => {
-    setLoading(true);
+  const loadVehicleDetails = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
 
     try {
       const token = await getAccessToken();
@@ -91,7 +107,7 @@ export default function DriverVehicleDetailsScreen({ navigation }) {
         payload?.vehicle_license ||
         {};
 
-      setDetails({
+      const nextDetails = {
         vehicle_type:
           pickFirstValue(driver, ["vehicle_type", "vehicle_category"], "") ||
           pickFirstValue(vehicle, ["vehicle_type", "type", "vehicle_category"]),
@@ -111,7 +127,7 @@ export default function DriverVehicleDetailsScreen({ navigation }) {
             "registration_number",
             "plate_number",
           ]),
-        insurance_expiry: formatDateValue(
+        insurance_expiry: toInputDate(
           pickFirstValue(
             driver,
             ["insurance_expiry", "insurance_expiry_date"],
@@ -122,7 +138,7 @@ export default function DriverVehicleDetailsScreen({ navigation }) {
               "insurance_expiry_date",
             ]),
         ),
-        vehicle_license_expiry: formatDateValue(
+        vehicle_license_expiry: toInputDate(
           pickFirstValue(
             driver,
             ["vehicle_license_expiry", "vehicle_license_expiry_date"],
@@ -148,7 +164,7 @@ export default function DriverVehicleDetailsScreen({ navigation }) {
             "license_number",
             "driver_license_number",
           ]),
-        license_expiry_date: formatDateValue(
+        license_expiry_date: toInputDate(
           pickFirstValue(
             driver,
             ["license_expiry_date", "driving_license_expiry"],
@@ -160,29 +176,126 @@ export default function DriverVehicleDetailsScreen({ navigation }) {
               "driving_license_expiry_date",
             ]),
         ),
-      });
+      };
+
+      setDetails(nextDetails);
+      await setDriverProfileScreenCache("vehicle-details", nextDetails);
     } catch (error) {
-      Alert.alert("Error", error?.message || "Unable to load vehicle details.");
+      if (!silent) {
+        Alert.alert(
+          "Error",
+          error?.message || "Unable to load vehicle details.",
+        );
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadVehicleDetails();
+    let mounted = true;
+
+    (async () => {
+      const cached = await getDriverProfileScreenCache("vehicle-details");
+      if (cached && mounted) {
+        setDetails((prev) => ({ ...prev, ...cached }));
+        setLoading(false);
+        loadVehicleDetails({ silent: true });
+        return;
+      }
+      loadVehicleDetails();
+    })();
+
+    return () => {
+      mounted = false;
+    };
   }, [loadVehicleDetails]);
+
+  const saveExpiryDates = useCallback(async () => {
+    const insuranceExpiry = String(details.insurance_expiry || "").trim();
+    const vehicleLicenseExpiry = String(
+      details.vehicle_license_expiry || "",
+    ).trim();
+    const licenseExpiryDate = String(details.license_expiry_date || "").trim();
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (
+      !insuranceExpiry ||
+      !vehicleLicenseExpiry ||
+      !licenseExpiryDate ||
+      !datePattern.test(insuranceExpiry) ||
+      !datePattern.test(vehicleLicenseExpiry) ||
+      !datePattern.test(licenseExpiryDate)
+    ) {
+      Alert.alert(
+        "Validation",
+        "Please provide all 3 expiry dates in YYYY-MM-DD format.",
+      );
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("No authentication token");
+
+      const response = await fetch(`${API_URL}/driver/vehicle-expiry`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          insuranceExpiry,
+          vehicleLicenseExpiry,
+          licenseExpiryDate,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.message || "Failed to update expiry dates");
+      }
+
+      const updatedVehicle = payload?.vehicle || {};
+      const updatedDetails = {
+        ...details,
+        insurance_expiry: toInputDate(
+          updatedVehicle.insurance_expiry ||
+            insuranceExpiry ||
+            details.insurance_expiry,
+        ),
+        vehicle_license_expiry: toInputDate(
+          updatedVehicle.vehicle_license_expiry ||
+            vehicleLicenseExpiry ||
+            details.vehicle_license_expiry,
+        ),
+        license_expiry_date: toInputDate(
+          updatedVehicle.license_expiry_date ||
+            licenseExpiryDate ||
+            details.license_expiry_date,
+        ),
+      };
+      setDetails(updatedDetails);
+      await setDriverProfileScreenCache("vehicle-details", updatedDetails);
+      Alert.alert("Success", "Expiry dates updated successfully.");
+    } catch (error) {
+      Alert.alert("Error", error?.message || "Unable to update expiry dates.");
+    } finally {
+      setSaving(false);
+    }
+  }, [details]);
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={["top"]}>
-        <ActivityIndicator size="large" color="#111827" />
-        <Text style={styles.loadingText}>Loading vehicle details...</Text>
+      <SafeAreaView style={styles.loadingContainer} edges={["top", "bottom"]}>
+        <DriverProfileLoadingSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.headerButton}
@@ -203,21 +316,82 @@ export default function DriverVehicleDetailsScreen({ navigation }) {
           <InfoRow label="Vehicle type" value={details.vehicle_type} />
           <InfoRow label="Vehicle model" value={details.vehicle_model} />
           <InfoRow label="Vehicle number" value={details.vehicle_number} />
-          <InfoRow label="Insurance expiry" value={details.insurance_expiry} />
-          <InfoRow
-            label="Vehicle license expiry"
-            value={details.vehicle_license_expiry}
-          />
+          <View style={styles.editableFieldWrap}>
+            <Text style={styles.infoLabel}>Insurance expiry (YYYY-MM-DD)</Text>
+            <TextInput
+              style={styles.dateInput}
+              value={details.insurance_expiry}
+              onChangeText={(text) =>
+                setDetails((prev) => ({ ...prev, insurance_expiry: text }))
+              }
+              placeholder="YYYY-MM-DD"
+              autoCapitalize="none"
+            />
+            <Text style={styles.hintText}>
+              Current: {formatDateValue(details.insurance_expiry)}
+            </Text>
+          </View>
+          <View style={styles.editableFieldWrap}>
+            <Text style={styles.infoLabel}>
+              Vehicle license expiry (YYYY-MM-DD)
+            </Text>
+            <TextInput
+              style={styles.dateInput}
+              value={details.vehicle_license_expiry}
+              onChangeText={(text) =>
+                setDetails((prev) => ({
+                  ...prev,
+                  vehicle_license_expiry: text,
+                }))
+              }
+              placeholder="YYYY-MM-DD"
+              autoCapitalize="none"
+            />
+            <Text style={styles.hintText}>
+              Current: {formatDateValue(details.vehicle_license_expiry)}
+            </Text>
+          </View>
           <InfoRow
             label="Driving license number"
             value={details.driving_license_number}
           />
-          <InfoRow
-            label="License expiry date"
-            value={details.license_expiry_date}
-            isLast
-          />
+          <View style={[styles.editableFieldWrap, styles.editableFieldLast]}>
+            <Text style={styles.infoLabel}>
+              License expiry date (YYYY-MM-DD)
+            </Text>
+            <TextInput
+              style={styles.dateInput}
+              value={details.license_expiry_date}
+              onChangeText={(text) =>
+                setDetails((prev) => ({ ...prev, license_expiry_date: text }))
+              }
+              placeholder="YYYY-MM-DD"
+              autoCapitalize="none"
+            />
+            <Text style={styles.hintText}>
+              Current: {formatDateValue(details.license_expiry_date)}
+            </Text>
+          </View>
         </View>
+
+        <TouchableOpacity
+          style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+          onPress={saveExpiryDates}
+          activeOpacity={0.85}
+          disabled={saving}
+        >
+          <Text style={styles.saveButtonText}>
+            {saving ? "Saving..." : "Update Expiry Dates"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.refreshButton}
+          onPress={() => loadVehicleDetails()}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.refreshButtonText}>Refresh</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -306,5 +480,61 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#0F172A",
     fontWeight: "700",
+  },
+  editableFieldWrap: {
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F7",
+  },
+  editableFieldLast: {
+    borderBottomWidth: 0,
+  },
+  dateInput: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#0F172A",
+    backgroundColor: "#FFFFFF",
+  },
+  hintText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "500",
+  },
+  saveButton: {
+    marginTop: 12,
+    backgroundColor: "#111827",
+    borderRadius: 12,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  refreshButton: {
+    marginTop: 10,
+    marginBottom: 6,
+    backgroundColor: "#E2E8F0",
+    borderRadius: 12,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  refreshButtonText: {
+    color: "#1E293B",
+    fontWeight: "700",
+    fontSize: 14,
   },
 });

@@ -54,6 +54,7 @@ import { fetchOSRMRoute } from "../../utils/osrmClient";
 const { width: SW, height: SH } = Dimensions.get("window");
 const ORDER_TOTAL_CACHE_KEY = "@order_display_totals";
 const DRIVER_INFO_CACHE_KEY = "@order_driver_info";
+const DRIVER_LAST_LOCATION_CACHE_KEY = "@order_driver_last_location";
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -119,6 +120,60 @@ async function cacheDriverInfo(orderId, driver) {
     const map = raw ? JSON.parse(raw) : {};
     map[String(orderId)] = driver;
     await AsyncStorage.setItem(DRIVER_INFO_CACHE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore cache write failures
+  }
+}
+
+async function getCachedDriverLastLocation(orderId) {
+  if (!orderId) return null;
+
+  try {
+    const raw = await AsyncStorage.getItem(DRIVER_LAST_LOCATION_CACHE_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw);
+    const cached = map?.[String(orderId)] || null;
+
+    const lat = Number(cached?.lat ?? cached?.latitude);
+    const lng = Number(cached?.lng ?? cached?.longitude);
+    const heading = Number(cached?.heading ?? 0);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+    return {
+      lat,
+      lng,
+      heading: Number.isFinite(heading) ? heading : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function cacheDriverLastLocation(orderId, location) {
+  if (!orderId || !location) return;
+
+  const lat = Number(location?.lat ?? location?.latitude);
+  const lng = Number(location?.lng ?? location?.longitude);
+  const heading = Number(location?.heading ?? 0);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  try {
+    const raw = await AsyncStorage.getItem(DRIVER_LAST_LOCATION_CACHE_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+
+    map[String(orderId)] = {
+      lat,
+      lng,
+      heading: Number.isFinite(heading) ? heading : 0,
+      timestamp: Date.now(),
+    };
+
+    await AsyncStorage.setItem(
+      DRIVER_LAST_LOCATION_CACHE_KEY,
+      JSON.stringify(map),
+    );
   } catch {
     // ignore cache write failures
   }
@@ -1441,6 +1496,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
   const prevRouteKeyRef = useRef(null);
   const pollRef = useRef(null);
   const pollNowRef = useRef(null);
+  const wasSocketConnectedRef = useRef(Boolean(isSocketConnected));
   const mapRef = useRef(null);
   const appStateRef = useRef(AppState.currentState);
   const isProgrammaticMapMoveRef = useRef(false);
@@ -1659,6 +1715,12 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
   }, [driverLocation]);
 
   useEffect(() => {
+    if (orderId && driverLocation) {
+      cacheDriverLastLocation(orderId, driverLocation);
+    }
+  }, [orderId, driverLocation]);
+
+  useEffect(() => {
     deliveryLocationRef.current = deliveryLocation;
   }, [deliveryLocation]);
 
@@ -1806,6 +1868,29 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
       mounted = false;
     };
   }, [orderId]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const hydrateLastKnownDriverLocation = async () => {
+      const cachedLocation = await getCachedDriverLastLocation(orderId);
+      if (!mounted || !cachedLocation) return;
+
+      const effectiveStatus = normalizeStatus(
+        currentStatusRef.current || params.status || "",
+      );
+
+      if (shouldDisplayLiveDriverLocation(effectiveStatus)) {
+        setDriverLocation((prev) => prev || cachedLocation);
+      }
+    };
+
+    hydrateLastKnownDriverLocation();
+
+    return () => {
+      mounted = false;
+    };
+  }, [orderId, params.status]);
 
   useEffect(() => {
     let mounted = true;
@@ -2211,6 +2296,17 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
       appStateSubscription?.remove();
     };
   }, []);
+
+  useEffect(() => {
+    const wasConnected = wasSocketConnectedRef.current;
+    const isConnectedNow = Boolean(isSocketConnected);
+
+    if (!wasConnected && isConnectedNow) {
+      pollNowRef.current?.();
+    }
+
+    wasSocketConnectedRef.current = isConnectedNow;
+  }, [isSocketConnected]);
 
   // ===========================================================================
   // LINE ROUTE for map statuses (curved for preparing stage, straight otherwise)

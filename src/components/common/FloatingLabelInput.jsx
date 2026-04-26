@@ -1,21 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import { Animated, Easing, StyleSheet, TextInput, View } from "react-native";
 
-export default function FloatingLabelInput({
-  label,
-  value,
-  onChangeText,
-  inactivePlaceholder,
-  activePlaceholder,
-  leftIcon,
-  rightAccessory,
-  containerStyle,
-  inputStyle,
-  labelLeft,
-  onFocus,
-  onBlur,
-  ...inputProps
-}) {
+const FloatingLabelInput = forwardRef(function FloatingLabelInput(
+  {
+    label,
+    value,
+    onChangeText,
+    inactivePlaceholder,
+    activePlaceholder,
+    leftIcon,
+    rightAccessory,
+    containerStyle,
+    inputStyle,
+    labelLeft,
+    onFocus,
+    onBlur,
+    ...inputProps
+  },
+  ref,
+) {
   const [isFocused, setIsFocused] = useState(false);
   const hasValue = Boolean(String(value ?? "").length);
   const isActive = isFocused || hasValue;
@@ -76,6 +79,7 @@ export default function FloatingLabelInput({
         </Animated.Text>
 
         <TextInput
+          ref={ref}
           value={value}
           onChangeText={onChangeText}
           placeholder={resolvedPlaceholder}
@@ -104,7 +108,9 @@ export default function FloatingLabelInput({
       </View>
     </View>
   );
-}
+});
+
+export default FloatingLabelInput;
 
 const styles = StyleSheet.create({
   inputGroup: {

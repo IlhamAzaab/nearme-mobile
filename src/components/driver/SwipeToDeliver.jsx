@@ -9,8 +9,8 @@ import {
 } from "react-native";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const KNOB_SIZE = 56;
-const TRACK_HORIZONTAL_PADDING = 6;
+const KNOB_SIZE = 60;
+const TRACK_HORIZONTAL_PADDING = 8;
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.62;
 
 /**
@@ -35,11 +35,43 @@ const SwipeToDeliver = ({
     return Math.max(0, effectiveTrackWidth - KNOB_SIZE);
   }, [containerWidth]);
 
-  const completionThreshold = useMemo(() => maxTranslate * 0.5, [maxTranslate]);
+  const completionThreshold = useMemo(
+    () => Math.max(6, maxTranslate * 0.08),
+    [maxTranslate],
+  );
+
+  const finishSwipe = () => {
+    Animated.timing(pan, {
+      toValue: maxTranslate,
+      duration: 100,
+      useNativeDriver: false,
+    }).start(() => {
+      onSwipeComplete?.();
+      Animated.timing(pan, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: false,
+      }).start();
+    });
+  };
+
+  const resetSwipe = () => {
+    Animated.spring(pan, {
+      toValue: 0,
+      tension: 90,
+      friction: 10,
+      useNativeDriver: false,
+    }).start();
+  };
 
   const panResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => !disabled,
-    onMoveShouldSetPanResponder: () => !disabled,
+    onMoveShouldSetPanResponder: (_, gestureState) =>
+      !disabled &&
+      Math.abs(gestureState.dx) > 5 &&
+      Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
     onPanResponderMove: (_, gestureState) => {
       if (gestureState.dx > 0) {
         pan.setValue(Math.min(gestureState.dx, maxTranslate));
@@ -47,34 +79,24 @@ const SwipeToDeliver = ({
     },
     onPanResponderRelease: (_, gestureState) => {
       const currentValue = Number(pan.__getValue?.() || 0);
+      const swipeDistance = Math.max(currentValue, gestureState.dx || 0);
       const shouldComplete =
-        currentValue >= completionThreshold ||
-        gestureState.dx >= completionThreshold;
+        swipeDistance >= completionThreshold ||
+        (gestureState.vx > 0.2 && swipeDistance >= completionThreshold * 0.5) ||
+        swipeDistance >= 3;
 
       if (shouldComplete) {
-        Animated.timing(pan, {
-          toValue: maxTranslate,
-          duration: 170,
-          useNativeDriver: false,
-        }).start(() => {
-          onSwipeComplete?.();
-          // Reset after completion
-          setTimeout(() => {
-            Animated.spring(pan, {
-              toValue: 0,
-              tension: 90,
-              friction: 10,
-              useNativeDriver: false,
-            }).start();
-          }, 500);
-        });
+        finishSwipe();
       } else {
-        Animated.spring(pan, {
-          toValue: 0,
-          tension: 90,
-          friction: 10,
-          useNativeDriver: false,
-        }).start();
+        resetSwipe();
+      }
+    },
+    onPanResponderTerminate: () => {
+      const currentValue = Number(pan.__getValue?.() || 0);
+      if (currentValue >= completionThreshold || currentValue >= 3) {
+        finishSwipe();
+      } else {
+        resetSwipe();
       }
     },
   });
@@ -137,8 +159,8 @@ const SwipeToDeliver = ({
 
 const styles = StyleSheet.create({
   container: {
-    height: 68,
-    borderRadius: 34,
+    height: 76,
+    borderRadius: 38,
     justifyContent: "center",
     marginVertical: 10,
     overflow: "hidden",
@@ -150,7 +172,7 @@ const styles = StyleSheet.create({
     left: TRACK_HORIZONTAL_PADDING,
     top: TRACK_HORIZONTAL_PADDING,
     bottom: TRACK_HORIZONTAL_PADDING,
-    borderRadius: 22,
+    borderRadius: 30,
   },
   thumb: {
     width: KNOB_SIZE,
@@ -165,7 +187,7 @@ const styles = StyleSheet.create({
   thumbText: { fontSize: 30, fontWeight: "700", lineHeight: 32 },
   text: {
     textAlign: "center",
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "800",
     letterSpacing: 0.4,
     color: "#065F46",
