@@ -34,7 +34,7 @@ import {
   markDriverAvailableDeliveriesSeen,
   syncDriverAvailableUnseenState,
 } from "../utils/driverAvailableUnseen";
-import { API_BASE_URL } from "../constants/api";
+import { fetchDriverActiveDeliveries } from "../services/driverActiveDeliveriesService";
 import { getAccessToken } from "../lib/authStorage";
 
 const Tab = createBottomTabNavigator();
@@ -92,14 +92,14 @@ function DriverTabs() {
     const token = await getAccessToken();
     if (!token) return false;
 
-    const res = await fetch(`${API_BASE_URL}/driver/deliveries/active`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const result = await fetchDriverActiveDeliveries(token, {
+      ttlMs: 15000,
+      includeStaleOnError: true,
     });
-    if (!res.ok) return false;
+    if (!result.ok && !result.fromCache) return false;
 
-    const data = await res.json().catch(() => ({}));
-    const activeDeliveries = Array.isArray(data?.deliveries)
-      ? data.deliveries
+    const activeDeliveries = Array.isArray(result.deliveries)
+      ? result.deliveries
       : [];
 
     const restrictedDelivery = activeDeliveries.find((delivery) => {
@@ -118,7 +118,7 @@ function DriverTabs() {
     Alert.alert("Unavailable", "Complete your picked up delivery first.");
 
     navigation.navigate("DriverMap", {
-      deliveryId: restrictedDelivery?.delivery_id,
+      deliveryId: restrictedDelivery?.delivery_id || restrictedDelivery?.id,
     });
     return true;
   }, []);

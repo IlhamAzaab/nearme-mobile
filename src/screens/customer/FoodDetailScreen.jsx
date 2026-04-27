@@ -328,6 +328,7 @@ export default function FoodDetailScreen({ route, navigation }) {
               }
               style={styles.heroImg}
               transition={120}
+              cloudinaryPreset="hero"
             />
             {/* Restaurant Badge */}
             <View style={styles.restaurantBadge}>

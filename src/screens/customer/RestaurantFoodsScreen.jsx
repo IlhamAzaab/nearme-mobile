@@ -451,6 +451,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
                 uri={item.image_url}
                 style={styles.foodImage}
                 transition={110}
+                cloudinaryPreset="card"
               />
             ) : (
               <LinearGradient
@@ -685,6 +686,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
                   uri={restaurant.cover_image_url || restaurant.logo_url}
                   style={styles.coverImage}
                   transition={120}
+                  cloudinaryPreset="hero"
                 />
               ) : (
                 <LinearGradient
@@ -708,6 +710,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
                       uri={restaurant.logo_url}
                       style={styles.restaurantLogo}
                       transition={100}
+                      cloudinaryPreset="thumbnail"
                     />
                   ) : (
                     <LinearGradient

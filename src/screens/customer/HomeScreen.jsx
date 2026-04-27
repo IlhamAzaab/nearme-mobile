@@ -968,6 +968,7 @@ export default function HomeScreen({ navigation }) {
               }
               style={styles.restaurantImage}
               transition={80}
+              cloudinaryPreset="card"
             />
 
             {/* Rating Badge - Top Right */}
@@ -987,6 +988,7 @@ export default function HomeScreen({ navigation }) {
                   uri={item.logo_url}
                   style={styles.restaurantLogo}
                   transition={80}
+                  cloudinaryPreset="thumbnail"
                 />
               ) : (
                 <View
@@ -1074,6 +1076,7 @@ export default function HomeScreen({ navigation }) {
                     }
                     style={styles.foodImg}
                     transition={120}
+                    cloudinaryPreset="card"
                   />
                   {Number(item.stars || 0) > 0 && (
                     <View style={styles.foodRatingBadge}>
@@ -1221,6 +1224,7 @@ export default function HomeScreen({ navigation }) {
                   uri={launchPromoHeroUri}
                   style={styles.promoHeroImage}
                   transition={120}
+                  cloudinaryPreset="hero"
                   fallback={
                     <Image
                       source={CATEGORY_IMAGE_BY_KEY.others}

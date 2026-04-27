@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { API_BASE_URL } from "../constants/api";
 import { getAccessToken } from "../lib/authStorage";
+import { fetchDriverActiveDeliveryIds } from "./driverActiveDeliveriesService";
 import {
   DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
   getCurrentDriverScopedCacheKey,
@@ -22,8 +23,8 @@ const LAST_SYNC_AT_KEY = "@driver_bg_last_sync_at";
 const AVAILABLE_CACHE_KEY = DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY;
 const ACTIVE_DELIVERY_CACHE_KEY = "@driver_bg_active_delivery_ids";
 const LOCATION_UPLOAD_QUEUE_KEY = "@driver_location_upload_queue";
-const ACTIVE_DELIVERY_CACHE_MAX_AGE_MS = 90000;
 const MAX_QUEUED_LOCATION_UPDATES = 60;
+const ACTIVE_DELIVERY_FETCH_TTL_MS = 15000;
 
 // Track consecutive failures to avoid premature stop
 let consecutiveEmptyFetches = 0;
@@ -235,47 +236,18 @@ async function shouldSyncNow() {
 
 async function getActiveDeliveryIds(token) {
   const cached = await readActiveDeliveryCache();
-  const now = Date.now();
 
-  if (
-    cached?.ids?.length &&
-    Number.isFinite(cached.updatedAt) &&
-    now - cached.updatedAt <= ACTIVE_DELIVERY_CACHE_MAX_AGE_MS
-  ) {
-    return cached.ids;
+  const result = await fetchDriverActiveDeliveryIds(token, {
+    ttlMs: ACTIVE_DELIVERY_FETCH_TTL_MS,
+    includeStaleOnError: true,
+  });
+
+  if (result.ok || result.fromCache) {
+    return writeActiveDeliveryCache(result.ids);
   }
 
-  try {
-    const response = await fetch(`${API_BASE_URL}/driver/deliveries/active`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      // API failed — don't return empty, use stale cache if available
-      return cached?.ids || [];
-    }
-
-    const payload = await response.json().catch(() => ({}));
-    const deliveries = Array.isArray(payload?.deliveries)
-      ? payload.deliveries
-      : [];
-
-    const activeIds = deliveries
-      .filter((item) =>
-        ["accepted", "picked_up", "on_the_way", "at_customer"].includes(
-          String(item?.status || "").toLowerCase(),
-        ),
-      )
-      .map((item) => item?.id || item?.delivery_id)
-      .filter(Boolean);
-
-    return writeActiveDeliveryCache(activeIds);
-  } catch {
-    // Network error — use stale cache to keep tracking alive
-    return cached?.ids || [];
-  }
+  // Hard failure: use local stale cache to keep tracking alive.
+  return cached?.ids || [];
 }
 
 async function uploadLocationToDeliveries({ token, deliveryIds, location }) {

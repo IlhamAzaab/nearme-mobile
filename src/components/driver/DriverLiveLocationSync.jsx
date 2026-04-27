@@ -12,6 +12,7 @@ import {
   startDriverBackgroundLocationTracking,
   stopDriverBackgroundLocationTracking,
 } from "../../services/driverBackgroundLocationService";
+import { fetchDriverActiveDeliveryIds } from "../../services/driverActiveDeliveriesService";
 import {
   DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
   getCurrentDriverScopedCacheKey,
@@ -169,35 +170,20 @@ export default function DriverLiveLocationSync() {
   );
 
   const refreshActiveDeliveryIds = useCallback(async (token) => {
-    const res = await fetch(`${API_BASE_URL}/driver/deliveries/active`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+    const result = await fetchDriverActiveDeliveryIds(token, {
+      ttlMs: ACTIVE_DELIVERY_REFRESH_MS,
+      includeStaleOnError: true,
     });
 
-    if (!res.ok) {
+    if (!result.ok && !result.fromCache) {
       activeDeliveryIdsRef.current = [];
       await cacheDriverActiveDeliveryIds([]);
       return;
     }
 
-    const payload = await res.json().catch(() => ({}));
-    const deliveries = Array.isArray(payload?.deliveries)
-      ? payload.deliveries
-      : [];
-
-    const activeIds = deliveries
-      .filter((item) =>
-        ["accepted", "picked_up", "on_the_way", "at_customer"].includes(
-          String(item?.status || "").toLowerCase(),
-        ),
-      )
-      .map((item) => item?.id || item?.delivery_id)
-      .filter(Boolean);
-
-    activeDeliveryIdsRef.current = activeIds;
-    lastActiveDeliveryFetchAtRef.current = Date.now();
-    await cacheDriverActiveDeliveryIds(activeIds);
+    activeDeliveryIdsRef.current = result.ids;
+    lastActiveDeliveryFetchAtRef.current = Number(result.fetchedAt || Date.now());
+    await cacheDriverActiveDeliveryIds(result.ids);
   }, []);
 
   const setBackgroundTrackingEnabled = useCallback(async (enabled) => {
