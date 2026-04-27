@@ -1,8 +1,8 @@
 const BRAND_ASSETS = {
-  appIcon: "./assets/branding/app-icon.png",
-  iosIcon: "./assets/branding/ios-icon.png",
+  appIcon: "./assets/branding/app-icon.jpeg",
+  iosIcon: "./assets/branding/ios-icon.jpeg",
   androidAdaptiveForeground:
-    "./assets/branding/android-adaptive-foreground.png",
+    "./assets/branding/android-adaptive-foreground.jpeg",
   androidAdaptiveMonochrome:
     "./assets/branding/android-adaptive-monochrome.png",
   splashLogo: "./assets/branding/splash-logo.png",

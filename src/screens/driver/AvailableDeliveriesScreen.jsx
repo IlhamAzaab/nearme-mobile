@@ -56,7 +56,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 // ============================================================================
 
 const CACHE_EXPIRY = 60000; // 1 minute cache
-const DATA_REFRESH_THRESHOLD = 200; // Only fetch API data when driver moves 200m+
+const DATA_REFRESH_THRESHOLD = 300; // Only fetch API data when driver moves 300m+
 const LIVE_TRACKING_INTERVAL = 3000; // 3 seconds - smooth driver marker updates
 const LIVE_DELIVERIES_MAX_BACKOFF_MS = 45000;
 const LIVE_DELIVERIES_504_BACKOFF_MAX_MS = 120000;
@@ -1417,12 +1417,21 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     }
 
     setIsRefreshing(true);
+    // Hard-reset ALL throttle state so the refresh fires immediately
     deliveriesSyncRetryStateRef.current = {
       consecutiveFailures: 0,
       nextAllowedAt: 0,
     };
+    // If a request is in-flight, abort it so refresh gets priority
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    fetchInFlightRef.current = false;
+    pendingFetchRequestRef.current = null;
+    // Fetch fresh location then immediately call API
     fetchDeliveriesWithCurrentLocation(false, "pull_to_refresh");
   }, [fetchDeliveriesWithCurrentLocation, inDeliveringMode]);
+
 
   const getTipAmount = useCallback((delivery) => {
     return Number.parseFloat(delivery?.pricing?.tip_amount || 0);
@@ -1572,7 +1581,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         mapViewportHeight={mapViewportHeight}
         tabBarHeight={tabBarHeight}
         accepting={accepting === item.delivery_id}
-        isSyncing={isLoadingAfterAccept}
+        isSyncing={isLoadingAfterAccept || isDeliveriesSyncing || isPostCompleteHardLoading}
         onAccept={handleAcceptDelivery}
         onDecline={handleDecline}
         hasActiveDeliveries={currentRoute.active_deliveries > 0}
@@ -1657,8 +1666,9 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       )}
 
       {isDeliveriesSyncing && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>⟳ Updating latest requests...</Text>
+        <View style={styles.syncingBanner}>
+          <ActivityIndicator size="small" color="#06C168" style={{ marginRight: 8 }} />
+          <Text style={styles.syncingText}>Updating delivery requests...</Text>
         </View>
       )}
 
@@ -1690,7 +1700,11 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
           <DriverMapSheetLoadingSkeleton />
         ) : isPostCompleteHardLoading ? (
           <DriverMapSheetLoadingSkeleton />
-        ) : deliveries.length === 0 ? (
+        ) : (deliveries.length === 0 && isDeliveriesSyncing) ? (
+          // Syncing in progress — show skeleton, never blank or empty state
+          <DriverMapSheetLoadingSkeleton />
+        ) : deliveries.length === 0 && hasCompletedFirstFetch && !isDeliveriesSyncing ? (
+          // Strictly only show empty state when: first fetch done + not syncing + truly empty
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyEmoji}>📦</Text>
             <Text style={styles.emptyTitle}>No Deliveries Near You</Text>
@@ -1703,6 +1717,15 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
               <Pressable
                 style={styles.refreshBtn}
                 onPress={() => {
+                  // Hard-reset all throttle / in-flight state for immediate refresh
+                  deliveriesSyncRetryStateRef.current = { consecutiveFailures: 0, nextAllowedAt: 0 };
+                  if (abortControllerRef.current) {
+                    abortControllerRef.current.abort();
+                  }
+                  fetchInFlightRef.current = false;
+                  pendingFetchRequestRef.current = null;
+                  setFetchError(null);
+                  setIsRefreshing(true);
                   fetchDeliveriesWithCurrentLocation(false, "retry_button");
                 }}
               >
@@ -1720,7 +1743,11 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
               )}
             </View>
           </View>
+        ) : deliveries.length === 0 ? (
+          // Has not completed first fetch yet — show skeleton instead of blank
+          <DriverMapSheetLoadingSkeleton />
         ) : (
+
           <Animated.View
             style={{
               flex: 1,
@@ -2680,6 +2707,23 @@ const styles = StyleSheet.create({
     color: "#B91C1C",
     fontWeight: "700",
     fontSize: 13,
+  },
+
+  // Syncing Banner (green theme)
+  syncingBanner: {
+    backgroundColor: "#ECFDF5",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#A7F3D0",
+  },
+  syncingText: {
+    color: "#047857",
+    fontSize: 13,
+    fontWeight: "600",
   },
 
   // Delivering Mode

@@ -316,45 +316,13 @@ export default function CompleteProfileScreen({ navigation, route }) {
                 )}
 
                 <FloatingLabelInput
-                  label="Username"
+                  label="Name"
                   value={formData.name}
                   onChangeText={(v) => handleChange("name", v)}
-                  inactivePlaceholder="Username"
-                  activePlaceholder="Enter your name"
+                  inactivePlaceholder="Name"
+                  activePlaceholder="Your name"
                   autoCapitalize="words"
                   leftIcon={<UserIcon size={20} color="#9CA3AF" />}
-                />
-
-                <FloatingLabelInput
-                  label="Address"
-                  value={formData.address}
-                  onChangeText={(v) => handleChange("address", v)}
-                  inactivePlaceholder="Address"
-                  activePlaceholder="Eg: 123 Main Street"
-                  autoCapitalize="words"
-                  leftIcon={
-                    <Ionicons
-                      name="location-outline"
-                      size={20}
-                      color="#9CA3AF"
-                    />
-                  }
-                />
-
-                <FloatingLabelInput
-                  label="Area or City"
-                  value={formData.city}
-                  onChangeText={(v) => handleChange("city", v)}
-                  inactivePlaceholder="Area or City"
-                  activePlaceholder="Eg: Periye Kinniya"
-                  autoCapitalize="words"
-                  leftIcon={
-                    <Ionicons
-                      name="business-outline"
-                      size={20}
-                      color="#9CA3AF"
-                    />
-                  }
                 />
 
                 <FloatingLabelInput
@@ -391,6 +359,39 @@ export default function CompleteProfileScreen({ navigation, route }) {
                     </Pressable>
                   }
                 />
+
+                <FloatingLabelInput
+                  label="Address"
+                  value={formData.address}
+                  onChangeText={(v) => handleChange("address", v)}
+                  inactivePlaceholder="Address"
+                  activePlaceholder="Eg: 123 Main Street"
+                  autoCapitalize="words"
+                  leftIcon={
+                    <Ionicons
+                      name="location-outline"
+                      size={20}
+                      color="#9CA3AF"
+                    />
+                  }
+                />
+
+                <FloatingLabelInput
+                  label="Area or City"
+                  value={formData.city}
+                  onChangeText={(v) => handleChange("city", v)}
+                  inactivePlaceholder="Area or City"
+                  activePlaceholder="Eg: Periye Kinniya"
+                  autoCapitalize="words"
+                  leftIcon={
+                    <Ionicons
+                      name="business-outline"
+                      size={20}
+                      color="#9CA3AF"
+                    />
+                  }
+                />
+
 
                 <View style={styles.termsRow}>
                   <Pressable

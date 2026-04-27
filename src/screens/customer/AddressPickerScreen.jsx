@@ -101,6 +101,7 @@ export default function AddressPickerScreen({ navigation, route }) {
   const geocodeCacheRef = useRef(new Map());
   const hasManualPinRef = useRef(false);
   const hasProfilePinRef = useRef(false);
+  const hasAutoFocusedLiveMapRef = useRef(false);
   const addressLabelRef = useRef("Loading address...");
   const [initialRegion, setInitialRegion] = useState(DEFAULT_MAP_REGION);
   const [currentCoordinate, setCurrentCoordinate] = useState(null);
@@ -109,6 +110,84 @@ export default function AddressPickerScreen({ navigation, route }) {
   const [saving, setSaving] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [showUserLocationMarker, setShowUserLocationMarker] = useState(false);
+
+  const focusMapToRelevantLocations = useCallback(
+    ({ pinnedCoordinate = null, liveCoordinate = null } = {}) => {
+      if (!mapRef.current) return;
+
+      const pinnedValid =
+        Number.isFinite(Number(pinnedCoordinate?.latitude)) &&
+        Number.isFinite(Number(pinnedCoordinate?.longitude));
+      const liveValid =
+        Number.isFinite(Number(liveCoordinate?.latitude)) &&
+        Number.isFinite(Number(liveCoordinate?.longitude));
+
+      if (!pinnedValid && !liveValid) return;
+
+      const coordinates = [];
+      if (pinnedValid) {
+        coordinates.push({
+          latitude: Number(pinnedCoordinate.latitude),
+          longitude: Number(pinnedCoordinate.longitude),
+        });
+      }
+      if (liveValid) {
+        coordinates.push({
+          latitude: Number(liveCoordinate.latitude),
+          longitude: Number(liveCoordinate.longitude),
+        });
+      }
+
+      if (coordinates.length === 1) {
+        const [point] = coordinates;
+        if (mapRef.current?.animateToRegion) {
+          mapRef.current.animateToRegion(
+            {
+              latitude: point.latitude,
+              longitude: point.longitude,
+              latitudeDelta: 0.008,
+              longitudeDelta: 0.008,
+            },
+            700,
+          );
+        }
+        return;
+      }
+
+      const [first, second] = coordinates;
+      const distanceMeters = getDistanceMeters(
+        first.latitude,
+        first.longitude,
+        second.latitude,
+        second.longitude,
+      );
+
+      if (distanceMeters <= 20 && mapRef.current?.animateToRegion) {
+        mapRef.current.animateToRegion(
+          {
+            latitude: second.latitude,
+            longitude: second.longitude,
+            latitudeDelta: 0.008,
+            longitudeDelta: 0.008,
+          },
+          700,
+        );
+        return;
+      }
+
+      if (mapRef.current?.fitToCoordinates) {
+        mapRef.current.fitToCoordinates(coordinates, {
+          edgePadding: {
+            top: 120,
+            right: 70,
+            bottom: 240,
+            left: 70,
+          },
+        });
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     addressLabelRef.current = addressLabel;
@@ -283,6 +362,7 @@ export default function AddressPickerScreen({ navigation, route }) {
   useEffect(() => {
     (async () => {
       try {
+        let profilePinnedCoordinate = null;
         const token = await getAccessToken();
         if (token) {
           const profileRes = await fetch(
@@ -302,6 +382,7 @@ export default function AddressPickerScreen({ navigation, route }) {
               latitude: savedLat,
               longitude: savedLng,
             };
+            profilePinnedCoordinate = savedCoordinate;
             setCurrentCoordinate(savedCoordinate);
             setInitialRegion({
               ...savedCoordinate,
@@ -371,6 +452,19 @@ export default function AddressPickerScreen({ navigation, route }) {
             700,
           );
         }
+
+        // Once live location is fetched, always frame the map to visible relevant points
+        // so current location tile and red pinned marker are both visible.
+        setTimeout(() => {
+          focusMapToRelevantLocations({
+            pinnedCoordinate:
+              !hasProfilePinRef.current && !hasManualPinRef.current
+                ? liveLocation
+                : profilePinnedCoordinate,
+            liveCoordinate: liveLocation,
+          });
+          hasAutoFocusedLiveMapRef.current = true;
+        }, 180);
       } catch (error) {
         console.error("Location error:", error);
         setAddressLabel(
@@ -378,7 +472,21 @@ export default function AddressPickerScreen({ navigation, route }) {
         );
       }
     })();
-  }, [getReliableCurrentLocation, reverseGeocode]);
+  }, [focusMapToRelevantLocations, getReliableCurrentLocation, reverseGeocode]);
+
+  useEffect(() => {
+    if (!hasAutoFocusedLiveMapRef.current) return;
+    if (!userLocation || !currentCoordinate) return;
+
+    const timer = setTimeout(() => {
+      focusMapToRelevantLocations({
+        pinnedCoordinate: currentCoordinate,
+        liveCoordinate: userLocation,
+      });
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [currentCoordinate, userLocation, focusMapToRelevantLocations]);
 
   useEffect(
     () => () => {
@@ -401,11 +509,16 @@ export default function AddressPickerScreen({ navigation, route }) {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 
     hasManualPinRef.current = true;
-    setCurrentCoordinate({ latitude, longitude });
+    const nextPinned = { latitude, longitude };
+    setCurrentCoordinate(nextPinned);
     scheduleReverseGeocode(latitude, longitude, {
       force: true,
       showLoading: true,
     });
+
+    setTimeout(() => {
+      focusMapToRelevantLocations({ pinnedCoordinate: nextPinned });
+    }, 80);
   };
 
   const saveLocation = async () => {

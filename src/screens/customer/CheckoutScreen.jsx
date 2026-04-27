@@ -474,6 +474,46 @@ export default function CheckoutScreen({ route, navigation }) {
     cart?.restaurant?.longitude,
   ]);
 
+  useEffect(() => {
+    const hasCoords = hasValidCoordinates(
+      position?.latitude,
+      position?.longitude,
+    );
+    const hasLocationDetails =
+      hasExplicitDeliveryLocation &&
+      hasCoords &&
+      Boolean(String(address || "").trim()) &&
+      Boolean(String(city || "").trim());
+
+    if (!cartId || !hasLocationDetails) {
+      return;
+    }
+
+    const nextSignature = getQuoteInputSignature();
+    if (
+      orderQuote?.quote_token &&
+      lastSuccessfulQuoteInputRef.current === nextSignature
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      fetchOrderQuote({ silent: true }).catch(() => {});
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [
+    address,
+    cartId,
+    city,
+    fetchOrderQuote,
+    getQuoteInputSignature,
+    hasExplicitDeliveryLocation,
+    orderQuote?.quote_token,
+    position?.latitude,
+    position?.longitude,
+  ]);
+
   const fetchCheckoutData = async () => {
     try {
       setLoading(true);
@@ -744,11 +784,40 @@ export default function CheckoutScreen({ route, navigation }) {
         return;
       }
       if (!cart) throw new Error("Cart missing");
+      const activeQuote = orderQuote;
 
       setPlacing(true);
       setError("");
 
       const token = await getAccessToken();
+
+      const placeOrderPayload = {
+        cartId,
+        payment_method: paymentMethod,
+        delivery_latitude: Number(position?.latitude),
+        delivery_longitude: Number(position?.longitude),
+        delivery_address: String(address || "").trim(),
+        delivery_city: String(city || "").trim(),
+        // Route: send client-calculated distance as a hint to avoid duplicate
+        // server-side OSRM call. Server still computes fees from its own distance
+        // when no quote_token is present.
+        distance_km:
+          Number.isFinite(effectiveDistanceKm) && effectiveDistanceKm > 0
+            ? Number(Number(effectiveDistanceKm).toFixed(2))
+            : undefined,
+        estimated_duration_min:
+          Number.isFinite(quoteEstimatedDurationMin) &&
+          quoteEstimatedDurationMin > 0
+            ? quoteEstimatedDurationMin
+            : estimatedDeliveryWindow?.midpoint || undefined,
+      };
+
+      if (activeQuote?.quote_token) {
+        // Signed quote token — server-computed pricing locked in and signed.
+        // Server verifies the signature and uses the embedded pricing directly.
+        // No financial values are sent from the client.
+        placeOrderPayload.quote_token = activeQuote.quote_token;
+      }
 
       const res = await fetch(`${API_BASE_URL}/orders/place`, {
         method: "POST",
@@ -756,20 +825,7 @@ export default function CheckoutScreen({ route, navigation }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          cartId,
-          payment_method: paymentMethod,
-          delivery_latitude: Number(position?.latitude),
-          delivery_longitude: Number(position?.longitude),
-          delivery_address: String(address || "").trim(),
-          delivery_city: String(city || "").trim(),
-          distance_km:
-            Number.isFinite(effectiveDistanceKm) && effectiveDistanceKm > 0
-              ? Number(Number(effectiveDistanceKm).toFixed(2))
-              : undefined,
-          estimated_duration_min:
-            estimatedDeliveryWindow?.midpoint || undefined,
-        }),
+        body: JSON.stringify(placeOrderPayload),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -1072,6 +1128,8 @@ export default function CheckoutScreen({ route, navigation }) {
 
   const ctaAlertMessage = useMemo(() => {
     if (checkoutBlockReason && !routeLoading && !placing) {
+      // Don't show "Calculating pricing..." as an error — it's a loading state
+      if (checkoutBlockReason === "Calculating pricing...") return "";
       return checkoutBlockReason;
     }
 
@@ -1082,6 +1140,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
   const isPlaceOrderDisabled =
     routeLoading ||
+    quoteLoading ||
     placing ||
     !cart ||
     (isLocationDetailsComplete && deliveryFee === null);
@@ -1507,20 +1566,29 @@ export default function CheckoutScreen({ route, navigation }) {
           >
             {placing
               ? "Placing..."
-              : routeLoading && !Number.isFinite(quoteDistanceKm)
-                ? "Calculating..."
-                : !hasExplicitDeliveryLocation
-                  ? "Location not provided"
-                  : !String(city || "").trim()
-                    ? "Add city to continue"
-                    : !isDistanceWithinLimit && routeInfo
-                      ? `Not available beyond ${maxOrderDistanceKm} km`
-                      : !isSubtotalValid
-                        ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
-                        : finalTotal !== null
-                          ? `Place Order • ${formatPrice(finalTotal)}`
-                          : "Place Order"}
+              : quoteLoading
+                ? "Calculating pricing..."
+                : routeLoading && !Number.isFinite(quoteDistanceKm)
+                  ? "Calculating..."
+                  : !hasExplicitDeliveryLocation
+                    ? "Location not provided"
+                    : !String(city || "").trim()
+                      ? "Add city to continue"
+                      : !isDistanceWithinLimit && routeInfo
+                        ? `Not available beyond ${maxOrderDistanceKm} km`
+                        : !isSubtotalValid
+                          ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
+                          : finalTotal !== null
+                            ? `Place Order • ${formatPrice(finalTotal)}`
+                            : "Place Order"}
           </Text>
+          {(placing || quoteLoading) && (
+            <ActivityIndicator
+              size="small"
+              color={placing ? "#fff" : "#6EDE9A"}
+              style={{ marginLeft: 8 }}
+            />
+          )}
         </Pressable>
       </View>
 

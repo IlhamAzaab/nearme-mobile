@@ -204,9 +204,7 @@ export default function HomeSearchScreen({ navigation, route }) {
           {hasOffer ? (
             <View style={styles.resultPriceRow}>
               <Text style={styles.resultPrice}>{formatPrice(offerPrice)}</Text>
-              <Text style={styles.resultOldPrice}>
-                {formatPrice(regularPrice)}
-              </Text>
+              <Text style={styles.resultOldPrice}>{formatPrice(regularPrice)}</Text>
             </View>
           ) : (
             <Text style={styles.resultPrice}>{formatPrice(regularPrice)}</Text>

@@ -193,6 +193,8 @@ function normalizeDeliveryStatus(value) {
   return String(value).trim().toLowerCase();
 }
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function mapActiveDeliveryToMapItem(delivery) {
   const status = normalizeDeliveryStatus(delivery?.status);
   const order = delivery?.order || {};
@@ -311,6 +313,7 @@ export default function DriverMapScreen({ route, navigation }) {
     new Animated.Value(SCREEN_HEIGHT * 0.4),
   ).current;
   const overlayCallbackRef = useRef(null);
+  const statusActionInProgressRef = useRef(false);
   const sheetTouchStartY = useRef(null);
   const hasAutoFitRef = useRef(false);
   const currentTargetRef = useRef(null);
@@ -535,6 +538,10 @@ export default function DriverMapScreen({ route, navigation }) {
   const fetchPickupsAndDeliveries = async (location, options = {}) => {
     const { force = false, immediate = false } = options;
     if (!location) return;
+
+    if (statusActionInProgressRef.current && !force) {
+      return;
+    }
 
     if (isFetchingRef.current) {
       if (force) {
@@ -956,6 +963,59 @@ export default function DriverMapScreen({ route, navigation }) {
     });
   };
 
+  const waitForServerStatusConfirmation = async ({
+    targetId,
+    expectedStatus,
+    maxWaitMs = null,
+    pollIntervalMs = 2000,
+  }) => {
+    const startedAt = Date.now();
+
+    while (true) {
+      if (
+        Number.isFinite(maxWaitMs) &&
+        Date.now() - startedAt > Number(maxWaitMs)
+      ) {
+        return false;
+      }
+
+      try {
+        const token = await getAccessToken();
+        if (!token) {
+          await delay(pollIntervalMs);
+          continue;
+        }
+
+        const verifyRes = await fetch(
+          `${API_BASE_URL}/driver/deliveries/${targetId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Cache-Control": "no-cache",
+            },
+          },
+        );
+
+        if (verifyRes.ok) {
+          const verifyData = await verifyRes.json().catch(() => ({}));
+          const serverStatus = normalizeDeliveryStatus(
+            verifyData?.delivery?.status || verifyData?.status || "",
+          );
+
+          if (serverStatus === expectedStatus) {
+            return true;
+          }
+        }
+      } catch {
+        // keep waiting until timeout
+      }
+
+      await delay(pollIntervalMs);
+    }
+
+    return false;
+  };
+
   // ============================================================================
   // ROUTE + TARGET LOCATION
   // ============================================================================
@@ -1095,7 +1155,14 @@ export default function DriverMapScreen({ route, navigation }) {
     if (!targetId) return;
 
     setUpdating(true);
-    applyOptimisticWorkflow({ action: "picked_up", target: actionTarget });
+    statusActionInProgressRef.current = true;
+    overlayCallbackRef.current = null;
+
+    // Show Meezo logo processing overlay immediately
+    setOverlayActionType("pickup");
+    setOverlayErrorMsg("");
+    setOverlayStatus("processing");
+    setOverlayVisible(true);
 
     try {
       let token = await getAccessToken();
@@ -1127,16 +1194,32 @@ export default function DriverMapScreen({ route, navigation }) {
             target: actionTarget,
             promotedDelivery,
           });
+        } else {
+          applyOptimisticWorkflow({
+            action: "picked_up",
+            target: actionTarget,
+          });
         }
 
         await pushStatusFocusSignal("picked_up", targetId);
 
+        // Fetch updated data in background while showing success overlay
         const refreshLocation =
           driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-        fetchPickupsAndDeliveries(refreshLocation, {
-          force: true,
-          immediate: true,
-        });
+
+        // Set callback to run after success animation completes
+        overlayCallbackRef.current = () => {
+          fetchPickupsAndDeliveries(refreshLocation, {
+            force: true,
+            immediate: true,
+          });
+          setUpdating(false);
+          statusActionInProgressRef.current = false;
+        };
+
+        // Transition overlay to success state (auto-dismisses after animation)
+        setOverlayStatus("success");
+        return; // setUpdating handled by callback
       } else {
         let errData = await res.json().catch(function () {
           return {};
@@ -1144,18 +1227,35 @@ export default function DriverMapScreen({ route, navigation }) {
         throw new Error(errData.message || "Failed to update status");
       }
     } catch (e) {
-      const refreshLocation =
-        driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-      fetchPickupsAndDeliveries(refreshLocation, {
-        force: true,
-        immediate: true,
+      // Keep showing processing overlay until backend confirms the final status.
+      const confirmed = await waitForServerStatusConfirmation({
+        targetId,
+        expectedStatus: "picked_up",
       });
+
+      if (confirmed) {
+        applyOptimisticWorkflow({ action: "picked_up", target: actionTarget });
+        await pushStatusFocusSignal("picked_up", targetId);
+        const refreshLocation =
+          driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+        overlayCallbackRef.current = () => {
+          fetchPickupsAndDeliveries(refreshLocation, {
+            force: true,
+            immediate: true,
+          });
+          setUpdating(false);
+          statusActionInProgressRef.current = false;
+        };
+        setOverlayStatus("success");
+        return;
+      }
 
       setOverlayActionType("pickup");
       setOverlayErrorMsg(e?.message || "Failed to mark as picked up");
       setOverlayStatus("error");
       setOverlayVisible(true);
-    } finally {
+      overlayCallbackRef.current = null;
+      statusActionInProgressRef.current = false;
       setUpdating(false);
     }
   };
@@ -1168,7 +1268,14 @@ export default function DriverMapScreen({ route, navigation }) {
     if (!targetId) return;
 
     setUpdating(true);
-    applyOptimisticWorkflow({ action: "delivered", target: actionTarget });
+    statusActionInProgressRef.current = true;
+    overlayCallbackRef.current = null;
+
+    // Show Meezo logo processing overlay immediately
+    setOverlayActionType("deliver");
+    setOverlayErrorMsg("");
+    setOverlayStatus("processing");
+    setOverlayVisible(true);
 
     try {
       let token = await getAccessToken();
@@ -1202,6 +1309,11 @@ export default function DriverMapScreen({ route, navigation }) {
             target: actionTarget,
             promotedDelivery,
           });
+        } else {
+          applyOptimisticWorkflow({
+            action: "delivered",
+            target: actionTarget,
+          });
         }
 
         await pushStatusFocusSignal("delivered", targetId);
@@ -1221,10 +1333,20 @@ export default function DriverMapScreen({ route, navigation }) {
 
         const refreshLocation =
           driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-        fetchPickupsAndDeliveries(refreshLocation, {
-          force: true,
-          immediate: true,
-        });
+
+        // Set callback to run after success animation completes
+        overlayCallbackRef.current = () => {
+          fetchPickupsAndDeliveries(refreshLocation, {
+            force: true,
+            immediate: true,
+          });
+          setUpdating(false);
+          statusActionInProgressRef.current = false;
+        };
+
+        // Transition overlay to success state
+        setOverlayStatus("success");
+        return; // setUpdating handled by callback
       } else {
         let errData = await finalRes.json().catch(function () {
           return {};
@@ -1232,18 +1354,47 @@ export default function DriverMapScreen({ route, navigation }) {
         throw new Error(errData.message || "Failed to mark as delivered");
       }
     } catch (e) {
-      const refreshLocation =
-        driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-      fetchPickupsAndDeliveries(refreshLocation, {
-        force: true,
-        immediate: true,
+      // Keep showing processing overlay until backend confirms the final status.
+      const confirmed = await waitForServerStatusConfirmation({
+        targetId,
+        expectedStatus: "delivered",
       });
+
+      if (confirmed) {
+        applyOptimisticWorkflow({ action: "delivered", target: actionTarget });
+        await pushStatusFocusSignal("delivered", targetId);
+        DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+          deliveryId: targetId,
+          action: "delivered",
+          source: "driver_map",
+          location: driverLocation
+            ? {
+                latitude: driverLocation.latitude,
+                longitude: driverLocation.longitude,
+              }
+            : null,
+          triggeredAt: Date.now(),
+        });
+        const refreshLocation =
+          driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+        overlayCallbackRef.current = () => {
+          fetchPickupsAndDeliveries(refreshLocation, {
+            force: true,
+            immediate: true,
+          });
+          setUpdating(false);
+          statusActionInProgressRef.current = false;
+        };
+        setOverlayStatus("success");
+        return;
+      }
 
       setOverlayActionType("deliver");
       setOverlayErrorMsg(e?.message || "Failed to mark as delivered");
       setOverlayStatus("error");
       setOverlayVisible(true);
-    } finally {
+      overlayCallbackRef.current = null;
+      statusActionInProgressRef.current = false;
       setUpdating(false);
     }
   };
@@ -1460,10 +1611,13 @@ export default function DriverMapScreen({ route, navigation }) {
         actionType={overlayActionType}
         errorMessage={overlayErrorMsg}
         onComplete={() => {
+          const shouldRunSuccessCallback = overlayStatus === "success";
           setOverlayVisible(false);
           setOverlayStatus("processing");
           setOverlayErrorMsg("");
-          overlayCallbackRef.current?.();
+          if (shouldRunSuccessCallback) {
+            overlayCallbackRef.current?.();
+          }
           overlayCallbackRef.current = null;
         }}
       />

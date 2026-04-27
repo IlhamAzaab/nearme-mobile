@@ -8,6 +8,8 @@ export default function StatusTransitionOverlay({
   status,
   actionType = "pickup",
   errorMessage = "",
+  minimal = false,
+  autoCloseMs = null,
   onComplete,
 }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -131,6 +133,20 @@ export default function StatusTransitionOverlay({
     return () => clearTimeout(timer);
   }, [visible, status, fadeAnim, successPopAnim, onComplete]);
 
+  useEffect(() => {
+    if (!visible || !Number.isFinite(autoCloseMs) || autoCloseMs <= 0) return;
+
+    const timer = setTimeout(() => {
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 220,
+        useNativeDriver: true,
+      }).start(() => onComplete?.());
+    }, autoCloseMs);
+
+    return () => clearTimeout(timer);
+  }, [visible, autoCloseMs, fadeAnim, onComplete]);
+
   if (!visible) return null;
 
   const isPickup = actionType === "pickup";
@@ -157,11 +173,11 @@ export default function StatusTransitionOverlay({
         : errorMessage || "Something went wrong. Please try again.";
 
   const bgColor =
-    status === "error"
-      ? "rgba(239,68,68,0.95)"
-      : status === "success"
-        ? "rgba(6,95,70,0.92)"
-        : "rgba(2,6,23,0.86)";
+    minimal || status === "processing"
+      ? "rgba(2,6,23,0.86)"
+      : status === "error"
+        ? "rgba(239,68,68,0.95)"
+        : "rgba(6,95,70,0.92)";
 
   return (
     <Animated.View
@@ -204,7 +220,7 @@ export default function StatusTransitionOverlay({
           </Animated.View>
         </View>
 
-        {status === "success" ? (
+        {!minimal && status === "success" ? (
           <Animated.View
             style={[
               styles.successBadge,
@@ -215,12 +231,14 @@ export default function StatusTransitionOverlay({
           </Animated.View>
         ) : null}
 
-        {status === "error" ? <Text style={styles.errorIcon}>⚠</Text> : null}
+        {!minimal && status === "error" ? (
+          <Text style={styles.errorIcon}>⚠</Text>
+        ) : null}
 
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+        {!minimal ? <Text style={styles.title}>{title}</Text> : null}
+        {!minimal ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
 
-        {status === "error" ? (
+        {!minimal && status === "error" ? (
           <Pressable style={styles.retryBtn} onPress={() => onComplete?.()}>
             <Text style={styles.retryText}>Try Again</Text>
           </Pressable>
