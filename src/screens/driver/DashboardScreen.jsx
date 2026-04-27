@@ -1306,6 +1306,10 @@ export default function DashboardScreen({ navigation }) {
   // ============================================================================
 
   const handleAcceptDelivery = async (deliveryId) => {
+    if (isNearbySyncing) {
+      // Block accepts while delivery requests are being recalculated
+      return;
+    }
     setAcceptingOrder(deliveryId);
     try {
       const token = await getAccessToken();
@@ -1350,7 +1354,14 @@ export default function DashboardScreen({ navigation }) {
       );
 
       if (res.ok) {
-        syncAvailableDeliveriesInBackground(token, "delivery_accepted");
+        // Clear stale list immediately so driver sees 'Updating...' not old bonus deliveries
+        setAvailableDeliveries([]);
+        setHasNearbyInitialSyncCompleted(false);
+        // Recalculate in background — blocks accept button until done
+        syncAvailableDeliveriesInBackground(token, "delivery_accepted", {
+          forceSync: true,
+          forceFreshLocation: true,
+        });
         navigation.navigate("DriverMap", { deliveryId });
       } else {
         const data = await res.json();
@@ -1370,6 +1381,7 @@ export default function DashboardScreen({ navigation }) {
       setAcceptingOrder(null);
     }
   };
+
 
   // ============================================================================
   // HELPER FUNCTIONS
@@ -1577,6 +1589,8 @@ export default function DashboardScreen({ navigation }) {
       consecutiveFailures: 0,
       nextAllowedAt: 0,
     };
+    // Reset in-flight lock so sync fires immediately even if a stale lock is set
+    nearbySyncInFlightRef.current = false;
 
     (async () => {
       await fetchDriverProfile();
@@ -1597,6 +1611,7 @@ export default function DashboardScreen({ navigation }) {
     refreshDashboardOnDemand,
     syncAvailableDeliveriesInBackground,
   ]);
+
 
   useEffect(() => {
     if (!statusMessage) {
@@ -2114,7 +2129,7 @@ export default function DashboardScreen({ navigation }) {
                     </View>
                   ))}
                 </View>
-              ) : nearbySyncError && nearbyDeliveries.length === 0 ? (
+              ) : nearbySyncError && nearbyDeliveries.length === 0 && !isNearbySyncing ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="warning-outline" size={52} color="#f59e0b" />
                   <Text style={styles.emptyStateTitle}>
@@ -2125,14 +2140,18 @@ export default function DashboardScreen({ navigation }) {
                   </Text>
                   <TouchableOpacity
                     style={styles.retryNearbyButton}
-                    onPress={() => fetchDashboardData()}
+                    onPress={() => {
+                      nearbySyncBackoffRef.current = { consecutiveFailures: 0, nextAllowedAt: 0 };
+                      nearbySyncInFlightRef.current = false;
+                      fetchDashboardData();
+                    }}
                   >
                     <Text style={styles.retryNearbyButtonText}>
                       Retry update
                     </Text>
                   </TouchableOpacity>
                 </View>
-              ) : nearbyDeliveries.length === 0 ? (
+              ) : nearbyDeliveries.length === 0 && hasNearbyInitialSyncCompleted && !isNearbySyncing ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="cube-outline" size={64} color="#cbd5e1" />
                   <Text style={styles.emptyStateTitle}>No requests nearby</Text>
@@ -2140,7 +2159,29 @@ export default function DashboardScreen({ navigation }) {
                     New orders will appear here
                   </Text>
                 </View>
+              ) : nearbyDeliveries.length === 0 ? (
+                // Catch-all: still loading — show skeleton, never blank
+                <View style={styles.nearbySkeletonWrap}>
+                  <View style={styles.nearbySyncBanner}>
+                    <ActivityIndicator size="small" color="#06C168" />
+                    <Text style={styles.nearbySyncBannerText}>
+                      Updating nearby requests...
+                    </Text>
+                  </View>
+                  {[1, 2, 3].map((item) => (
+                    <View key={item} style={styles.nearbySkeletonCard}>
+                      <View style={styles.nearbySkeletonLineLg} />
+                      <View style={styles.nearbySkeletonLineSm} />
+                      <View style={styles.nearbySkeletonRow}>
+                        <View style={styles.nearbySkeletonChip} />
+                        <View style={styles.nearbySkeletonChip} />
+                      </View>
+                      <View style={styles.nearbySkeletonButton} />
+                    </View>
+                  ))}
+                </View>
               ) : (
+
                 visibleNearbyDeliveries.map((delivery, index) => {
                   const breakdown = getEarningsBreakdown(delivery);
                   const tripSummary = getDistanceAndTimeSummary(delivery);
@@ -2239,19 +2280,26 @@ export default function DashboardScreen({ navigation }) {
                       <TouchableOpacity
                         style={[
                           styles.acceptButton,
-                          acceptingOrder === delivery.delivery_id &&
+                          (acceptingOrder === delivery.delivery_id || isNearbySyncing) &&
                             styles.acceptButtonDisabled,
                         ]}
                         onPress={() =>
                           handleAcceptDelivery(delivery.delivery_id)
                         }
-                        disabled={acceptingOrder === delivery.delivery_id}
+                        disabled={acceptingOrder === delivery.delivery_id || isNearbySyncing}
                       >
                         {acceptingOrder === delivery.delivery_id ? (
                           <>
                             <ActivityIndicator size="small" color="#fff" />
                             <Text style={styles.acceptButtonText}>
                               Accepting...
+                            </Text>
+                          </>
+                        ) : isNearbySyncing ? (
+                          <>
+                            <ActivityIndicator size="small" color="#fff" />
+                            <Text style={styles.acceptButtonText}>
+                              Updating...
                             </Text>
                           </>
                         ) : (
@@ -2270,6 +2318,7 @@ export default function DashboardScreen({ navigation }) {
                     </View>
                   );
                 })
+
               )}
               {remainingNearbyCount > 0 && (
                 <TouchableOpacity

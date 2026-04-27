@@ -1417,12 +1417,21 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     }
 
     setIsRefreshing(true);
+    // Hard-reset ALL throttle state so the refresh fires immediately
     deliveriesSyncRetryStateRef.current = {
       consecutiveFailures: 0,
       nextAllowedAt: 0,
     };
+    // If a request is in-flight, abort it so refresh gets priority
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    fetchInFlightRef.current = false;
+    pendingFetchRequestRef.current = null;
+    // Fetch fresh location then immediately call API
     fetchDeliveriesWithCurrentLocation(false, "pull_to_refresh");
   }, [fetchDeliveriesWithCurrentLocation, inDeliveringMode]);
+
 
   const getTipAmount = useCallback((delivery) => {
     return Number.parseFloat(delivery?.pricing?.tip_amount || 0);
@@ -1572,7 +1581,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         mapViewportHeight={mapViewportHeight}
         tabBarHeight={tabBarHeight}
         accepting={accepting === item.delivery_id}
-        isSyncing={isLoadingAfterAccept}
+        isSyncing={isLoadingAfterAccept || isDeliveriesSyncing || isPostCompleteHardLoading}
         onAccept={handleAcceptDelivery}
         onDecline={handleDecline}
         hasActiveDeliveries={currentRoute.active_deliveries > 0}
@@ -1692,8 +1701,10 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         ) : isPostCompleteHardLoading ? (
           <DriverMapSheetLoadingSkeleton />
         ) : (deliveries.length === 0 && isDeliveriesSyncing) ? (
+          // Syncing in progress — show skeleton, never blank or empty state
           <DriverMapSheetLoadingSkeleton />
-        ) : deliveries.length === 0 ? (
+        ) : deliveries.length === 0 && hasCompletedFirstFetch && !isDeliveriesSyncing ? (
+          // Strictly only show empty state when: first fetch done + not syncing + truly empty
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyEmoji}>📦</Text>
             <Text style={styles.emptyTitle}>No Deliveries Near You</Text>
@@ -1706,9 +1717,15 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
               <Pressable
                 style={styles.refreshBtn}
                 onPress={() => {
-                  // Clear cache + retry state to force fresh API call
+                  // Hard-reset all throttle / in-flight state for immediate refresh
                   deliveriesSyncRetryStateRef.current = { consecutiveFailures: 0, nextAllowedAt: 0 };
+                  if (abortControllerRef.current) {
+                    abortControllerRef.current.abort();
+                  }
+                  fetchInFlightRef.current = false;
+                  pendingFetchRequestRef.current = null;
                   setFetchError(null);
+                  setIsRefreshing(true);
                   fetchDeliveriesWithCurrentLocation(false, "retry_button");
                 }}
               >
@@ -1726,7 +1743,11 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
               )}
             </View>
           </View>
+        ) : deliveries.length === 0 ? (
+          // Has not completed first fetch yet — show skeleton instead of blank
+          <DriverMapSheetLoadingSkeleton />
         ) : (
+
           <Animated.View
             style={{
               flex: 1,

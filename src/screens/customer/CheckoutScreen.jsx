@@ -474,6 +474,46 @@ export default function CheckoutScreen({ route, navigation }) {
     cart?.restaurant?.longitude,
   ]);
 
+  useEffect(() => {
+    const hasCoords = hasValidCoordinates(
+      position?.latitude,
+      position?.longitude,
+    );
+    const hasLocationDetails =
+      hasExplicitDeliveryLocation &&
+      hasCoords &&
+      Boolean(String(address || "").trim()) &&
+      Boolean(String(city || "").trim());
+
+    if (!cartId || !hasLocationDetails) {
+      return;
+    }
+
+    const nextSignature = getQuoteInputSignature();
+    if (
+      orderQuote?.quote_token &&
+      lastSuccessfulQuoteInputRef.current === nextSignature
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      fetchOrderQuote({ silent: true }).catch(() => {});
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [
+    address,
+    cartId,
+    city,
+    fetchOrderQuote,
+    getQuoteInputSignature,
+    hasExplicitDeliveryLocation,
+    orderQuote?.quote_token,
+    position?.latitude,
+    position?.longitude,
+  ]);
+
   const fetchCheckoutData = async () => {
     try {
       setLoading(true);
@@ -537,8 +577,12 @@ export default function CheckoutScreen({ route, navigation }) {
           profileData.customer.address || "",
         ).trim();
         const profileCity = String(profileData.customer.city || "").trim();
-        const profileLat = parseNullableCoordinate(profileData.customer.latitude);
-        const profileLng = parseNullableCoordinate(profileData.customer.longitude);
+        const profileLat = parseNullableCoordinate(
+          profileData.customer.latitude,
+        );
+        const profileLng = parseNullableCoordinate(
+          profileData.customer.longitude,
+        );
 
         setPhone(profilePhone);
         setAddress(profileAddress);
@@ -740,24 +784,40 @@ export default function CheckoutScreen({ route, navigation }) {
         return;
       }
       if (!cart) throw new Error("Cart missing");
-
-      // Ensure we have a fresh server quote before placing.
-      // This is a safety net — normally the button is disabled until quote is ready.
-      let activeQuote = orderQuote;
-      if (!activeQuote?.quote_token) {
-        setQuoteLoading(true);
-        activeQuote = await fetchOrderQuote({ silent: false });
-        setQuoteLoading(false);
-        if (!activeQuote?.quote_token) {
-          setError("Unable to confirm pricing. Please try again.");
-          return;
-        }
-      }
+      const activeQuote = orderQuote;
 
       setPlacing(true);
       setError("");
 
       const token = await getAccessToken();
+
+      const placeOrderPayload = {
+        cartId,
+        payment_method: paymentMethod,
+        delivery_latitude: Number(position?.latitude),
+        delivery_longitude: Number(position?.longitude),
+        delivery_address: String(address || "").trim(),
+        delivery_city: String(city || "").trim(),
+        // Route: send client-calculated distance as a hint to avoid duplicate
+        // server-side OSRM call. Server still computes fees from its own distance
+        // when no quote_token is present.
+        distance_km:
+          Number.isFinite(effectiveDistanceKm) && effectiveDistanceKm > 0
+            ? Number(Number(effectiveDistanceKm).toFixed(2))
+            : undefined,
+        estimated_duration_min:
+          Number.isFinite(quoteEstimatedDurationMin) &&
+          quoteEstimatedDurationMin > 0
+            ? quoteEstimatedDurationMin
+            : estimatedDeliveryWindow?.midpoint || undefined,
+      };
+
+      if (activeQuote?.quote_token) {
+        // Signed quote token — server-computed pricing locked in and signed.
+        // Server verifies the signature and uses the embedded pricing directly.
+        // No financial values are sent from the client.
+        placeOrderPayload.quote_token = activeQuote.quote_token;
+      }
 
       const res = await fetch(`${API_BASE_URL}/orders/place`, {
         method: "POST",
@@ -765,30 +825,7 @@ export default function CheckoutScreen({ route, navigation }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          cartId,
-          payment_method: paymentMethod,
-          delivery_latitude: Number(position?.latitude),
-          delivery_longitude: Number(position?.longitude),
-          delivery_address: String(address || "").trim(),
-          delivery_city: String(city || "").trim(),
-          // Route: send client-calculated distance as a hint to avoid duplicate
-          // server-side OSRM call. Server still computes fees from its own distance
-          // when no quote_token is present.
-          distance_km:
-            Number.isFinite(effectiveDistanceKm) && effectiveDistanceKm > 0
-              ? Number(Number(effectiveDistanceKm).toFixed(2))
-              : undefined,
-          estimated_duration_min:
-            Number.isFinite(quoteEstimatedDurationMin) && quoteEstimatedDurationMin > 0
-              ? quoteEstimatedDurationMin
-              : (estimatedDeliveryWindow?.midpoint || undefined),
-          // Signed quote token — server-computed pricing locked in and signed.
-          // Server verifies the signature and uses the embedded pricing directly.
-          // No financial values are sent from the client.
-          quote_token: activeQuote.quote_token,
-        }),
-
+        body: JSON.stringify(placeOrderPayload),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -1042,13 +1079,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
     if (!isSubtotalValid || deliveryFee === null) return null;
     return subtotal + serviceFee + deliveryFee;
-  }, [
-    deliveryFee,
-    isSubtotalValid,
-    quoteTotalAmount,
-    serviceFee,
-    subtotal,
-  ]);
+  }, [deliveryFee, isSubtotalValid, quoteTotalAmount, serviceFee, subtotal]);
 
   const finalTotal = useMemo(() => {
     if (Number.isFinite(quoteTotalAmount)) return quoteTotalAmount;
@@ -1080,9 +1111,6 @@ export default function CheckoutScreen({ route, navigation }) {
       return `Minimum order amount is Rs. ${requiredMinSubtotal}.`;
     if (deliveryFee === null)
       return "Delivery fee is unavailable. Please verify your location pin.";
-    // All inputs valid but server quote not ready yet — block until quote arrives
-    // This ensures Place Order ALWAYS uses a signed server quote_token.
-    if (!orderQuote?.quote_token) return "Calculating pricing...";
     return "";
   }, [
     phone,
@@ -1096,7 +1124,6 @@ export default function CheckoutScreen({ route, navigation }) {
     isSubtotalValid,
     requiredMinSubtotal,
     deliveryFee,
-    orderQuote,
   ]);
 
   const ctaAlertMessage = useMemo(() => {
@@ -1116,8 +1143,7 @@ export default function CheckoutScreen({ route, navigation }) {
     quoteLoading ||
     placing ||
     !cart ||
-    (isLocationDetailsComplete && deliveryFee === null) ||
-    !orderQuote?.quote_token;
+    (isLocationDetailsComplete && deliveryFee === null);
 
   // ✅ Loading / Error
   if (loading) {
@@ -1498,9 +1524,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
           <Row
             label="Delivery fee"
-            value={
-              deliveryFee !== null ? formatPrice(deliveryFee) : "--"
-            }
+            value={deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
           />
           <Row
             label="Service fee"
@@ -1540,34 +1564,32 @@ export default function CheckoutScreen({ route, navigation }) {
               isPlaceOrderDisabled && { color: "#6EDE9A" },
             ]}
           >
-          {placing
-            ? "Placing..."
-            : quoteLoading
-              ? "Calculating pricing..."
-              : routeLoading && !Number.isFinite(quoteDistanceKm)
-                      ? "Calculating..."
-                      : !hasExplicitDeliveryLocation
-                        ? "Location not provided"
-                        : !String(city || "").trim()
-                          ? "Add city to continue"
-                          : !isDistanceWithinLimit && routeInfo
-                            ? `Not available beyond ${maxOrderDistanceKm} km`
-                            : !isSubtotalValid
-                              ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
-                              : !orderQuote?.quote_token
-                                ? "Calculating pricing..."
-                                : finalTotal !== null
-                                  ? `Place Order • ${formatPrice(finalTotal)}`
-                                  : "Place Order"}
-        </Text>
-        {(placing || quoteLoading) && (
-          <ActivityIndicator
-            size="small"
-            color={placing ? "#fff" : "#6EDE9A"}
-            style={{ marginLeft: 8 }}
-          />
-        )}
-      </Pressable>
+            {placing
+              ? "Placing..."
+              : quoteLoading
+                ? "Calculating pricing..."
+                : routeLoading && !Number.isFinite(quoteDistanceKm)
+                  ? "Calculating..."
+                  : !hasExplicitDeliveryLocation
+                    ? "Location not provided"
+                    : !String(city || "").trim()
+                      ? "Add city to continue"
+                      : !isDistanceWithinLimit && routeInfo
+                        ? `Not available beyond ${maxOrderDistanceKm} km`
+                        : !isSubtotalValid
+                          ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
+                          : finalTotal !== null
+                            ? `Place Order • ${formatPrice(finalTotal)}`
+                            : "Place Order"}
+          </Text>
+          {(placing || quoteLoading) && (
+            <ActivityIndicator
+              size="small"
+              color={placing ? "#fff" : "#6EDE9A"}
+              style={{ marginLeft: 8 }}
+            />
+          )}
+        </Pressable>
       </View>
 
       {/* ✅ Address Modal */}

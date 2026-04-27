@@ -1161,6 +1161,41 @@ export default function DriverMapScreen({ route, navigation }) {
         throw new Error(errData.message || "Failed to update status");
       }
     } catch (e) {
+      // Before showing error, verify the server actually processed the action.
+      // Network timeouts can fire after the server already updated the status.
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const verifyRes = await fetch(
+            `${API_BASE_URL}/driver/deliveries/${targetId}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          if (verifyRes.ok) {
+            const verifyData = await verifyRes.json().catch(() => ({}));
+            const serverStatus = String(
+              verifyData?.delivery?.status ||
+              verifyData?.status ||
+              "",
+            ).toLowerCase();
+            if (serverStatus === "picked_up") {
+              // Server already applied it — treat as success
+              applyOptimisticWorkflow({ action: "picked_up", target: actionTarget });
+              await pushStatusFocusSignal("picked_up", targetId);
+              const refreshLocation =
+                driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+              overlayCallbackRef.current = () => {
+                fetchPickupsAndDeliveries(refreshLocation, { force: true, immediate: true });
+                setUpdating(false);
+              };
+              setOverlayStatus("success");
+              return;
+            }
+          }
+        }
+      } catch (_verifyErr) {
+        // ignore verify error, fall through to show error
+      }
+
       const refreshLocation =
         driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
       fetchPickupsAndDeliveries(refreshLocation, {
@@ -1175,6 +1210,7 @@ export default function DriverMapScreen({ route, navigation }) {
       setUpdating(false);
     }
   };
+
 
   const handleDelivered = async () => {
     if (!currentTarget || updating || isMapRefreshing) return;
@@ -1264,6 +1300,48 @@ export default function DriverMapScreen({ route, navigation }) {
         throw new Error(errData.message || "Failed to mark as delivered");
       }
     } catch (e) {
+      // Before showing error, verify server actually applied the delivered status.
+      // Mobile network can drop the response even after server processes successfully.
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const verifyRes = await fetch(
+            `${API_BASE_URL}/driver/deliveries/${targetId}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          if (verifyRes.ok) {
+            const verifyData = await verifyRes.json().catch(() => ({}));
+            const serverStatus = String(
+              verifyData?.delivery?.status ||
+              verifyData?.status ||
+              "",
+            ).toLowerCase();
+            if (serverStatus === "delivered") {
+              // Server already marked delivered — treat as success
+              applyOptimisticWorkflow({ action: "delivered", target: actionTarget });
+              await pushStatusFocusSignal("delivered", targetId);
+              DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+                deliveryId: targetId,
+                action: "delivered",
+                source: "driver_map",
+                location: driverLocation ? { latitude: driverLocation.latitude, longitude: driverLocation.longitude } : null,
+                triggeredAt: Date.now(),
+              });
+              const refreshLocation =
+                driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+              overlayCallbackRef.current = () => {
+                fetchPickupsAndDeliveries(refreshLocation, { force: true, immediate: true });
+                setUpdating(false);
+              };
+              setOverlayStatus("success");
+              return;
+            }
+          }
+        }
+      } catch (_verifyErr) {
+        // ignore verify error, fall through to show error
+      }
+
       const refreshLocation =
         driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
       fetchPickupsAndDeliveries(refreshLocation, {
@@ -1278,6 +1356,7 @@ export default function DriverMapScreen({ route, navigation }) {
       setUpdating(false);
     }
   };
+
 
   const handleStartDelivery = () => {
     if (deliveriesList.length > 0) {
