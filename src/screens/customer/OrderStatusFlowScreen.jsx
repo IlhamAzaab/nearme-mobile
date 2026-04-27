@@ -52,6 +52,7 @@ import OptimizedImage from "../../components/common/OptimizedImage";
 import OrderPlacedBackground from "../../components/customer/OrderPlacedBackground";
 import { API_BASE_URL } from "../../constants/api";
 import { useSocket } from "../../context/SocketContext";
+import { getAccessToken } from "../../lib/authStorage";
 import { fetchOSRMRoute } from "../../utils/osrmClient";
 
 const { width: SW, height: SH } = Dimensions.get("window");
@@ -1507,15 +1508,19 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
   ];
 
   const handleCancelOrder = async () => {
-    const reason = cancelReason === "Other" ? customCancelReason.trim() : cancelReason;
+    const reason =
+      cancelReason === "Other" ? customCancelReason.trim() : cancelReason;
     if (!reason) {
-      Alert.alert("Reason Required", "Please select or type a cancellation reason.");
+      Alert.alert(
+        "Reason Required",
+        "Please select or type a cancellation reason.",
+      );
       return;
     }
 
     setIsCancelling(true);
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const res = await fetch(`${API_BASE_URL}/orders/${orderId}/cancel`, {
         method: "POST",
         headers: {
@@ -1534,7 +1539,13 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
         Alert.alert(
           "Order Cancelled",
           "Your order has been successfully cancelled.",
-          [{ text: "OK", onPress: () => navigation.reset({ index: 0, routes: [{ name: "MainTabs" }] }) }],
+          [
+            {
+              text: "OK",
+              onPress: () =>
+                navigation.reset({ index: 0, routes: [{ name: "MainTabs" }] }),
+            },
+          ],
         );
       } else if (res.status === 409) {
         setShowCancelModal(false);
@@ -1543,11 +1554,17 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
           data.message || "The restaurant has already accepted your order.",
         );
       } else {
-        Alert.alert("Error", data.message || "Failed to cancel order. Please try again.");
+        Alert.alert(
+          "Error",
+          data.message || "Failed to cancel order. Please try again.",
+        );
       }
     } catch (err) {
       console.error("Cancel order error:", err);
-      Alert.alert("Error", "Network error. Please check your connection and try again.");
+      Alert.alert(
+        "Error",
+        "Network error. Please check your connection and try again.",
+      );
     } finally {
       setIsCancelling(false);
     }
@@ -2064,7 +2081,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
 
       // ALWAYS fetch full order from API to get order_items (single source of truth)
       try {
-        const token = await AsyncStorage.getItem("token");
+        const token = await getAccessToken();
         const res = await fetch(`${API_BASE_URL}/orders/${orderId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -2154,7 +2171,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
 
     const poll = async () => {
       try {
-        const token = await AsyncStorage.getItem("token");
+        const token = await getAccessToken();
         const res = await fetch(
           `${API_BASE_URL}/orders/${orderId}/delivery-status`,
           { headers: { Authorization: `Bearer ${token}` } },
@@ -2469,7 +2486,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
   const handleSubmitRating = useCallback(async () => {
     if (rating <= 0) return;
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       await fetch(`${API_BASE_URL}/orders/${orderId}/rate`, {
         method: "POST",
         headers: {
@@ -2914,7 +2931,11 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
                   style={st.cancelOrderBtn}
                   onPress={() => setShowCancelModal(true)}
                 >
-                  <Ionicons name="close-circle-outline" size={20} color="#DC2626" />
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={20}
+                    color="#DC2626"
+                  />
                   <Text style={st.cancelOrderTxt}>Cancel Order</Text>
                 </Pressable>
               )}
@@ -2954,7 +2975,10 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
               </Text>
             </View>
 
-            <ScrollView style={st.cancelReasonsScroll} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={st.cancelReasonsScroll}
+              showsVerticalScrollIndicator={false}
+            >
               {CANCEL_REASONS.map((reason) => (
                 <Pressable
                   key={reason}
