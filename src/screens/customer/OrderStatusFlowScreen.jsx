@@ -23,10 +23,12 @@ import React, {
 import {
   AppState,
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   Easing,
   Linking,
+  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -34,6 +36,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -1487,6 +1490,69 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [phoneCopied, setPhoneCopied] = useState(false);
 
+  /* ── cancel order state ── */
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [customCancelReason, setCustomCancelReason] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(currentStatus === "cancelled");
+
+  const CANCEL_REASONS = [
+    "Changed my mind",
+    "Found better option",
+    "Ordered by mistake",
+    "Delivery taking too long",
+    "Wrong items selected",
+    "Other",
+  ];
+
+  const handleCancelOrder = async () => {
+    const reason = cancelReason === "Other" ? customCancelReason.trim() : cancelReason;
+    if (!reason) {
+      Alert.alert("Reason Required", "Please select or type a cancellation reason.");
+      return;
+    }
+
+    setIsCancelling(true);
+    try {
+      const token = await AsyncStorage.getItem("token");
+      const res = await fetch(`${API_BASE_URL}/orders/${orderId}/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ cancelled_reason: reason }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok) {
+        setIsCancelled(true);
+        setShowCancelModal(false);
+        setCurrentStatus("cancelled");
+        Alert.alert(
+          "Order Cancelled",
+          "Your order has been successfully cancelled.",
+          [{ text: "OK", onPress: () => navigation.reset({ index: 0, routes: [{ name: "MainTabs" }] }) }],
+        );
+      } else if (res.status === 409) {
+        setShowCancelModal(false);
+        Alert.alert(
+          "Cannot Cancel",
+          data.message || "The restaurant has already accepted your order.",
+        );
+      } else {
+        Alert.alert("Error", data.message || "Failed to cancel order. Please try again.");
+      }
+    } catch (err) {
+      console.error("Cancel order error:", err);
+      Alert.alert("Error", "Network error. Please check your connection and try again.");
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   /* ── animations ── */
   const sheetAnim = useRef(new Animated.Value(0)).current;
   const contentFade = useRef(new Animated.Value(0)).current;
@@ -2841,6 +2907,17 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
                   onToggle={() => setViewOrderExpanded(!viewOrderExpanded)}
                 />
               </View>
+
+              {/* 6) Cancel Order Button — only visible in 'placed' status */}
+              {currentStatus === "placed" && !isCancelled && (
+                <Pressable
+                  style={st.cancelOrderBtn}
+                  onPress={() => setShowCancelModal(true)}
+                >
+                  <Ionicons name="close-circle-outline" size={20} color="#DC2626" />
+                  <Text style={st.cancelOrderTxt}>Cancel Order</Text>
+                </Pressable>
+              )}
             </>
           )}
 
@@ -2859,6 +2936,94 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
           )}
         </ScrollView>
       </Animated.View>
+
+      {/* ══════ CANCEL ORDER MODAL ══════ */}
+      <Modal
+        visible={showCancelModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !isCancelling && setShowCancelModal(false)}
+      >
+        <View style={st.cancelModalOverlay}>
+          <View style={st.cancelModalContent}>
+            <View style={st.cancelModalHeader}>
+              <Ionicons name="warning-outline" size={28} color="#DC2626" />
+              <Text style={st.cancelModalTitle}>Cancel Order?</Text>
+              <Text style={st.cancelModalSubtitle}>
+                Please tell us why you want to cancel
+              </Text>
+            </View>
+
+            <ScrollView style={st.cancelReasonsScroll} showsVerticalScrollIndicator={false}>
+              {CANCEL_REASONS.map((reason) => (
+                <Pressable
+                  key={reason}
+                  style={[
+                    st.cancelReasonItem,
+                    cancelReason === reason && st.cancelReasonItemActive,
+                  ]}
+                  onPress={() => setCancelReason(reason)}
+                >
+                  <View
+                    style={[
+                      st.cancelReasonRadio,
+                      cancelReason === reason && st.cancelReasonRadioActive,
+                    ]}
+                  >
+                    {cancelReason === reason && (
+                      <View style={st.cancelReasonRadioDot} />
+                    )}
+                  </View>
+                  <Text
+                    style={[
+                      st.cancelReasonText,
+                      cancelReason === reason && st.cancelReasonTextActive,
+                    ]}
+                  >
+                    {reason}
+                  </Text>
+                </Pressable>
+              ))}
+
+              {cancelReason === "Other" && (
+                <TextInput
+                  style={st.cancelReasonInput}
+                  placeholder="Type your reason..."
+                  placeholderTextColor="#9CA3AF"
+                  value={customCancelReason}
+                  onChangeText={setCustomCancelReason}
+                  multiline
+                  maxLength={200}
+                />
+              )}
+            </ScrollView>
+
+            <View style={st.cancelModalActions}>
+              <Pressable
+                style={st.cancelModalKeepBtn}
+                onPress={() => !isCancelling && setShowCancelModal(false)}
+                disabled={isCancelling}
+              >
+                <Text style={st.cancelModalKeepTxt}>Keep Order</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  st.cancelModalConfirmBtn,
+                  (!cancelReason || isCancelling) && { opacity: 0.5 },
+                ]}
+                onPress={handleCancelOrder}
+                disabled={!cancelReason || isCancelling}
+              >
+                {isCancelling ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={st.cancelModalConfirmTxt}>Confirm Cancel</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -3660,5 +3825,148 @@ const st = StyleSheet.create({
     color: "#06C168",
     textAlign: "center",
     lineHeight: 20,
+  },
+
+  /* ── cancel order ── */
+  cancelOrderBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: "#FCA5A5",
+    backgroundColor: "#FEF2F2",
+  },
+  cancelOrderTxt: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#DC2626",
+  },
+
+  /* cancel modal */
+  cancelModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  cancelModalContent: {
+    width: "100%",
+    maxWidth: 400,
+    backgroundColor: "#fff",
+    borderRadius: 24,
+    paddingTop: 24,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    maxHeight: "80%",
+  },
+  cancelModalHeader: {
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  cancelModalTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#1F2937",
+    marginTop: 10,
+  },
+  cancelModalSubtitle: {
+    fontSize: 13,
+    color: "#6B7280",
+    marginTop: 4,
+    textAlign: "center",
+  },
+  cancelReasonsScroll: {
+    maxHeight: 280,
+  },
+  cancelReasonItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 8,
+    backgroundColor: "#FAFAFA",
+  },
+  cancelReasonItemActive: {
+    borderColor: "#DC2626",
+    backgroundColor: "#FEF2F2",
+  },
+  cancelReasonRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: "#D1D5DB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelReasonRadioActive: {
+    borderColor: "#DC2626",
+  },
+  cancelReasonRadioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#DC2626",
+  },
+  cancelReasonText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#374151",
+  },
+  cancelReasonTextActive: {
+    fontWeight: "700",
+    color: "#DC2626",
+  },
+  cancelReasonInput: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 14,
+    color: "#1F2937",
+    backgroundColor: "#F9FAFB",
+    minHeight: 80,
+    textAlignVertical: "top",
+    marginBottom: 8,
+  },
+  cancelModalActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 16,
+  },
+  cancelModalKeepBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: "#06C168",
+    alignItems: "center",
+  },
+  cancelModalKeepTxt: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#06C168",
+  },
+  cancelModalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: "#DC2626",
+    alignItems: "center",
+  },
+  cancelModalConfirmTxt: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff",
   },
 });

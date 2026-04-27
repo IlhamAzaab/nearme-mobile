@@ -1095,7 +1095,12 @@ export default function DriverMapScreen({ route, navigation }) {
     if (!targetId) return;
 
     setUpdating(true);
-    applyOptimisticWorkflow({ action: "picked_up", target: actionTarget });
+
+    // Show Meezo logo processing overlay immediately
+    setOverlayActionType("pickup");
+    setOverlayErrorMsg("");
+    setOverlayStatus("processing");
+    setOverlayVisible(true);
 
     try {
       let token = await getAccessToken();
@@ -1127,16 +1132,28 @@ export default function DriverMapScreen({ route, navigation }) {
             target: actionTarget,
             promotedDelivery,
           });
+        } else {
+          applyOptimisticWorkflow({ action: "picked_up", target: actionTarget });
         }
 
         await pushStatusFocusSignal("picked_up", targetId);
 
+        // Fetch updated data in background while showing success overlay
         const refreshLocation =
           driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-        fetchPickupsAndDeliveries(refreshLocation, {
-          force: true,
-          immediate: true,
-        });
+
+        // Set callback to run after success animation completes
+        overlayCallbackRef.current = () => {
+          fetchPickupsAndDeliveries(refreshLocation, {
+            force: true,
+            immediate: true,
+          });
+          setUpdating(false);
+        };
+
+        // Transition overlay to success state (auto-dismisses after animation)
+        setOverlayStatus("success");
+        return; // setUpdating handled by callback
       } else {
         let errData = await res.json().catch(function () {
           return {};
@@ -1155,7 +1172,6 @@ export default function DriverMapScreen({ route, navigation }) {
       setOverlayErrorMsg(e?.message || "Failed to mark as picked up");
       setOverlayStatus("error");
       setOverlayVisible(true);
-    } finally {
       setUpdating(false);
     }
   };
@@ -1168,7 +1184,12 @@ export default function DriverMapScreen({ route, navigation }) {
     if (!targetId) return;
 
     setUpdating(true);
-    applyOptimisticWorkflow({ action: "delivered", target: actionTarget });
+
+    // Show Meezo logo processing overlay immediately
+    setOverlayActionType("deliver");
+    setOverlayErrorMsg("");
+    setOverlayStatus("processing");
+    setOverlayVisible(true);
 
     try {
       let token = await getAccessToken();
@@ -1202,6 +1223,8 @@ export default function DriverMapScreen({ route, navigation }) {
             target: actionTarget,
             promotedDelivery,
           });
+        } else {
+          applyOptimisticWorkflow({ action: "delivered", target: actionTarget });
         }
 
         await pushStatusFocusSignal("delivered", targetId);
@@ -1221,10 +1244,19 @@ export default function DriverMapScreen({ route, navigation }) {
 
         const refreshLocation =
           driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-        fetchPickupsAndDeliveries(refreshLocation, {
-          force: true,
-          immediate: true,
-        });
+
+        // Set callback to run after success animation completes
+        overlayCallbackRef.current = () => {
+          fetchPickupsAndDeliveries(refreshLocation, {
+            force: true,
+            immediate: true,
+          });
+          setUpdating(false);
+        };
+
+        // Transition overlay to success state
+        setOverlayStatus("success");
+        return; // setUpdating handled by callback
       } else {
         let errData = await finalRes.json().catch(function () {
           return {};
@@ -1243,7 +1275,6 @@ export default function DriverMapScreen({ route, navigation }) {
       setOverlayErrorMsg(e?.message || "Failed to mark as delivered");
       setOverlayStatus("error");
       setOverlayVisible(true);
-    } finally {
       setUpdating(false);
     }
   };

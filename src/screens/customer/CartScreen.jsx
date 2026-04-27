@@ -327,9 +327,7 @@ export default function CartScreen({ navigation, route }) {
             asArray(prev)
               .map((cart) => ({
                 ...cart,
-                items: asArray(cart?.items).filter(
-                  (item) => item.id !== itemId,
-                ),
+                items: asArray(cart?.items).filter((item) => item.id !== itemId),
               }))
               .filter((cart) => asArray(cart?.items).length > 0),
           );
@@ -422,10 +420,7 @@ export default function CartScreen({ navigation, route }) {
         redirectTo: "Checkout",
       });
     } catch (checkoutNavError) {
-      console.error(
-        "Checkout pre-check failed, redirecting to map pin:",
-        checkoutNavError,
-      );
+      console.error("Checkout pre-check failed, redirecting to map pin:", checkoutNavError);
       navigation.navigate("AddressPicker", {
         cartId,
         redirectTo: "Checkout",
@@ -636,7 +631,8 @@ export default function CartScreen({ navigation, route }) {
                 key={String(item?.id || idx)}
                 style={[
                   styles.itemRow,
-                  idx < selectedItems.length - 1 && styles.itemRowBorder,
+                  idx < selectedItems.length - 1 &&
+                    styles.itemRowBorder,
                 ]}
               >
                 <OptimizedImage

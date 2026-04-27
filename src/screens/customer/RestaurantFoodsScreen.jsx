@@ -336,10 +336,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
         }
         return (
           sum +
-          (cart.items || []).reduce(
-            (s, item) => s + Number(item.quantity || 0),
-            0,
-          )
+          (cart.items || []).reduce((s, item) => s + Number(item.quantity || 0), 0)
         );
       }, 0);
       setCartCount(total);
@@ -657,8 +654,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
         <Pressable onPress={openRestaurantCart} style={styles.cartBtn}>
           <Ionicons name="cart" size={18} color="#fff" />
           <Text style={styles.cartBtnLabel}>
-            Cart
-            {cartCount > 0 ? ` (${cartCount > 99 ? "99+" : cartCount})` : ""}
+            Cart{cartCount > 0 ? ` (${cartCount > 99 ? "99+" : cartCount})` : ""}
           </Text>
           <Ionicons name="chevron-forward" size={14} color="#fff" />
         </Pressable>
@@ -894,8 +890,7 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
               <View>
                 <Text style={styles.floatingCartTitle}>View cart</Text>
                 <Text style={styles.floatingCartSubtext}>
-                  {cartCount} item{cartCount !== 1 ? "s" : ""} from this
-                  restaurant
+                  {cartCount} item{cartCount !== 1 ? "s" : ""} from this restaurant
                 </Text>
               </View>
             </View>

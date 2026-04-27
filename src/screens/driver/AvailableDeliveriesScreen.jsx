@@ -56,7 +56,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 // ============================================================================
 
 const CACHE_EXPIRY = 60000; // 1 minute cache
-const DATA_REFRESH_THRESHOLD = 200; // Only fetch API data when driver moves 200m+
+const DATA_REFRESH_THRESHOLD = 300; // Only fetch API data when driver moves 300m+
 const LIVE_TRACKING_INTERVAL = 3000; // 3 seconds - smooth driver marker updates
 const LIVE_DELIVERIES_MAX_BACKOFF_MS = 45000;
 const LIVE_DELIVERIES_504_BACKOFF_MAX_MS = 120000;
@@ -1657,8 +1657,9 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       )}
 
       {isDeliveriesSyncing && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>⟳ Updating latest requests...</Text>
+        <View style={styles.syncingBanner}>
+          <ActivityIndicator size="small" color="#06C168" style={{ marginRight: 8 }} />
+          <Text style={styles.syncingText}>Updating delivery requests...</Text>
         </View>
       )}
 
@@ -1690,6 +1691,8 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
           <DriverMapSheetLoadingSkeleton />
         ) : isPostCompleteHardLoading ? (
           <DriverMapSheetLoadingSkeleton />
+        ) : (deliveries.length === 0 && isDeliveriesSyncing) ? (
+          <DriverMapSheetLoadingSkeleton />
         ) : deliveries.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyEmoji}>📦</Text>
@@ -1703,6 +1706,9 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
               <Pressable
                 style={styles.refreshBtn}
                 onPress={() => {
+                  // Clear cache + retry state to force fresh API call
+                  deliveriesSyncRetryStateRef.current = { consecutiveFailures: 0, nextAllowedAt: 0 };
+                  setFetchError(null);
                   fetchDeliveriesWithCurrentLocation(false, "retry_button");
                 }}
               >
@@ -2680,6 +2686,23 @@ const styles = StyleSheet.create({
     color: "#B91C1C",
     fontWeight: "700",
     fontSize: 13,
+  },
+
+  // Syncing Banner (green theme)
+  syncingBanner: {
+    backgroundColor: "#ECFDF5",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#A7F3D0",
+  },
+  syncingText: {
+    color: "#047857",
+    fontSize: 13,
+    fontWeight: "600",
   },
 
   // Delivering Mode
