@@ -1418,7 +1418,12 @@ const RatingSection = React.memo(({ rating, onRate, onSubmit, submitted }) => {
 
 export default function OrderStatusFlowScreen({ route, navigation }) {
   const params = route.params || {};
-  const orderId = params.orderId;
+  const orderId =
+    params.orderId ||
+    params.order?.id ||
+    params.order?.order_id ||
+    params.order?.orderId ||
+    null;
   const routeName = route?.name || "PlacingOrder";
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
