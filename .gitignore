@@ -31,7 +31,7 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
+.env*
 .env
 
 # Firebase / FCM credentials (NEVER commit service account keys)
