@@ -419,8 +419,36 @@ export default function Orders() {
       const normalizedDeliveryId =
         deliveryId != null ? String(deliveryId) : null;
 
-      setOrders((prevOrders) =>
-        prevOrders.map((order) => {
+      console.log("[Orders] Applying status update:", {
+        orderId: normalizedOrderId,
+        deliveryId: normalizedDeliveryId,
+        status: normalizedStatus,
+      });
+
+      setOrders((prevOrders) => {
+        // When order is cancelled (no deliveryId specified), mark the entire order as cancelled
+        if (normalizedStatus === "cancelled" && !normalizedDeliveryId) {
+          return prevOrders.map((order) => {
+            if (normalizedOrderId && String(order?.id) === normalizedOrderId) {
+              // Mark all deliveries as cancelled
+              const deliveries = normalizeDeliveries(order?.deliveries);
+              const updatedDeliveries = deliveries.map((delivery) => ({
+                ...delivery,
+                status: "cancelled",
+                rejection_reason: reason || delivery?.rejection_reason || null,
+              }));
+              return {
+                ...order,
+                status: "cancelled",
+                deliveries: updatedDeliveries,
+              };
+            }
+            return order;
+          });
+        }
+
+        // Handle delivery-level status updates
+        return prevOrders.map((order) => {
           const isOrderMatch =
             normalizedOrderId && String(order?.id) === normalizedOrderId;
 
@@ -446,7 +474,7 @@ export default function Orders() {
               ...delivery,
               status: normalizedStatus,
               rejection_reason:
-                normalizedStatus === "failed"
+                normalizedStatus === "failed" || normalizedStatus === "cancelled"
                   ? reason || delivery?.rejection_reason || null
                   : delivery?.rejection_reason || null,
             };
@@ -456,8 +484,8 @@ export default function Orders() {
             ...order,
             deliveries: updatedDeliveries,
           };
-        }),
-      );
+        });
+      });
     },
     [],
   );
@@ -651,6 +679,12 @@ export default function Orders() {
     () =>
       periodOrders.filter((order) => {
         const deliveryStatus = getDeliveryStatus(order);
+        
+        // Hide cancelled orders from all filtered views
+        if (deliveryStatus === "cancelled") {
+          return statusFilter === "all";
+        }
+        
         if (statusFilter === "all") return true;
         if (statusFilter === "pending") return deliveryStatus === "placed";
         if (statusFilter === "accepted") {

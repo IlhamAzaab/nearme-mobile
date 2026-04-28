@@ -202,6 +202,9 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   const { on, off, isConnected } = useSocket();
   const { declineDelivery } = useDriverDeliveryNotifications();
   const isFocusedRef = useRef(true);
+  const inDeliveringModeRef = useRef(false);
+  const fetchDeliveriesWithCurrentLocationRef = useRef(null);
+  const mutateAvailableDeliveriesRef = useRef(null);
   const [listViewportHeight, setListViewportHeight] = useState(0);
   const viewportHeight = useMemo(
     () => Math.max(320, Math.round(listViewportHeight || SCREEN_HEIGHT)),
@@ -230,6 +233,10 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   useEffect(() => {
     isFocusedRef.current = isFocused;
   }, [isFocused]);
+
+  useEffect(() => {
+    inDeliveringModeRef.current = inDeliveringMode;
+  }, [inDeliveringMode]);
 
   // Initialize with cached data for instant display
   const [deliveries, setDeliveries] = useState([]);
@@ -414,6 +421,10 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       trimDeclinedIds,
     ],
   );
+
+  useEffect(() => {
+    mutateAvailableDeliveriesRef.current = mutateAvailableDeliveries;
+  }, [mutateAvailableDeliveries]);
 
   const syncDeliveryMeta = useCallback((incomingDeliveries) => {
     const meta = deliveryMetaRef.current;
@@ -844,6 +855,11 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   );
 
   useEffect(() => {
+    fetchDeliveriesWithCurrentLocationRef.current =
+      fetchDeliveriesWithCurrentLocation;
+  }, [fetchDeliveriesWithCurrentLocation]);
+
+  useEffect(() => {
     driverLocationRef.current = driverLocation;
   }, [driverLocation]);
 
@@ -1122,19 +1138,18 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   }, [isConnected]);
 
   useEffect(() => {
-    if (!isFocused) return;
-    if (inDeliveringMode) return;
-    if (!on || !off) return;
+    if (!isConnected || !on || !off) return;
 
     const handleNewDelivery = (payload) => {
       if (!isFocusedRef.current) return;
+      if (inDeliveringModeRef.current) return;
       setShowNewDeliveryBanner(true);
 
       const normalizedId = normalizeDeliveryId(payload?.delivery_id);
       const hasCoordinates = hasValidDeliveryCoordinates(payload);
 
       if (normalizedId && hasCoordinates) {
-        mutateAvailableDeliveries((prev) => {
+        mutateAvailableDeliveriesRef.current?.((prev) => {
           const withoutIncoming = prev.filter(
             (delivery) =>
               normalizeDeliveryId(delivery?.delivery_id) !== normalizedId,
@@ -1144,11 +1159,15 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         return;
       }
 
-      fetchDeliveriesWithCurrentLocation(true, "socket_new_delivery_fallback");
+      fetchDeliveriesWithCurrentLocationRef.current?.(
+        true,
+        "socket_new_delivery_fallback",
+      );
     };
 
     const handleTipUpdated = (payload) => {
       if (!isFocusedRef.current) return;
+      if (inDeliveringModeRef.current) return;
 
       const normalizedId = normalizeDeliveryId(payload?.delivery_id);
       if (!normalizedId) return;
@@ -1159,7 +1178,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       );
 
       if (hasMatch) {
-        mutateAvailableDeliveries((prev) =>
+        mutateAvailableDeliveriesRef.current?.((prev) =>
           prev.map((delivery) => {
             if (normalizeDeliveryId(delivery?.delivery_id) !== normalizedId) {
               return delivery;
@@ -1185,14 +1204,17 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         return;
       }
 
-      fetchDeliveriesWithCurrentLocation(true, "socket_tip_update_fallback");
+      fetchDeliveriesWithCurrentLocationRef.current?.(
+        true,
+        "socket_tip_update_fallback",
+      );
     };
 
     const handleDeliveryTaken = (payload) => {
       const takenId = normalizeDeliveryId(payload?.delivery_id);
       if (!takenId) return;
 
-      mutateAvailableDeliveries((prev) =>
+      mutateAvailableDeliveriesRef.current?.((prev) =>
         prev.filter((d) => normalizeDeliveryId(d?.delivery_id) !== takenId),
       );
     };
@@ -1206,14 +1228,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       off("delivery:tip_updated", handleTipUpdated);
       off("delivery:taken", handleDeliveryTaken);
     };
-  }, [
-    on,
-    off,
-    isFocused,
-    inDeliveringMode,
-    fetchDeliveriesWithCurrentLocation,
-    mutateAvailableDeliveries,
-  ]);
+  }, [on, off, isConnected]);
 
   useEffect(() => {
     const subscription = DeviceEventEmitter.addListener(

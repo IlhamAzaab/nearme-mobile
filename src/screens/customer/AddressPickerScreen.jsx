@@ -21,9 +21,10 @@ const GEOCODE_DEBOUNCE_MS = 700;
 const GEOCODE_TIMEOUT_MS = 6500;
 const MIN_GEOCODE_DISTANCE_METERS = 20;
 const LOCATION_TIMEOUT_MS = 9000;
+
 const DEFAULT_MAP_REGION = {
-  latitude: 8.5874,
-  longitude: 81.2147,
+  latitude: 8.5017,
+  longitude: 81.1893,
   latitudeDelta: 0.045,
   longitudeDelta: 0.045,
 };
@@ -44,12 +45,14 @@ function getDistanceMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000;
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
+
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(toRad(lat1)) *
       Math.cos(toRad(lat2)) *
       Math.sin(dLng / 2) *
       Math.sin(dLng / 2);
+
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
@@ -78,9 +81,11 @@ function toCoordinates(locationPayload) {
 
   const latitude = Number(rawLatitude);
   const longitude = Number(rawLongitude);
+
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     return null;
   }
+
   return { latitude, longitude };
 }
 
@@ -94,20 +99,27 @@ function parseNullableCoordinate(value) {
 
 export default function AddressPickerScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
+
   const mapRef = useRef(null);
   const geocodeTimerRef = useRef(null);
   const lastGeocodePointRef = useRef(null);
   const geocodeRequestIdRef = useRef(0);
   const geocodeCacheRef = useRef(new Map());
+
   const hasManualPinRef = useRef(false);
   const hasProfilePinRef = useRef(false);
   const hasAutoFocusedLiveMapRef = useRef(false);
   const addressLabelRef = useRef("Loading address...");
+
   const [initialRegion, setInitialRegion] = useState(DEFAULT_MAP_REGION);
   const [currentCoordinate, setCurrentCoordinate] = useState(null);
+
   const [addressLabel, setAddressLabel] = useState("Loading address...");
   const [addressCity, setAddressCity] = useState("");
+
   const [saving, setSaving] = useState(false);
+  const [locating, setLocating] = useState(false);
+
   const [userLocation, setUserLocation] = useState(null);
   const [showUserLocationMarker, setShowUserLocationMarker] = useState(false);
 
@@ -118,6 +130,7 @@ export default function AddressPickerScreen({ navigation, route }) {
       const pinnedValid =
         Number.isFinite(Number(pinnedCoordinate?.latitude)) &&
         Number.isFinite(Number(pinnedCoordinate?.longitude));
+
       const liveValid =
         Number.isFinite(Number(liveCoordinate?.latitude)) &&
         Number.isFinite(Number(liveCoordinate?.longitude));
@@ -125,12 +138,14 @@ export default function AddressPickerScreen({ navigation, route }) {
       if (!pinnedValid && !liveValid) return;
 
       const coordinates = [];
+
       if (pinnedValid) {
         coordinates.push({
           latitude: Number(pinnedCoordinate.latitude),
           longitude: Number(pinnedCoordinate.longitude),
         });
       }
+
       if (liveValid) {
         coordinates.push({
           latitude: Number(liveCoordinate.latitude),
@@ -140,6 +155,7 @@ export default function AddressPickerScreen({ navigation, route }) {
 
       if (coordinates.length === 1) {
         const [point] = coordinates;
+
         if (mapRef.current?.animateToRegion) {
           mapRef.current.animateToRegion(
             {
@@ -151,10 +167,12 @@ export default function AddressPickerScreen({ navigation, route }) {
             700,
           );
         }
+
         return;
       }
 
       const [first, second] = coordinates;
+
       const distanceMeters = getDistanceMeters(
         first.latitude,
         first.longitude,
@@ -172,6 +190,7 @@ export default function AddressPickerScreen({ navigation, route }) {
           },
           700,
         );
+
         return;
       }
 
@@ -206,6 +225,7 @@ export default function AddressPickerScreen({ navigation, route }) {
       }
 
       const lastPoint = lastGeocodePointRef.current;
+
       if (!force && lastPoint) {
         const moved = getDistanceMeters(
           lastPoint.latitude,
@@ -213,12 +233,14 @@ export default function AddressPickerScreen({ navigation, route }) {
           latitude,
           longitude,
         );
+
         if (moved < MIN_GEOCODE_DISTANCE_METERS) {
           return;
         }
       }
 
       const requestId = ++geocodeRequestIdRef.current;
+
       if (showLoading) {
         setAddressLabel("Loading address...");
       }
@@ -228,6 +250,7 @@ export default function AddressPickerScreen({ navigation, route }) {
           latitude,
           longitude,
         });
+
         const timeoutPromise = new Promise((_, reject) => {
           setTimeout(
             () => reject(new Error("reverse_geocode_timeout")),
@@ -243,17 +266,24 @@ export default function AddressPickerScreen({ navigation, route }) {
 
         if (Array.isArray(geocode) && geocode.length > 0) {
           const place = geocode[0];
-          const formattedAddress = `${place.name ? `${place.name}, ` : ""}${place.street || ""}, ${place.city || ""}`;
+
+          const formattedAddress = `${place.name ? `${place.name}, ` : ""}${
+            place.street || ""
+          }, ${place.city || ""}`;
+
           const label =
             formattedAddress.trim().replace(/^,|,$/g, "") ||
             "Selected Location";
+
           const city = place.city || place.subregion || place.region || "";
 
           setAddressLabel(label);
           setAddressCity(city);
+
           lastGeocodePointRef.current = { latitude, longitude };
 
           geocodeCacheRef.current.set(cacheKey, { label, city });
+
           if (geocodeCacheRef.current.size > 50) {
             const firstKey = geocodeCacheRef.current.keys().next().value;
             geocodeCacheRef.current.delete(firstKey);
@@ -268,13 +298,16 @@ export default function AddressPickerScreen({ navigation, route }) {
         }
 
         const message = String(error?.message || error || "");
+
         const isTimeout =
           /timeout|TimeoutException|reverse_geocode_timeout/i.test(message);
+
         if (isTimeout) {
           console.warn("Reverse geocode timed out, keeping previous address");
         } else {
           console.error("Reverse Geocode error:", error);
         }
+
         if (
           !addressLabelRef.current ||
           addressLabelRef.current === "Loading address..."
@@ -292,6 +325,7 @@ export default function AddressPickerScreen({ navigation, route }) {
       if (geocodeTimerRef.current) {
         clearTimeout(geocodeTimerRef.current);
       }
+
       geocodeTimerRef.current = setTimeout(() => {
         reverseGeocode(latitude, longitude, options);
       }, GEOCODE_DEBOUNCE_MS);
@@ -302,9 +336,11 @@ export default function AddressPickerScreen({ navigation, route }) {
   const getReliableCurrentLocation = useCallback(
     async ({ preferFresh = false } = {}) => {
       let permission = await Location.getForegroundPermissionsAsync();
+
       if (permission.status !== "granted") {
         permission = await Location.requestForegroundPermissionsAsync();
       }
+
       if (permission.status !== "granted") {
         throw new Error("location_permission_denied");
       }
@@ -314,8 +350,14 @@ export default function AddressPickerScreen({ navigation, route }) {
           accuracy: Location.Accuracy.BestForNavigation,
           timeout: LOCATION_TIMEOUT_MS,
         },
-        { accuracy: Location.Accuracy.High, timeout: 7500 },
-        { accuracy: Location.Accuracy.Balanced, timeout: 6000 },
+        {
+          accuracy: Location.Accuracy.High,
+          timeout: 7500,
+        },
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeout: 6000,
+        },
       ];
 
       for (const attempt of attempts) {
@@ -333,6 +375,7 @@ export default function AddressPickerScreen({ navigation, route }) {
           if (!parsed) continue;
 
           const reportedAccuracy = Number(live?.coords?.accuracy || 9999);
+
           if (preferFresh && reportedAccuracy > 180) {
             continue;
           }
@@ -351,6 +394,7 @@ export default function AddressPickerScreen({ navigation, route }) {
         maxAge: preferFresh ? 30000 : 120000,
         requiredAccuracy: 250,
       });
+
       const parsedLastKnown = toCoordinates(lastKnown);
       if (parsedLastKnown) return parsedLastKnown;
 
@@ -363,27 +407,37 @@ export default function AddressPickerScreen({ navigation, route }) {
     (async () => {
       try {
         let profilePinnedCoordinate = null;
+
         const token = await getAccessToken();
+
         if (token) {
           const profileRes = await fetch(
             `${API_BASE_URL}/cart/customer-profile`,
             {
-              headers: { Authorization: `Bearer ${token}` },
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
             },
           );
+
           const profileJson = await profileRes.json().catch(() => ({}));
           const customer = profileJson?.customer || {};
+
           const savedLat = parseNullableCoordinate(customer?.latitude);
           const savedLng = parseNullableCoordinate(customer?.longitude);
 
           if (savedLat !== null && savedLng !== null) {
             hasProfilePinRef.current = true;
+
             const savedCoordinate = {
               latitude: savedLat,
               longitude: savedLng,
             };
+
             profilePinnedCoordinate = savedCoordinate;
+
             setCurrentCoordinate(savedCoordinate);
+
             setInitialRegion({
               ...savedCoordinate,
               latitudeDelta: 0.01,
@@ -393,6 +447,7 @@ export default function AddressPickerScreen({ navigation, route }) {
             if (customer?.address) {
               setAddressLabel(String(customer.address));
             }
+
             if (customer?.city) {
               setAddressCity(String(customer.city));
             }
@@ -407,9 +462,11 @@ export default function AddressPickerScreen({ navigation, route }) {
         }
 
         let permission = await Location.getForegroundPermissionsAsync();
+
         if (permission.status !== "granted") {
           permission = await Location.requestForegroundPermissionsAsync();
         }
+
         if (permission.status !== "granted") {
           setAddressLabel(
             "Location permission denied. Tap map to pin manually.",
@@ -426,11 +483,13 @@ export default function AddressPickerScreen({ navigation, route }) {
 
         if (!hasProfilePinRef.current && !hasManualPinRef.current) {
           setCurrentCoordinate(liveLocation);
+
           setInitialRegion({
             ...liveLocation,
             latitudeDelta: 0.008,
             longitudeDelta: 0.008,
           });
+
           reverseGeocode(liveLocation.latitude, liveLocation.longitude, {
             force: true,
             showLoading: true,
@@ -453,8 +512,6 @@ export default function AddressPickerScreen({ navigation, route }) {
           );
         }
 
-        // Once live location is fetched, always frame the map to visible relevant points
-        // so current location tile and red pinned marker are both visible.
         setTimeout(() => {
           focusMapToRelevantLocations({
             pinnedCoordinate:
@@ -463,10 +520,12 @@ export default function AddressPickerScreen({ navigation, route }) {
                 : profilePinnedCoordinate,
             liveCoordinate: liveLocation,
           });
+
           hasAutoFocusedLiveMapRef.current = true;
         }, 180);
       } catch (error) {
         console.error("Location error:", error);
+
         setAddressLabel(
           "Could not fetch live location. Tap map to pin manually.",
         );
@@ -499,6 +558,7 @@ export default function AddressPickerScreen({ navigation, route }) {
 
   const handleRegionChangeComplete = (region) => {
     if (!region) return;
+
     // Intentionally do not update selected pin by map center.
     // Pin selection is based on explicit user tap for accuracy.
   };
@@ -506,26 +566,96 @@ export default function AddressPickerScreen({ navigation, route }) {
   const handleMapPress = (event) => {
     const latitude = Number(event?.nativeEvent?.coordinate?.latitude);
     const longitude = Number(event?.nativeEvent?.coordinate?.longitude);
+
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 
     hasManualPinRef.current = true;
-    const nextPinned = { latitude, longitude };
+
+    const nextPinned = {
+      latitude,
+      longitude,
+    };
+
     setCurrentCoordinate(nextPinned);
+
     scheduleReverseGeocode(latitude, longitude, {
       force: true,
       showLoading: true,
     });
 
     setTimeout(() => {
-      focusMapToRelevantLocations({ pinnedCoordinate: nextPinned });
+      focusMapToRelevantLocations({
+        pinnedCoordinate: nextPinned,
+      });
     }, 80);
+  };
+
+  const handleUseCurrentLocation = async () => {
+    if (locating || saving) return;
+
+    setLocating(true);
+
+    try {
+      const liveLocation = await getReliableCurrentLocation({
+        preferFresh: true,
+      });
+
+      hasManualPinRef.current = true;
+
+      setUserLocation(liveLocation);
+      setShowUserLocationMarker(true);
+      setCurrentCoordinate(liveLocation);
+
+      reverseGeocode(liveLocation.latitude, liveLocation.longitude, {
+        force: true,
+        showLoading: true,
+      });
+
+      if (mapRef.current?.animateToRegion) {
+        mapRef.current.animateToRegion(
+          {
+            latitude: liveLocation.latitude,
+            longitude: liveLocation.longitude,
+            latitudeDelta: 0.008,
+            longitudeDelta: 0.008,
+          },
+          700,
+        );
+      } else {
+        setTimeout(() => {
+          focusMapToRelevantLocations({
+            pinnedCoordinate: liveLocation,
+            liveCoordinate: liveLocation,
+          });
+        }, 80);
+      }
+    } catch (error) {
+      console.error("Use current location error:", error);
+
+      const message = String(error?.message || "");
+
+      if (message === "location_permission_denied") {
+        setAddressLabel(
+          "Location permission denied. Please allow location permission or tap map manually.",
+        );
+      } else {
+        setAddressLabel(
+          "Could not get your current location. Please try again or tap map manually.",
+        );
+      }
+    } finally {
+      setLocating(false);
+    }
   };
 
   const saveLocation = async () => {
     if (!currentCoordinate) return;
+
     setSaving(true);
+
     try {
       const token = await getAccessToken();
+
       if (!token) {
         throw new Error("Session expired");
       }
@@ -541,7 +671,9 @@ export default function AddressPickerScreen({ navigation, route }) {
           longitude: currentCoordinate.longitude,
         }),
       });
+
       const saveJson = await saveRes.json().catch(() => ({}));
+
       if (!saveRes.ok) {
         throw new Error(saveJson?.message || "Failed to save location pin");
       }
@@ -550,7 +682,10 @@ export default function AddressPickerScreen({ navigation, route }) {
       const redirectCartId = route?.params?.cartId;
 
       if (redirectTo === "Checkout" && redirectCartId) {
-        navigation.replace("Checkout", { cartId: redirectCartId });
+        navigation.replace("Checkout", {
+          cartId: redirectCartId,
+        });
+
         return;
       }
 
@@ -572,6 +707,7 @@ export default function AddressPickerScreen({ navigation, route }) {
         >
           <Ionicons name="arrow-back" size={24} color="#06C168" />
         </TouchableOpacity>
+
         <Text style={styles.headerTitle}>Select Delivery Address</Text>
       </View>
 
@@ -602,6 +738,27 @@ export default function AddressPickerScreen({ navigation, route }) {
               : []
           }
         />
+
+        {/* Use Current Location Button */}
+        <TouchableOpacity
+          style={[
+            styles.currentLocationButton,
+            (locating || saving) && styles.currentLocationButtonDisabled,
+          ]}
+          onPress={handleUseCurrentLocation}
+          disabled={locating || saving}
+          activeOpacity={0.85}
+        >
+          {locating ? (
+            <ActivityIndicator size="small" color="#06C168" />
+          ) : (
+            <Ionicons name="locate" size={22} color="#06C168" />
+          )}
+
+          <Text style={styles.currentLocationButtonText}>
+            Use my current location
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Bottom Panel */}
@@ -638,6 +795,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -647,27 +805,67 @@ const styles = StyleSheet.create({
     zIndex: 1,
     elevation: 3,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
     shadowOpacity: 0.1,
     shadowRadius: 2,
   },
+
   backButton: {
     padding: 5,
     marginRight: 10,
   },
+
   headerTitle: {
     fontSize: 18,
     fontWeight: "bold",
     color: colors.text,
   },
+
   mapContainer: {
     flex: 3.1,
     minHeight: 260,
     position: "relative",
   },
+
   map: {
     ...StyleSheet.absoluteFillObject,
   },
+
+  currentLocationButton: {
+    position: "absolute",
+    right: 16,
+    bottom: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.white,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 999,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 3,
+    },
+    shadowOpacity: 0.18,
+    shadowRadius: 5,
+    zIndex: 20,
+  },
+
+  currentLocationButtonDisabled: {
+    opacity: 0.75,
+  },
+
+  currentLocationButtonText: {
+    marginLeft: 7,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#06C168",
+  },
+
   bottomPanel: {
     flex: 1.1,
     backgroundColor: colors.white,
@@ -679,25 +877,32 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     elevation: 10,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: -3 },
+    shadowOffset: {
+      width: 0,
+      height: -3,
+    },
     shadowOpacity: 0.1,
     shadowRadius: 5,
   },
+
   pinInstructionText: {
     fontSize: 13,
     color: "#64748B",
     marginBottom: 8,
     fontWeight: "600",
   },
+
   confirmButton: {
     backgroundColor: "#06C168",
     paddingVertical: 15,
     borderRadius: 999,
     alignItems: "center",
   },
+
   confirmButtonDisabled: {
     opacity: 0.7,
   },
+
   confirmButtonText: {
     color: colors.white,
     fontSize: 16,

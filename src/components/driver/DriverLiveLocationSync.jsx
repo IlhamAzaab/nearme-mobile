@@ -21,6 +21,8 @@ import { useSocket } from "../../context/SocketContext";
 
 const LIVE_TRACKING_INTERVAL_MS = 3000;
 const BACKEND_SYNC_INTERVAL_MS = 5000;
+const LIVE_SOCKET_EMIT_INTERVAL_MS = 2000;
+const LIVE_SOCKET_MIN_MOVEMENT_METERS = 5;
 const ACTIVE_DELIVERY_REFRESH_MS = 20000;
 const LIVE_LOCATION_MAX_ACCURACY_METERS = 150;
 const LIVE_LOCATION_SAMPLE_MAX_AGE_MS = 12000;
@@ -66,6 +68,33 @@ function normalizeLocation(sample) {
     speed: Number.isFinite(speed) ? speed : null,
     accuracy,
   };
+}
+
+function toRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function distanceMeters(a, b) {
+  if (!a || !b) return Infinity;
+  const lat1 = Number(a.latitude);
+  const lng1 = Number(a.longitude);
+  const lat2 = Number(b.latitude);
+  const lng2 = Number(b.longitude);
+
+  if (!isValidCoordinatePair(lat1, lng1) || !isValidCoordinatePair(lat2, lng2)) {
+    return Infinity;
+  }
+
+  const r = 6371000; // Earth radius in meters
+  const dLat = toRadians(lat2 - lat1);
+  const dLng = toRadians(lng2 - lng1);
+  const s1 = Math.sin(dLat / 2);
+  const s2 = Math.sin(dLng / 2);
+  const aHarv =
+    s1 * s1 +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * s2 * s2;
+  const c = 2 * Math.atan2(Math.sqrt(aHarv), Math.sqrt(1 - aHarv));
+  return r * c;
 }
 
 async function patchAvailableDeliveryCacheLocation(location) {
@@ -117,6 +146,10 @@ export default function DriverLiveLocationSync() {
   const userIdRef = useRef("default");
   // Track if we've done initial background setup
   const initialBackgroundSetupDoneRef = useRef(false);
+  const lastEmitAtRef = useRef(0);
+  const lastEmitLocationRef = useRef(null);
+  const isLocationWatcherRunningRef = useRef(false);
+  const startTrackingInFlightRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -205,7 +238,7 @@ export default function DriverLiveLocationSync() {
       activeDeliveryIdsRef.current = [];
       await cacheDriverActiveDeliveryIds([]);
       await setBackgroundTrackingEnabled(false);
-      return;
+      return false;
     }
 
     await refreshActiveDeliveryIds(token);
@@ -217,6 +250,7 @@ export default function DriverLiveLocationSync() {
     }
 
     initialBackgroundSetupDoneRef.current = true;
+    return hasActiveDeliveries;
   }, [refreshActiveDeliveryIds, setBackgroundTrackingEnabled]);
 
   const syncLocationToBackend = useCallback(async () => {
@@ -282,15 +316,32 @@ export default function DriverLiveLocationSync() {
 
       latestLocationRef.current = location;
 
-      if (isConnected) {
-        emit("driver:location", {
-          lat: location.latitude,
-          lng: location.longitude,
-          heading: location.heading,
-          speed: location.speed,
-          accuracy: location.accuracy,
-          timestamp: Date.now(),
-        });
+      const hasActiveDeliveries = activeDeliveryIdsRef.current.length > 0;
+
+      if (isConnected && hasActiveDeliveries) {
+        const now = Date.now();
+        const lastEmitAt = lastEmitAtRef.current || 0;
+        const lastEmitLocation = lastEmitLocationRef.current;
+        const movedMeters = distanceMeters(lastEmitLocation, location);
+
+        if (
+          now - lastEmitAt >= LIVE_SOCKET_EMIT_INTERVAL_MS &&
+          movedMeters >= LIVE_SOCKET_MIN_MOVEMENT_METERS
+        ) {
+          emit("driver:location", {
+            lat: location.latitude,
+            lng: location.longitude,
+            heading: location.heading,
+            speed: location.speed,
+            accuracy: location.accuracy,
+            timestamp: now,
+          });
+          lastEmitAtRef.current = now;
+          lastEmitLocationRef.current = {
+            latitude: location.latitude,
+            longitude: location.longitude,
+          };
+        }
       }
 
       await updateCaches(location);
@@ -300,16 +351,27 @@ export default function DriverLiveLocationSync() {
   );
 
   const startTracking = useCallback(async () => {
-    if (locationWatchRef.current) {
+    if (startTrackingInFlightRef.current || isLocationWatcherRunningRef.current) {
       return;
     }
 
+    const hasActiveDeliveries = activeDeliveryIdsRef.current.length > 0;
+    if (!hasActiveDeliveries) {
+      return;
+    }
+
+    startTrackingInFlightRef.current = true;
+
     if (AppState.currentState !== "active") {
+      startTrackingInFlightRef.current = false;
       return;
     }
 
     const permission = await Location.requestForegroundPermissionsAsync();
-    if (permission.status !== "granted") return;
+    if (permission.status !== "granted") {
+      startTrackingInFlightRef.current = false;
+      return;
+    }
 
     const initial = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.BestForNavigation,
@@ -329,6 +391,8 @@ export default function DriverLiveLocationSync() {
         handleLocationUpdate(position).catch(() => {});
       },
     );
+    isLocationWatcherRunningRef.current = Boolean(locationWatchRef.current);
+    startTrackingInFlightRef.current = false;
   }, [handleLocationUpdate]);
 
   const stopTracking = useCallback(() => {
@@ -336,18 +400,23 @@ export default function DriverLiveLocationSync() {
       locationWatchRef.current.remove();
       locationWatchRef.current = null;
     }
+    isLocationWatcherRunningRef.current = false;
+    startTrackingInFlightRef.current = false;
   }, []);
 
   useEffect(() => {
     // Start background lifecycle FIRST, then start foreground watch.
     // This ensures background tracking is enabled before the app can go to background.
     syncTrackingLifecycle()
-      .then(() => {
-        startTracking().catch(() => {});
+      .then((hasActiveDeliveries) => {
+        if (hasActiveDeliveries) {
+          startTracking().catch(() => {});
+        } else {
+          stopTracking();
+        }
       })
       .catch(() => {
-        // Even if lifecycle sync fails, start foreground tracking anyway
-        startTracking().catch(() => {});
+        stopTracking();
       });
 
     const appStateSub = AppState.addEventListener("change", (nextAppState) => {
@@ -358,8 +427,17 @@ export default function DriverLiveLocationSync() {
         // App returned to foreground:
         // 1. Restart foreground watch
         // 2. Re-sync lifecycle (checks for new deliveries, flushes queue)
-        startTracking().catch(() => {});
-        syncTrackingLifecycle().catch(() => {});
+        syncTrackingLifecycle()
+          .then((hasActiveDeliveries) => {
+            if (hasActiveDeliveries) {
+              startTracking().catch(() => {});
+            } else {
+              stopTracking();
+            }
+          })
+          .catch(() => {
+            stopTracking();
+          });
       }
 
       if (nextAppState.match(/inactive|background/)) {
@@ -381,7 +459,17 @@ export default function DriverLiveLocationSync() {
     });
 
     const lifecycleInterval = setInterval(() => {
-      syncTrackingLifecycle().catch(() => {});
+      syncTrackingLifecycle()
+        .then((hasActiveDeliveries) => {
+          if (hasActiveDeliveries) {
+            startTracking().catch(() => {});
+          } else {
+            stopTracking();
+          }
+        })
+        .catch(() => {
+          stopTracking();
+        });
     }, ACTIVE_DELIVERY_REFRESH_MS);
 
     return () => {

@@ -42,6 +42,7 @@ const NOTIFICATION_ROLE_MAP = {
 };
 
 const PUSH_REGISTER_RETRY_AT_KEY = "pushRegisterRetryAt";
+const PUSH_LAST_REGISTER_KEY = "pushLastRegisterKey";
 const PUSH_REGISTER_COOLDOWN_MS = 5 * 60 * 1000;
 const PUSH_REGISTER_TIMEOUT_MS = 12000;
 const RETRYABLE_PUSH_STATUSES = new Set([
@@ -245,6 +246,8 @@ class PushNotificationService {
 
     this._onUrgentNotification = null; // callback for in-app modal
     this._initializePromise = null;
+    this._pushInitInProgress = false;
+    this._lastInitKey = null;
     this._lastNetworkWarnAt = 0;
     this._lastHandledNotificationResponseId = null;
   }
@@ -303,6 +306,27 @@ class PushNotificationService {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  async _getCurrentUserContext() {
+    try {
+      const [roleRaw, userIdRaw] = await Promise.all([
+        AsyncStorage.getItem("role"),
+        AsyncStorage.getItem("userId"),
+      ]);
+
+      const role = roleRaw ? String(roleRaw).trim().toLowerCase() : null;
+      const userId = userIdRaw ? String(userIdRaw).trim() : null;
+      return { role, userId };
+    } catch {
+      return { role: null, userId: null };
+    }
+  }
+
+  async _buildRegisterKey(expoPushToken, deviceId) {
+    const { role, userId } = await this._getCurrentUserContext();
+    if (!expoPushToken || !deviceId || !userId || !role) return null;
+    return `${role}:${userId}:${deviceId}:${expoPushToken}`;
   }
 
   async _shouldSkipTokenFetchForCooldown() {
@@ -588,6 +612,18 @@ class PushNotificationService {
 
       const deviceId = await this.getDeviceId();
 
+      const registerKey = await this._buildRegisterKey(
+        expoPushToken,
+        deviceId,
+      );
+      if (registerKey) {
+        const lastKey = await AsyncStorage.getItem(PUSH_LAST_REGISTER_KEY);
+        if (lastKey === registerKey) {
+          console.log("[Push] Register skipped (unchanged token/user/device)");
+          return true;
+        }
+      }
+
       console.log("[Push] Registering with backend...");
       console.log("[Push] Token:", expoPushToken);
       console.log("[Push] Device:", deviceId, Platform.OS);
@@ -627,6 +663,9 @@ class PushNotificationService {
           if (response.ok) {
             const data = await response.json().catch(() => ({}));
             await AsyncStorage.removeItem(PUSH_REGISTER_RETRY_AT_KEY);
+            if (registerKey) {
+              await AsyncStorage.setItem(PUSH_LAST_REGISTER_KEY, registerKey);
+            }
             console.log("[Push] Registered!", data);
             return true;
           }
@@ -1023,15 +1062,20 @@ class PushNotificationService {
    * Full initialization - call after login or on app start
    */
   async initialize(authToken) {
+    if (this.isInitialized && this._lastInitKey) {
+      return { success: true, skipped: true, isExpoGo };
+    }
     if (this._initializePromise) {
       return this._initializePromise;
     }
 
+    this._pushInitInProgress = true;
     this._initializePromise = this._initialize(authToken);
     try {
       return await this._initializePromise;
     } finally {
       this._initializePromise = null;
+      this._pushInitInProgress = false;
     }
   }
 
@@ -1039,10 +1083,9 @@ class PushNotificationService {
     console.log("[Push] Initializing...");
 
     // Store the user role so we can filter notifications by role
-    const storedRole = await AsyncStorage.getItem("role");
-    this._userRole = storedRole
-      ? String(storedRole).trim().toLowerCase()
-      : null;
+    const { role, userId } = await this._getCurrentUserContext();
+    this._userRole = role;
+    this._lastInitKey = role && userId ? `${role}:${userId}` : null;
     console.log("[Push] User role:", this._userRole);
 
     // Warn if running in Expo Go on Android
@@ -1096,6 +1139,7 @@ class PushNotificationService {
     this._onNotificationOpened = null;
     this._userRole = null;
     this.isInitialized = false;
+    this._lastInitKey = null;
   }
 
   // ─── LOCAL NOTIFICATIONS ──────────────────────────────────

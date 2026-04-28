@@ -181,7 +181,7 @@ const saveDashboardAsyncCache = async (payload) => {
 export default function DashboardScreen({ navigation }) {
   const isFocused = useIsFocused();
   const queryClient = useQueryClient();
-  const { on, off } = useSocket();
+  const { on, off, isConnected } = useSocket();
   const { logout } = useAuth();
   const initialUiState = queryClient.getQueryData(DASHBOARD_UI_CACHE_KEY);
   const [isOnline, setIsOnline] = useState(() => {
@@ -241,6 +241,7 @@ export default function DashboardScreen({ navigation }) {
   const { setDriverOnline } = useDriverDeliveryNotifications();
 
   const workingHoursCheckRef = useRef(null);
+  const isFocusedRef = useRef(false);
   const driverLocationRef = useRef(null);
   const nearbyLastSyncLocationRef = useRef(null);
   const hasInitializedRef = useRef(false);
@@ -252,6 +253,12 @@ export default function DashboardScreen({ navigation }) {
   const hasNearbyInitialSyncCompletedRef = useRef(false);
   const availableDeliveriesRef = useRef([]);
   const lastDashboardRefreshAtRef = useRef(0);
+  const persistNearbyDeliveriesCacheRef = useRef(null);
+  const syncAvailableDeliveriesInBackgroundRef = useRef(null);
+
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
 
   const safeRecentDeliveries = asArray(recentDeliveries);
   const safeActiveDeliveries = asArray(activeDeliveries);
@@ -288,6 +295,10 @@ export default function DashboardScreen({ navigation }) {
     },
     [availableCacheKey, driverUserId, queryClient],
   );
+
+  useEffect(() => {
+    persistNearbyDeliveriesCacheRef.current = persistNearbyDeliveriesCache;
+  }, [persistNearbyDeliveriesCache]);
 
   const isFullTimeDriver = useMemo(() => {
     const workingTime = String(
@@ -906,6 +917,11 @@ export default function DashboardScreen({ navigation }) {
     [persistNearbyDeliveriesCache, resolveVerifiedDriverLocation],
   );
 
+  useEffect(() => {
+    syncAvailableDeliveriesInBackgroundRef.current =
+      syncAvailableDeliveriesInBackground;
+  }, [syncAvailableDeliveriesInBackground]);
+
   const fetchDashboardData = useCallback(async () => {
     try {
       const token = await getAccessToken();
@@ -1101,11 +1117,10 @@ export default function DashboardScreen({ navigation }) {
   }, [fetchDriverProfile, refreshDashboardOnDemand]);
 
   useEffect(() => {
-    if (!isFocused) return;
-    if (!on || !off) return;
+    if (!isConnected || !on || !off) return;
 
     const handleNewDelivery = async (payload) => {
-      if (!isFocused) return;
+      if (!isFocusedRef.current) return;
 
       const incomingId = normalizeDeliveryId(payload?.delivery_id);
       const canHydrateFromPayload =
@@ -1120,7 +1135,7 @@ export default function DashboardScreen({ navigation }) {
                 normalizeDeliveryId(delivery?.delivery_id) !== incomingId,
             ),
           ];
-          persistNearbyDeliveriesCache(next);
+          persistNearbyDeliveriesCacheRef.current?.(next);
           return next;
         });
         setHasNearbyInitialSyncCompleted(true);
@@ -1129,13 +1144,13 @@ export default function DashboardScreen({ navigation }) {
 
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
-      syncAvailableDeliveriesInBackground(token, "new_delivery", {
+      syncAvailableDeliveriesInBackgroundRef.current?.(token, "new_delivery", {
         forceSync: true,
       });
     };
 
     const handleTipUpdated = async (payload) => {
-      if (!isFocused) return;
+      if (!isFocusedRef.current) return;
 
       const targetId = normalizeDeliveryId(payload?.delivery_id);
       if (!targetId) return;
@@ -1168,7 +1183,7 @@ export default function DashboardScreen({ navigation }) {
             };
           });
 
-          persistNearbyDeliveriesCache(next);
+          persistNearbyDeliveriesCacheRef.current?.(next);
           return next;
         });
         return;
@@ -1176,7 +1191,7 @@ export default function DashboardScreen({ navigation }) {
 
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
-      syncAvailableDeliveriesInBackground(token, "tip_updated", {
+      syncAvailableDeliveriesInBackgroundRef.current?.(token, "tip_updated", {
         forceSync: true,
       });
     };
@@ -1190,7 +1205,7 @@ export default function DashboardScreen({ navigation }) {
           (delivery) =>
             normalizeDeliveryId(delivery?.delivery_id) !== deliveryId,
         );
-        persistNearbyDeliveriesCache(next);
+        persistNearbyDeliveriesCacheRef.current?.(next);
         return next;
       });
     };
@@ -1204,13 +1219,7 @@ export default function DashboardScreen({ navigation }) {
       off("delivery:tip_updated", handleTipUpdated);
       off("delivery:taken", handleDeliveryTaken);
     };
-  }, [
-    on,
-    off,
-    isFocused,
-    persistNearbyDeliveriesCache,
-    syncAvailableDeliveriesInBackground,
-  ]);
+  }, [on, off, isConnected]);
 
   // ============================================================================
   // WORKING HOURS CHECK (every minute)

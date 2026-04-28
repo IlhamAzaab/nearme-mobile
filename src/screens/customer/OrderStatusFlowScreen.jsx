@@ -1523,10 +1523,24 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
       return;
     }
 
+    // Validate and normalize orderId — use ref as fallback for closure issues
+    const activeOrderId = String(orderId || orderIdRef.current || "").trim();
+    if (!activeOrderId) {
+      console.error("Cancel order error: orderId is missing or invalid");
+      Alert.alert(
+        "Error",
+        "Order ID is missing. Please try again or contact support.",
+      );
+      return;
+    }
+
     setIsCancelling(true);
     try {
       const token = await getAccessToken();
-      const res = await fetch(`${API_BASE_URL}/orders/${orderId}/cancel`, {
+      const cancelUrl = `${API_BASE_URL}/orders/${activeOrderId}/cancel`;
+      console.log("[Order Cancel] Attempting cancel for orderId:", activeOrderId);
+
+      const res = await fetch(cancelUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1537,7 +1551,10 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
 
       const data = await res.json().catch(() => ({}));
 
+      console.log("[Order Cancel] Response status:", res.status, "data:", data);
+
       if (res.ok) {
+        console.log("[Order Cancel] Success for orderId:", activeOrderId);
         setIsCancelled(true);
         setShowCancelModal(false);
         setCurrentStatus("cancelled");
@@ -1552,20 +1569,36 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
             },
           ],
         );
+      } else if (res.status === 404) {
+        console.error("[Order Cancel] Order not found (404) for orderId:", activeOrderId);
+        setShowCancelModal(false);
+        Alert.alert(
+          "Order Not Found",
+          "The order could not be found in the system. It may have already been cancelled or processed. Please refresh and try again.",
+        );
       } else if (res.status === 409) {
+        console.warn("[Order Cancel] Conflict (409) for orderId:", activeOrderId, data);
         setShowCancelModal(false);
         Alert.alert(
           "Cannot Cancel",
           data.message || "The restaurant has already accepted your order.",
         );
+      } else if (res.status === 400) {
+        console.error("[Order Cancel] Bad request (400) for orderId:", activeOrderId, data);
+        setShowCancelModal(false);
+        Alert.alert(
+          "Invalid Request",
+          data.message || "Unable to cancel order. Please check and try again.",
+        );
       } else {
+        console.error("[Order Cancel] Failed with status", res.status, "for orderId:", activeOrderId, data);
         Alert.alert(
           "Error",
-          data.message || "Failed to cancel order. Please try again.",
+          data.message || `Failed to cancel order (Error: ${res.status}). Please try again.`,
         );
       }
     } catch (err) {
-      console.error("Cancel order error:", err);
+      console.error("Cancel order error:", err, "orderId:", orderId);
       Alert.alert(
         "Error",
         "Network error. Please check your connection and try again.",
