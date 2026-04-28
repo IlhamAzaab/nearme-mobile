@@ -21,6 +21,7 @@ import {
   Alert,
   Animated,
   AppState,
+  DeviceEventEmitter,
   Modal,
   Pressable,
   RefreshControl,
@@ -74,6 +75,13 @@ const DRIVER_STATUS_FOCUS_SIGNAL_KEY = "driver_status_focus_signal";
 const DRIVER_STATUS_FOCUS_WINDOW_MS = 120000;
 const DRIVER_PROFILE_CACHE_KEY = "driver_profile_cache";
 const DASHBOARD_UI_CACHE_KEY = ["driver", "dashboard", "ui-state"];
+const DRIVER_DELIVERY_ACTION_EVENT = "driver:delivery_notification_action";
+
+// ✅ NEW: Dashboard stats API cache/TTL (45 seconds)
+const DASHBOARD_STATS_CACHE_TTL_MS = 45000;
+const STATUS_INFO_CACHE_TTL_MS = 45000;
+// In-flight request tracking
+const DASHBOARD_API_REQUESTS = new Map(); // key -> { promise, timestamp }
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
@@ -255,6 +263,8 @@ export default function DashboardScreen({ navigation }) {
   const lastDashboardRefreshAtRef = useRef(0);
   const persistNearbyDeliveriesCacheRef = useRef(null);
   const syncAvailableDeliveriesInBackgroundRef = useRef(null);
+  const pendingDashboardRefreshRef = useRef(false);
+  const hasInitialRefreshRef = useRef(false);
 
   useEffect(() => {
     isFocusedRef.current = isFocused;
@@ -500,12 +510,33 @@ export default function DashboardScreen({ navigation }) {
         return;
       }
 
-      const res = await rateLimitedFetch(
+      // ✅ Check if cached result is still fresh (within 45 seconds)
+      const statusCached = queryClient.getQueryData(["driver", "status-info"]);
+      if (statusCached && Date.now() - (statusCached._timestamp || 0) < STATUS_INFO_CACHE_TTL_MS) {
+        console.log("[Dashboard] Using cached status info (TTL still fresh)");
+        return;
+      }
+
+      // ✅ Dedupe: only allow one in-flight request
+      if (DASHBOARD_API_REQUESTS.has("status-info")) {
+        const cached = DASHBOARD_API_REQUESTS.get("status-info");
+        if (Date.now() - cached.timestamp < 5000) {
+          console.log("[Dashboard] Status info request already in-flight, skipping");
+          await cached.promise;
+          return;
+        }
+        DASHBOARD_API_REQUESTS.delete("status-info");
+      }
+
+      const requestPromise = rateLimitedFetch(
         `${API_URL}${DRIVER_STATUS_ENDPOINT}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
+      DASHBOARD_API_REQUESTS.set("status-info", { promise: requestPromise, timestamp: Date.now() });
+
+      const res = await requestPromise;
 
       if (res.ok) {
         const data = await res.json();
@@ -547,6 +578,16 @@ export default function DashboardScreen({ navigation }) {
             ? data.canToggleToInactive
             : true;
 
+        // ✅ Cache with timestamp
+        queryClient.setQueryData(["driver", "status-info"], {
+          ...data,
+          currentStatus: normalizedStatus,
+          shouldBeActive,
+          canToggleToActive,
+          canToggleToInactive,
+          _timestamp: Date.now(),
+        });
+
         setStatusInfo({
           ...data,
           currentStatus: normalizedStatus,
@@ -572,8 +613,11 @@ export default function DashboardScreen({ navigation }) {
       }
     } catch (error) {
       console.error("Status info fetch error:", error);
+      // ✅ On timeout, keep using cached data and don't retry immediately
+    } finally {
+      DASHBOARD_API_REQUESTS.delete("status-info");
     }
-  }, [setDriverOnline, writeDashboardUiState]);
+  }, [queryClient, setDriverOnline, writeDashboardUiState]);
 
   // ============================================================================
   // FETCH DRIVER PROFILE
@@ -673,12 +717,34 @@ export default function DashboardScreen({ navigation }) {
       if (!token) {
         return;
       }
-      const res = await rateLimitedFetch(
+
+      // ✅ Check cache first (45 seconds TTL)
+      const cachedStatus = queryClient.getQueryData(["driver", "working-hours"]);
+      if (cachedStatus && Date.now() - (cachedStatus._timestamp || 0) < STATUS_INFO_CACHE_TTL_MS) {
+        console.log("[Dashboard] Using cached working hours (TTL still fresh)");
+        return;
+      }
+
+      // ✅ Dedupe: only allow one in-flight request
+      if (DASHBOARD_API_REQUESTS.has("working-hours")) {
+        const cached = DASHBOARD_API_REQUESTS.get("working-hours");
+        if (Date.now() - cached.timestamp < 5000) {
+          console.log("[Dashboard] Working hours request already in-flight, skipping");
+          await cached.promise;
+          return;
+        }
+        DASHBOARD_API_REQUESTS.delete("working-hours");
+      }
+
+      const requestPromise = rateLimitedFetch(
         `${API_URL}/driver/working-hours-status`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
+      DASHBOARD_API_REQUESTS.set("working-hours", { promise: requestPromise, timestamp: Date.now() });
+
+      const res = await requestPromise;
 
       if (res.ok) {
         const data = await res.json();
@@ -700,6 +766,12 @@ export default function DashboardScreen({ navigation }) {
           typeof data?.shouldBeActive === "boolean"
             ? data.shouldBeActive
             : withinHoursValue || Boolean(data?.manual_override);
+
+        // ✅ Cache result
+        queryClient.setQueryData(["driver", "working-hours"], {
+          ...data,
+          _timestamp: Date.now(),
+        });
 
         setStatusInfo((prev) => ({
           ...(prev || {}),
@@ -734,8 +806,11 @@ export default function DashboardScreen({ navigation }) {
       }
     } catch (error) {
       console.error("Working hours check error:", error);
+      // ✅ On error/timeout, cached data is still used
+    } finally {
+      DASHBOARD_API_REQUESTS.delete("working-hours");
     }
-  }, [isFullTimeDriver, writeDashboardUiState]);
+  }, [isFullTimeDriver, writeDashboardUiState, queryClient]);
 
   // ============================================================================
   // FETCH DASHBOARD DATA
@@ -923,22 +998,49 @@ export default function DashboardScreen({ navigation }) {
   }, [syncAvailableDeliveriesInBackground]);
 
   const fetchDashboardData = useCallback(async () => {
+    // ✅ Mounted guard: prevent state updates after unmount
+    let mounted = true;
+    
     try {
       const token = await getAccessToken();
-      if (!token) {
-        // Do not force logout on transient token read issues.
-        setLoading(false);
-        setRefreshing(false);
+      if (!token || !mounted) {
+        if (mounted) {
+          setLoading(false);
+          setRefreshing(false);
+        }
         return;
+      }
+
+      // ✅ Check if cached dashboard is still fresh (45 seconds)
+      const dashCached = queryClient.getQueryData(["driver", "dashboard-stats"]);
+      if (dashCached && Date.now() - (dashCached._timestamp || 0) < DASHBOARD_STATS_CACHE_TTL_MS) {
+        console.log("[Dashboard] Using cached dashboard stats (TTL still fresh)");
+        if (mounted) {
+          applyDashboardSnapshot(dashCached);
+          setLoading(false);
+          setRefreshing(false);
+        }
+        return;
+      }
+
+      // ✅ Dedupe: only allow one in-flight dashboard fetch
+      if (DASHBOARD_API_REQUESTS.has("dashboard")) {
+        const cached = DASHBOARD_API_REQUESTS.get("dashboard");
+        if (Date.now() - cached.timestamp < 5000) {
+          console.log("[Dashboard] Dashboard fetch already in-flight, skipping");
+          await cached.promise;
+          return;
+        }
+        DASHBOARD_API_REQUESTS.delete("dashboard");
       }
 
       const statusFocusSignal = await consumeStatusFocusSignal();
 
       const cachedDashboard = queryClient.getQueryData(DASHBOARD_CACHE_KEY);
-      if (cachedDashboard) {
+      if (cachedDashboard && mounted) {
         applyDashboardSnapshot(cachedDashboard);
         setLoading(false);
-      } else {
+      } else if (mounted) {
         const dashboardAsyncCache = await loadDashboardAsyncCache();
         if (dashboardAsyncCache?.data) {
           applyDashboardSnapshot(dashboardAsyncCache.data);
@@ -947,7 +1049,7 @@ export default function DashboardScreen({ navigation }) {
       }
 
       const cachedAvailable = await loadAvailableCache(availableCacheKey);
-      if (Array.isArray(cachedAvailable?.data?.deliveries)) {
+      if (Array.isArray(cachedAvailable?.data?.deliveries) && mounted) {
         const cachedDeliveries = (cachedAvailable.data.deliveries || []).filter(
           hasValidDeliveryCoordinates,
         );
@@ -973,14 +1075,8 @@ export default function DashboardScreen({ navigation }) {
       let nextActiveDeliveries = asArray(cachedDashboard?.activeDeliveries);
       let nextBalanceToReceive = Number(cachedDashboard?.balanceToReceive || 0);
 
-      // Batch all dashboard API calls in parallel
-      const [
-        statsRes,
-        monthlyStatsRes,
-        recentRes,
-        activeDeliveriesRes,
-        withdrawalsSummaryRes,
-      ] = await Promise.all([
+      // ✅ Create request promise and track it for deduping
+      const dashboardPromise = Promise.all([
         rateLimitedFetch(`${API_URL}/driver/stats/today`, { headers }),
         rateLimitedFetch(`${API_URL}/driver/stats/monthly`, { headers }),
         rateLimitedFetch(`${API_URL}/driver/deliveries/recent?limit=5`, {
@@ -991,6 +1087,18 @@ export default function DashboardScreen({ navigation }) {
           headers,
         }),
       ]);
+
+      DASHBOARD_API_REQUESTS.set("dashboard", { promise: dashboardPromise, timestamp: Date.now() });
+
+      const [
+        statsRes,
+        monthlyStatsRes,
+        recentRes,
+        activeDeliveriesRes,
+        withdrawalsSummaryRes,
+      ] = await dashboardPromise;
+
+      if (!mounted) return;
 
       if (statsRes.ok) {
         const statsData = await statsRes.json();
@@ -1028,7 +1136,7 @@ export default function DashboardScreen({ navigation }) {
       ) {
         // Swipe-driven status changes should prioritize active workflow freshness first.
         setHasNearbyInitialSyncCompleted(true);
-      } else {
+      } else if (mounted) {
         syncAvailableDeliveriesInBackground(token, "dashboard_open");
       }
 
@@ -1040,27 +1148,31 @@ export default function DashboardScreen({ navigation }) {
         setBalanceToReceive(nextBalanceToReceive);
       }
 
-      queryClient.setQueryData(DASHBOARD_CACHE_KEY, {
+      // ✅ Cache dashboard stats with timestamp
+      const dashboardSnapshot = {
         stats: nextStats,
         monthlyStats: nextMonthlyStats,
         recentDeliveries: nextRecentDeliveries,
         activeDeliveries: nextActiveDeliveries,
         balanceToReceive: nextBalanceToReceive,
-      });
+        _timestamp: Date.now(),
+      };
 
-      saveDashboardAsyncCache({
-        stats: nextStats,
-        monthlyStats: nextMonthlyStats,
-        recentDeliveries: nextRecentDeliveries,
-        activeDeliveries: nextActiveDeliveries,
-        balanceToReceive: nextBalanceToReceive,
-      }).catch(() => {});
+      queryClient.setQueryData(["driver", "dashboard-stats"], dashboardSnapshot);
+      queryClient.setQueryData(DASHBOARD_CACHE_KEY, dashboardSnapshot);
+
+      saveDashboardAsyncCache(dashboardSnapshot).catch(() => {});
     } catch (error) {
       console.error("Dashboard fetch error:", error);
+      // ✅ On timeout/error, cached data is still available and shown
     } finally {
-      hasVisitedDriverDashboardScreen = true;
-      setLoading(false);
-      setRefreshing(false);
+      DASHBOARD_API_REQUESTS.delete("dashboard");
+      if (mounted) {
+        hasVisitedDriverDashboardScreen = true;
+        setLoading(false);
+        setRefreshing(false);
+      }
+      mounted = false;
     }
   }, [
     queryClient,
@@ -1074,11 +1186,15 @@ export default function DashboardScreen({ navigation }) {
     async (options = {}) => {
       const force = Boolean(options?.force);
       const now = Date.now();
-      if (!force && now - lastDashboardRefreshAtRef.current < 2500) {
+      // ✅ Only refresh if forced or 15+ seconds since last refresh (prevent hammering)
+      const timeSinceLastRefresh = now - lastDashboardRefreshAtRef.current;
+      if (!force && timeSinceLastRefresh < 15000) {
+        console.log(`[Dashboard] Skipping refresh (${timeSinceLastRefresh}ms since last)`);
         return;
       }
 
       lastDashboardRefreshAtRef.current = now;
+      console.log("[Dashboard] Triggering dashboard refresh (force:", force, ")");
       await Promise.all([fetchStatusInfo(), fetchDashboardData()]);
     },
     [fetchDashboardData, fetchStatusInfo],
@@ -1088,6 +1204,17 @@ export default function DashboardScreen({ navigation }) {
   // APP STATE LISTENER - Re-fetch status when app returns to foreground
   // ============================================================================
 
+  // ✅ Store callback in ref to avoid dependency changes
+  const refreshDashboardOnDemandRef = useRef(refreshDashboardOnDemand);
+  const fetchDriverProfileRef = useRef(fetchDriverProfile);
+  useEffect(() => {
+    refreshDashboardOnDemandRef.current = refreshDashboardOnDemand;
+  }, [refreshDashboardOnDemand]);
+
+  useEffect(() => {
+    fetchDriverProfileRef.current = fetchDriverProfile;
+  }, [fetchDriverProfile]);
+
   useEffect(() => {
     const appStateRef = { current: AppState.currentState };
     const subscription = AppState.addEventListener("change", (nextAppState) => {
@@ -1096,25 +1223,79 @@ export default function DashboardScreen({ navigation }) {
         nextAppState === "active"
       ) {
         // App came to foreground - re-fetch server status (source of truth)
-        refreshDashboardOnDemand();
+        // ✅ Use ref to avoid effect recreation
+        if (!isFocusedRef.current) return;
+        setTimeout(() => {
+          refreshDashboardOnDemandRef.current?.();
+        }, 0);
       }
       appStateRef.current = nextAppState;
     });
     return () => subscription?.remove();
-  }, [refreshDashboardOnDemand]);
+  }, []); // ✅ Empty deps: effect is stable now
 
   useEffect(() => {
     if (!isFocused) return;
 
-    refreshDashboardOnDemand();
-  }, [isFocused, refreshDashboardOnDemand]);
+    const shouldForce = pendingDashboardRefreshRef.current;
+    pendingDashboardRefreshRef.current = false;
+
+    if (hasInitialRefreshRef.current && !shouldForce) {
+      return;
+    }
+
+    hasInitialRefreshRef.current = true;
+
+    // ✅ Use ref to avoid effect recreation
+    setTimeout(() => {
+      refreshDashboardOnDemandRef.current?.({ force: shouldForce });
+    }, 0);
+  }, [isFocused]); // ✅ Only depends on isFocused
 
   useEffect(() => {
-    (async () => {
-      await fetchDriverProfile();
-      await refreshDashboardOnDemand({ force: true });
-    })();
-  }, [fetchDriverProfile, refreshDashboardOnDemand]);
+    let mounted = true;
+    if (!isFocusedRef.current) {
+      pendingDashboardRefreshRef.current = true;
+      return () => {
+        mounted = false;
+      };
+    }
+
+    setTimeout(async () => {
+      if (!mounted) return;
+      await fetchDriverProfileRef.current?.();
+      if (!mounted) return;
+      hasInitialRefreshRef.current = true;
+      await refreshDashboardOnDemandRef.current?.({ force: true });
+    }, 0);
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      DRIVER_DELIVERY_ACTION_EVENT,
+      (payload) => {
+        const action = String(payload?.action || "")
+          .trim()
+          .toLowerCase();
+        if (action !== "accepted") return;
+
+        // Defer refresh to avoid cross-render updates.
+        if (!isFocusedRef.current) {
+          pendingDashboardRefreshRef.current = true;
+          return;
+        }
+
+        setTimeout(() => {
+          refreshDashboardOnDemandRef.current?.({ force: true });
+        }, 0);
+      },
+    );
+
+    return () => subscription?.remove();
+  }, []);
 
   useEffect(() => {
     if (!isConnected || !on || !off) return;
@@ -1222,19 +1403,27 @@ export default function DashboardScreen({ navigation }) {
   }, [on, off, isConnected]);
 
   // ============================================================================
-  // WORKING HOURS CHECK (every minute)
+  // WORKING HOURS CHECK (every 2 minutes with cache)
   // ============================================================================
+
+  // ✅ Store callback in ref to avoid dependency changes
+  const checkWorkingHoursStatusRef = useRef(checkWorkingHoursStatus);
+  useEffect(() => {
+    checkWorkingHoursStatusRef.current = checkWorkingHoursStatus;
+  }, [checkWorkingHoursStatus]);
 
   useEffect(() => {
     workingHoursCheckRef.current = setInterval(() => {
-      if (isFocused && !isFullTimeDriver) checkWorkingHoursStatus();
-    }, 120000); // Every 2 minutes (was 1 minute)
+      if (isFocused && !isFullTimeDriver) {
+        checkWorkingHoursStatusRef.current?.(); // ✅ Use ref
+      }
+    }, 120000); // Every 2 minutes
     return () => {
       if (workingHoursCheckRef.current) {
         clearInterval(workingHoursCheckRef.current);
       }
     };
-  }, [checkWorkingHoursStatus, isFullTimeDriver, isFocused]);
+  }, [isFocused, isFullTimeDriver]); // ✅ Only depend on isFocused and isFullTimeDriver
 
   // ============================================================================
   // TOGGLE ONLINE STATUS (Enhanced to match web version)
@@ -1594,6 +1783,8 @@ export default function DashboardScreen({ navigation }) {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
+    pendingDashboardRefreshRef.current = false;
+    hasInitialRefreshRef.current = true;
     nearbySyncBackoffRef.current = {
       consecutiveFailures: 0,
       nextAllowedAt: 0,

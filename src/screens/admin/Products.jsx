@@ -85,8 +85,10 @@ const patchFoodAvailability = async ({ foodId, is_available }) => {
   });
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok)
+  if (!res.ok) {
     throw new Error(data?.message || "Failed to update availability");
+  }
+
   return data;
 };
 
@@ -115,6 +117,7 @@ const upsertFood = async ({ foodId, payload }) => {
   const url = foodId
     ? `${API_URL}/admin/foods/${foodId}`
     : `${API_URL}/admin/foods`;
+
   const method = foodId ? "PATCH" : "POST";
 
   const res = await fetch(url, {
@@ -134,12 +137,14 @@ const upsertFood = async ({ foodId, payload }) => {
 export default function Products() {
   const navigation = useNavigation();
   const queryClient = useQueryClient();
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingFood, setEditingFood] = useState(null);
   const [search, setSearch] = useState("");
   const [availabilityFilter, setAvailabilityFilter] = useState("all");
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
   const pageEnterStyle = usePageEnterAnimation();
 
   const availabilityLabel =
@@ -193,7 +198,7 @@ export default function Products() {
             deleteMutation.mutate(foodId);
           },
         },
-      ],
+      ]
     );
   };
 
@@ -204,11 +209,11 @@ export default function Products() {
 
   const toggleAvailability = async (food) => {
     const newValue = !food.is_available;
+
     queryClient.setQueryData(["admin", "products"], (prev = []) =>
-      prev.map((f) =>
-        f.id === food.id ? { ...f, is_available: newValue } : f,
-      ),
+      prev.map((f) => (f.id === food.id ? { ...f, is_available: newValue } : f))
     );
+
     toggleAvailabilityMutation.mutate({
       foodId: food.id,
       is_available: newValue,
@@ -226,15 +231,18 @@ export default function Products() {
 
   const filteredFoods = foods.filter((food) => {
     const safeSearch = search.toLowerCase();
+
     const matchesSearch =
       food.name.toLowerCase().includes(safeSearch) ||
       String(food.category || "")
         .toLowerCase()
         .includes(safeSearch);
+
     const matchesAvailability =
       availabilityFilter === "all" ||
       (availabilityFilter === "available" && food.is_available) ||
       (availabilityFilter === "unavailable" && !food.is_available);
+
     return matchesSearch && matchesAvailability;
   });
 
@@ -279,13 +287,9 @@ export default function Products() {
       activeOpacity={0.7}
     >
       <View style={styles.productCardContent}>
-        {/* Product Image */}
         <View style={styles.productImageContainer}>
           {food.image_url ? (
-            <Image
-              source={{ uri: food.image_url }}
-              style={styles.productImage}
-            />
+            <Image source={{ uri: food.image_url }} style={styles.productImage} />
           ) : (
             <View style={styles.noImagePlaceholder}>
               <Text style={styles.noImageText}>No img</Text>
@@ -293,7 +297,6 @@ export default function Products() {
           )}
         </View>
 
-        {/* Product Info */}
         <View style={styles.productInfo}>
           <View style={styles.productHeader}>
             <View style={styles.productNameContainer}>
@@ -325,6 +328,7 @@ export default function Products() {
               >
                 {food.is_available ? "Available" : "Unavailable"}
               </Text>
+
               <View
                 style={[
                   styles.customSwitch,
@@ -355,11 +359,10 @@ export default function Products() {
                 <Text style={styles.strikePrice}>Rs. {food.regular_price}</Text>
               ) : null}
             </View>
+
             {food.extra_price ? (
               <View style={styles.sizePriceRow}>
-                <Text style={styles.sizeLabel}>
-                  {food.extra_size || "Extra"}
-                </Text>
+                <Text style={styles.sizeLabel}>{food.extra_size || "Extra"}</Text>
                 <Text style={styles.activePrice}>
                   Rs. {food.extra_offer_price || food.extra_price}
                 </Text>
@@ -372,7 +375,6 @@ export default function Products() {
         </View>
       </View>
 
-      {/* Action Buttons */}
       <View style={styles.actionButtons}>
         <TouchableOpacity
           style={styles.editButton}
@@ -383,6 +385,7 @@ export default function Products() {
         >
           <Feather name="edit-2" size={15} color="#9CA3AF" />
         </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.deleteButton}
           onPress={(e) => {
@@ -399,13 +402,13 @@ export default function Products() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <Animated.View style={[styles.pageAnimationWrap, pageEnterStyle]}>
-        {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerTopRow}>
             <View style={styles.headerTitleBlock}>
               <Text style={styles.headerTitle}>Products</Text>
               <View style={styles.headerUnderline} />
             </View>
+
             <View style={styles.headerActions}>
               <View style={styles.filterDropdownWrap}>
                 <TouchableOpacity
@@ -416,6 +419,7 @@ export default function Products() {
                   <Text style={styles.filterPillText}>{availabilityLabel}</Text>
                   <Feather name="chevron-down" size={14} color="#64748b" />
                 </TouchableOpacity>
+
                 {showFilterMenu ? (
                   <View style={styles.filterMenu}>
                     {["all", "available", "unavailable"].map((value) => {
@@ -425,7 +429,9 @@ export default function Products() {
                           : value === "available"
                             ? "Available"
                             : "Unavailable";
+
                       const selected = availabilityFilter === value;
+
                       return (
                         <TouchableOpacity
                           key={value}
@@ -449,6 +455,7 @@ export default function Products() {
                   </View>
                 ) : null}
               </View>
+
               <TouchableOpacity
                 style={styles.iconBtn}
                 onPress={() => navigation.navigate("AdminNotifications")}
@@ -472,7 +479,6 @@ export default function Products() {
             />
           }
         >
-          {/* Search Bar */}
           <View style={styles.searchContainer}>
             <View style={styles.searchInputWrapper}>
               <Feather
@@ -481,6 +487,7 @@ export default function Products() {
                 color="#9ca3af"
                 style={styles.searchIcon}
               />
+
               <TextInput
                 style={styles.searchInput}
                 value={search}
@@ -488,6 +495,7 @@ export default function Products() {
                 placeholder="Search food items, categories..."
                 placeholderTextColor="#9ca3af"
               />
+
               {search.length > 0 && (
                 <TouchableOpacity onPress={() => setSearch("")}>
                   <Feather
@@ -513,7 +521,6 @@ export default function Products() {
             <Text style={styles.addProductCtaText}>Add Product</Text>
           </TouchableOpacity>
 
-          {/* Products List */}
           <View style={styles.productsContainer}>
             {loading ? (
               renderLoadingSkeleton()
@@ -528,7 +535,6 @@ export default function Products() {
         </ScrollView>
       </Animated.View>
 
-      {/* Add/Edit Product Modal */}
       <AddProductModal
         visible={showAddModal}
         food={editingFood}
@@ -546,7 +552,6 @@ export default function Products() {
   );
 }
 
-// Add/Edit Product Modal Component
 function AddProductModal({ visible, food, onClose, onSave }) {
   const [formData, setFormData] = useState({
     name: "",
@@ -611,12 +616,13 @@ function AddProductModal({ visible, food, onClose, onSave }) {
         extra_offer_price: food?.extra_offer_price?.toString() || "",
         is_available: food?.is_available ?? true,
       });
+
       setError(null);
     }
   }, [visible, food]);
 
   const handleInputChange = (name, value) => {
-    setFormData({ ...formData, [name]: value });
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleTimeToggle = (time) => {
@@ -630,45 +636,83 @@ function AddProductModal({ visible, food, onClose, onSave }) {
 
   const handleImagePick = async () => {
     try {
+      setError(null);
+
       const permissionResult =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-      if (!permissionResult.granted) {
+      if (
+        permissionResult.status !== "granted" &&
+        permissionResult.granted !== true
+      ) {
         Alert.alert(
           "Permission Required",
-          "Please allow access to your photo library.",
+          "Please allow access to your photo library."
         );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: [ImagePicker.MediaTypeOptions.Images],
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.8,
+        quality: 0.7,
         base64: true,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        setError(null);
+      if (result.canceled) {
+        return;
+      }
 
-        try {
-          const imageData = `data:image/jpeg;base64,${result.assets[0].base64}`;
-          await uploadImageMutation.mutateAsync(imageData);
-        } catch (err) {
-          console.error(err);
+      const selectedAsset = result.assets?.[0];
+
+      if (!selectedAsset) {
+        Alert.alert("Error", "No image selected. Please try again.");
+        return;
+      }
+
+      if (selectedAsset.type && selectedAsset.type !== "image") {
+        Alert.alert("Invalid File", "Please select an image file only.");
+        return;
+      }
+
+      if (!selectedAsset.base64) {
+        Alert.alert(
+          "Error",
+          "Could not read the selected image. Please choose another image."
+        );
+        return;
+      }
+
+      const uri = selectedAsset.uri || "";
+      const lowerUri = uri.toLowerCase();
+
+      let mimeType = selectedAsset.mimeType || "image/jpeg";
+
+      if (!selectedAsset.mimeType) {
+        if (lowerUri.endsWith(".png")) {
+          mimeType = "image/png";
+        } else if (lowerUri.endsWith(".webp")) {
+          mimeType = "image/webp";
+        } else {
+          mimeType = "image/jpeg";
         }
       }
+
+      const imageData = `data:${mimeType};base64,${selectedAsset.base64}`;
+
+      await uploadImageMutation.mutateAsync(imageData);
     } catch (err) {
-      Alert.alert("Error", "Error selecting image");
-      console.error(err);
+      console.error("Image picker error:", err);
+      Alert.alert(
+        "Error",
+        err?.message || "Error selecting image. Please try again."
+      );
     }
   };
 
   const handleSubmit = async () => {
     setError(null);
 
-    // Validation
     if (!formData.name.trim()) {
       setError("Product name is required");
       Alert.alert("Validation Error", "Product name is required");
@@ -709,9 +753,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
           : null,
         extra_size: formData.extra_size.trim() || null,
         extra_portion: formData.extra_portion.trim() || null,
-        extra_price: formData.extra_price
-          ? parseFloat(formData.extra_price)
-          : null,
+        extra_price: formData.extra_price ? parseFloat(formData.extra_price) : null,
         extra_offer_price: formData.extra_offer_price
           ? parseFloat(formData.extra_offer_price)
           : null,
@@ -719,7 +761,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
 
       await saveFoodMutation.mutateAsync({ foodId: food?.id, payload });
     } catch (err) {
-      console.error(err);
+      console.error("Save product error:", err);
     }
   };
 
@@ -734,7 +776,6 @@ function AddProductModal({ visible, food, onClose, onSave }) {
       onRequestClose={onClose}
     >
       <SafeAreaView style={modalStyles.container}>
-        {/* Modal Header */}
         <View style={modalStyles.header}>
           <View style={modalStyles.headerLeft}>
             <TouchableOpacity
@@ -744,10 +785,12 @@ function AddProductModal({ visible, food, onClose, onSave }) {
             >
               <Feather name="arrow-left" size={18} color="#374151" />
             </TouchableOpacity>
+
             <Text style={modalStyles.headerTitle}>
               {food ? "Edit Product" : "Add New Product"}
             </Text>
           </View>
+
           <TouchableOpacity
             style={[
               modalStyles.headerSaveButton,
@@ -775,9 +818,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
             contentContainerStyle={modalStyles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {/* Product Image */}
             <View style={modalStyles.section}>
               <Text style={modalStyles.sectionLabel}>Product Image</Text>
+
               <View style={modalStyles.imageSection}>
                 {formData.image_url ? (
                   <View style={modalStyles.previewWrap}>
@@ -785,6 +828,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                       source={{ uri: formData.image_url }}
                       style={modalStyles.previewImage}
                     />
+
                     <TouchableOpacity
                       style={modalStyles.removeImageButton}
                       onPress={() => handleInputChange("image_url", "")}
@@ -797,14 +841,15 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                     <View style={modalStyles.uploadIconCircle}>
                       <Feather name="upload-cloud" size={22} color="#ffffff" />
                     </View>
-                    <Text style={modalStyles.uploadTitle}>
-                      Upload Food Image
-                    </Text>
+
+                    <Text style={modalStyles.uploadTitle}>Upload Food Image</Text>
+
                     <Text style={modalStyles.uploadSubtitle}>
-                      JPG, PNG . Max size of 2MB
+                      JPG, PNG. Max size of 2MB
                     </Text>
                   </>
                 )}
+
                 <TouchableOpacity
                   style={[
                     modalStyles.uploadButton,
@@ -816,18 +861,16 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                   {uploading ? (
                     <ActivityIndicator size="small" color="#ffffff" />
                   ) : (
-                    <Text style={modalStyles.uploadButtonText}>
-                      Browse Files
-                    </Text>
+                    <Text style={modalStyles.uploadButtonText}>Browse Files</Text>
                   )}
                 </TouchableOpacity>
               </View>
+
               {uploading ? (
                 <Text style={modalStyles.helperText}>Uploading...</Text>
               ) : null}
             </View>
 
-            {/* Product Name */}
             <View style={modalStyles.section}>
               <Text style={modalStyles.sectionLabel}>Product Name *</Text>
               <TextInput
@@ -841,9 +884,11 @@ function AddProductModal({ visible, food, onClose, onSave }) {
 
             <View style={modalStyles.section}>
               <Text style={modalStyles.sectionLabel}>Category *</Text>
+
               <View style={modalStyles.categoryOptionsRow}>
                 {FOOD_CATEGORIES.map((category) => {
                   const selected = formData.category === category;
+
                   return (
                     <TouchableOpacity
                       key={category}
@@ -867,16 +912,13 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               </View>
             </View>
 
-            {/* Description */}
             <View style={modalStyles.section}>
               <Text style={modalStyles.sectionLabel}>Description</Text>
               <TextInput
                 style={[modalStyles.input, modalStyles.textArea]}
                 value={formData.description}
-                onChangeText={(value) =>
-                  handleInputChange("description", value)
-                }
-                placeholder="Describe your product (e.g., ingredients, specialties)..."
+                onChangeText={(value) => handleInputChange("description", value)}
+                placeholder="Describe your product"
                 placeholderTextColor="#9ca3af"
                 multiline
                 numberOfLines={3}
@@ -884,9 +926,9 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               />
             </View>
 
-            {/* Available Time */}
             <View style={modalStyles.section}>
               <Text style={modalStyles.sectionLabel}>Available Time *</Text>
+
               <View style={modalStyles.timeOptionsRow}>
                 {availableTimes.map((time) => (
                   <TouchableOpacity
@@ -909,6 +951,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                         <Feather name="check" size={13} color="#ffffff" />
                       )}
                     </View>
+
                     <Text
                       style={[
                         modalStyles.timeOptionText,
@@ -921,6 +964,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                   </TouchableOpacity>
                 ))}
               </View>
+
               {formData.available_time.length === 0 && (
                 <Text style={modalStyles.errorText}>
                   Select at least one available time
@@ -928,16 +972,14 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               )}
             </View>
 
-            {/* Availability Toggle */}
             <View style={modalStyles.toggleSection}>
               <View>
-                <Text style={modalStyles.toggleLabel}>
-                  Product availability
-                </Text>
+                <Text style={modalStyles.toggleLabel}>Product availability</Text>
                 <Text style={modalStyles.toggleHelper}>
                   Toggle off to hide from menu
                 </Text>
               </View>
+
               <TouchableOpacity
                 style={[
                   modalStyles.customToggle,
@@ -963,11 +1005,8 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               </TouchableOpacity>
             </View>
 
-            {/* Regular Size Section */}
             <View style={modalStyles.sectionDivider}>
-              <Text style={modalStyles.sectionTitle}>
-                Regular Size (Required)
-              </Text>
+              <Text style={modalStyles.sectionTitle}>Regular Size (Required)</Text>
             </View>
 
             <View style={modalStyles.gridRow}>
@@ -983,6 +1022,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                   placeholderTextColor="#9ca3af"
                 />
               </View>
+
               <View style={modalStyles.gridItem}>
                 <Text style={modalStyles.inputLabel}>Portion</Text>
                 <TextInput
@@ -1016,23 +1056,19 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <TextInput
                 style={modalStyles.input}
                 value={formData.offer_price}
-                onChangeText={(value) =>
-                  handleInputChange("offer_price", value)
-                }
+                onChangeText={(value) => handleInputChange("offer_price", value)}
                 placeholder="Leave empty if no offer"
                 placeholderTextColor="#9ca3af"
                 keyboardType="numeric"
               />
+
               <Text style={modalStyles.helperText}>
                 Optional. Leave empty if there&apos;s no special offer price.
               </Text>
             </View>
 
-            {/* Extra Size Section */}
             <View style={modalStyles.sectionDivider}>
-              <Text style={modalStyles.sectionTitle}>
-                Extra Size (Optional)
-              </Text>
+              <Text style={modalStyles.sectionTitle}>Extra Size (Optional)</Text>
             </View>
 
             <View style={modalStyles.gridRow}>
@@ -1041,13 +1077,12 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                 <TextInput
                   style={modalStyles.input}
                   value={formData.extra_size}
-                  onChangeText={(value) =>
-                    handleInputChange("extra_size", value)
-                  }
+                  onChangeText={(value) => handleInputChange("extra_size", value)}
                   placeholder="e.g., Large"
                   placeholderTextColor="#9ca3af"
                 />
               </View>
+
               <View style={modalStyles.gridItem}>
                 <Text style={modalStyles.inputLabel}>Portion</Text>
                 <TextInput
@@ -1067,9 +1102,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <TextInput
                 style={modalStyles.input}
                 value={formData.extra_price}
-                onChangeText={(value) =>
-                  handleInputChange("extra_price", value)
-                }
+                onChangeText={(value) => handleInputChange("extra_price", value)}
                 placeholder="0.00"
                 placeholderTextColor="#9ca3af"
                 keyboardType="numeric"
@@ -1090,12 +1123,10 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               />
             </View>
 
-            {/* Spacer for bottom buttons */}
             <View style={{ height: 100 }} />
           </ScrollView>
         </KeyboardAvoidingView>
 
-        {/* Action Buttons */}
         <View style={modalStyles.footer}>
           <TouchableOpacity
             style={modalStyles.cancelButton}
@@ -1104,6 +1135,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
           >
             <Text style={modalStyles.cancelButtonText}>Discard</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             style={[
               modalStyles.saveButton,
@@ -1124,7 +1156,6 @@ function AddProductModal({ visible, food, onClose, onSave }) {
   );
 }
 
-// Main Screen Styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1472,7 +1503,6 @@ const styles = StyleSheet.create({
   },
 });
 
-// Modal Styles
 const modalStyles = StyleSheet.create({
   container: {
     flex: 1,

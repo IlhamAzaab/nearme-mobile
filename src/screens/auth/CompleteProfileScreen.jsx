@@ -31,7 +31,7 @@ import Svg, { Path } from "react-native-svg";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
 const WEB_CARD_MAX_WIDTH = 560;
-const TERMS_AND_CONDITIONS_URL = "https://tranquil-medovik-7b2e45.netlify.app/";
+const TERMS_AND_CONDITIONS_URL = "https://cosmic-pika-2ec173.netlify.app";
 
 const UserIcon = ({ size = 20, color = "#9CA3AF" }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -81,15 +81,25 @@ const EyeOffIcon = ({ size = 22, color = "#9CA3AF" }) => (
 export default function CompleteProfileScreen({ navigation, route }) {
   const { refreshAuthState, markProfileCompleted, preparePostLoginTransition } =
     useAuth();
+
   const insets = useSafeAreaInsets();
   const { userId, accessToken, prefillPhone } = route.params || {};
+
+  /*
+    Important:
+    UI label = Name
+    Internal field/API field = username
+
+    Backend already expects username. So don't send "name" to backend.
+  */
   const [formData, setFormData] = useState({
-    name: "",
+    username: "",
     email: "",
     address: "",
     city: "",
     password: "",
   });
+
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -105,13 +115,14 @@ export default function CompleteProfileScreen({ navigation, route }) {
           userId,
           accessToken,
           prefillPhone,
-        }),
-      ),
+        })
+      )
     ).catch(() => {});
   }, [accessToken, prefillPhone, userId]);
 
   const triggerShake = () => {
     shakeX.setValue(0);
+
     Animated.sequence([
       Animated.timing(shakeX, {
         toValue: -10,
@@ -142,33 +153,38 @@ export default function CompleteProfileScreen({ navigation, route }) {
   };
 
   const handleChange = (key, value) => {
-    setFormData((p) => ({ ...p, [key]: value }));
+    setFormData((previous) => ({ ...previous, [key]: value }));
     setError("");
   };
 
   const handleSubmit = async () => {
     setError("");
 
+    const trimmedUsername = formData.username.trim();
+    const normalizedEmail = formData.email.trim().toLowerCase();
+    const trimmedAddress = formData.address.trim();
+    const trimmedCity = formData.city.trim();
+    const trimmedPassword = formData.password.trim();
+
     if (
-      !formData.name.trim() ||
-      !formData.email.trim() ||
-      !formData.address.trim() ||
-      !formData.city.trim() ||
-      !formData.password.trim()
+      !trimmedUsername ||
+      !normalizedEmail ||
+      !trimmedAddress ||
+      !trimmedCity ||
+      !trimmedPassword
     ) {
       setError("Name, email, address, city and password are required");
       triggerShake();
       return;
     }
 
-    const normalizedEmail = formData.email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       setError("Enter a valid email address");
       triggerShake();
       return;
     }
 
-    if (formData.password.trim().length < 6) {
+    if (trimmedPassword.length < 6) {
       setError("Password must be at least 6 characters");
       triggerShake();
       return;
@@ -182,6 +198,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
 
     try {
       const effectiveAccessToken = accessToken || (await getAccessToken());
+
       if (!effectiveAccessToken) {
         setError("Session expired. Please login again.");
         triggerShake();
@@ -197,18 +214,19 @@ export default function CompleteProfileScreen({ navigation, route }) {
           Authorization: `Bearer ${effectiveAccessToken}`,
         },
         body: JSON.stringify({
-          name: formData.name.trim(),
+          name: trimmedUsername,
           email: normalizedEmail,
-          address: formData.address.trim(),
-          city: formData.city.trim(),
-          password: formData.password.trim(),
+          address: trimmedAddress,
+          city: trimmedCity,
+          password: trimmedPassword,
         }),
       });
 
       const completeData = await completeRes.json().catch(() => ({}));
 
       if (!completeRes.ok) {
-        setError(completeData?.message || "Failed to complete profile");
+        console.log("Complete profile failed:", completeData);
+        setError(completeData?.message || "Failed to finalise your profile");
         triggerShake();
         return;
       }
@@ -217,20 +235,26 @@ export default function CompleteProfileScreen({ navigation, route }) {
         completeData?.data?.token ||
         completeData?.token ||
         effectiveAccessToken;
+
       const resolvedUserId =
-        userId || completeData?.data?.id || completeData?.id || null;
+        userId ||
+        completeData?.data?.id ||
+        completeData?.data?.userId ||
+        completeData?.id ||
+        completeData?.userId ||
+        null;
 
       await persistAuthSession(
         {
           token: returnedToken,
           role: "customer",
           userId: resolvedUserId,
-          userName: formData.name.trim(),
+          userName: trimmedUsername,
         },
         {
           userEmail: normalizedEmail,
           profileCompleted: true,
-        },
+        }
       );
 
       await markProfileCompleted();
@@ -276,9 +300,11 @@ export default function CompleteProfileScreen({ navigation, route }) {
             >
               <View style={styles.bgCircle1} />
               <View style={styles.bgCircle2} />
+
               <View style={styles.logoWrap}>
                 <MeezoLogo size={IS_WEB ? 320 : 250} />
               </View>
+
               <Text style={styles.appSubtitle}>Complete your profile</Text>
             </LinearGradient>
 
@@ -290,7 +316,11 @@ export default function CompleteProfileScreen({ navigation, route }) {
                 style={styles.waveSvg}
               >
                 <Path
-                  d={`M0,0 L0,20 Q${SCREEN_WIDTH * 0.25},46 ${SCREEN_WIDTH * 0.5},20 Q${SCREEN_WIDTH * 0.75},-2 ${SCREEN_WIDTH},20 L${SCREEN_WIDTH},0 Z`}
+                  d={`M0,0 L0,20 Q${SCREEN_WIDTH * 0.25},46 ${
+                    SCREEN_WIDTH * 0.5
+                  },20 Q${
+                    SCREEN_WIDTH * 0.75
+                  },-2 ${SCREEN_WIDTH},20 L${SCREEN_WIDTH},0 Z`}
                   fill="#06C168"
                 />
               </Svg>
@@ -317,8 +347,8 @@ export default function CompleteProfileScreen({ navigation, route }) {
 
                 <FloatingLabelInput
                   label="Name"
-                  value={formData.name}
-                  onChangeText={(v) => handleChange("name", v)}
+                  value={formData.username}
+                  onChangeText={(value) => handleChange("username", value)}
                   inactivePlaceholder="Name"
                   activePlaceholder="Your name"
                   autoCapitalize="words"
@@ -326,44 +356,9 @@ export default function CompleteProfileScreen({ navigation, route }) {
                 />
 
                 <FloatingLabelInput
-                  label="Email"
-                  value={formData.email}
-                  onChangeText={(v) => handleChange("email", v)}
-                  inactivePlaceholder="Email"
-                  activePlaceholder="Eg: user@gmail.com"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  leftIcon={<EmailIcon size={20} color="#9CA3AF" />}
-                />
-
-                <FloatingLabelInput
-                  label="Password"
-                  value={formData.password}
-                  onChangeText={(v) => handleChange("password", v)}
-                  inactivePlaceholder="Password"
-                  activePlaceholder="Minimum 6 characters"
-                  autoCapitalize="none"
-                  secureTextEntry={!showPassword}
-                  leftIcon={<LockIcon size={20} color="#9CA3AF" />}
-                  rightAccessory={
-                    <Pressable
-                      onPress={() => setShowPassword((v) => !v)}
-                      style={styles.passwordEyeBtn}
-                      hitSlop={10}
-                    >
-                      {showPassword ? (
-                        <EyeOffIcon size={22} color="#9CA3AF" />
-                      ) : (
-                        <EyeIcon size={22} color="#9CA3AF" />
-                      )}
-                    </Pressable>
-                  }
-                />
-
-                <FloatingLabelInput
                   label="Address"
                   value={formData.address}
-                  onChangeText={(v) => handleChange("address", v)}
+                  onChangeText={(value) => handleChange("address", value)}
                   inactivePlaceholder="Address"
                   activePlaceholder="Eg: 123 Main Street"
                   autoCapitalize="words"
@@ -379,7 +374,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
                 <FloatingLabelInput
                   label="Area or City"
                   value={formData.city}
-                  onChangeText={(v) => handleChange("city", v)}
+                  onChangeText={(value) => handleChange("city", value)}
                   inactivePlaceholder="Area or City"
                   activePlaceholder="Eg: Periye Kinniya"
                   autoCapitalize="words"
@@ -392,6 +387,40 @@ export default function CompleteProfileScreen({ navigation, route }) {
                   }
                 />
 
+                <FloatingLabelInput
+                  label="Email"
+                  value={formData.email}
+                  onChangeText={(value) => handleChange("email", value)}
+                  inactivePlaceholder="Email"
+                  activePlaceholder="Eg: user@gmail.com"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  leftIcon={<EmailIcon size={20} color="#9CA3AF" />}
+                />
+
+                <FloatingLabelInput
+                  label="Password"
+                  value={formData.password}
+                  onChangeText={(value) => handleChange("password", value)}
+                  inactivePlaceholder="Password"
+                  activePlaceholder="Minimum 6 characters"
+                  autoCapitalize="none"
+                  secureTextEntry={!showPassword}
+                  leftIcon={<LockIcon size={20} color="#9CA3AF" />}
+                  rightAccessory={
+                    <Pressable
+                      onPress={() => setShowPassword((value) => !value)}
+                      style={styles.passwordEyeBtn}
+                      hitSlop={10}
+                    >
+                      {showPassword ? (
+                        <EyeOffIcon size={22} color="#9CA3AF" />
+                      ) : (
+                        <EyeIcon size={22} color="#9CA3AF" />
+                      )}
+                    </Pressable>
+                  }
+                />
 
                 <View style={styles.termsRow}>
                   <Pressable
@@ -408,6 +437,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
                         <Ionicons name="checkmark" size={16} color="#FFFFFF" />
                       ) : null}
                     </View>
+
                     <Text style={styles.termsText}>I accept</Text>
                   </Pressable>
 
@@ -457,7 +487,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
-  scrollContent: { flexGrow: 1 },
+  scrollContent: {
+    flexGrow: 1,
+  },
   scrollContentWeb: {
     justifyContent: "center",
     paddingVertical: 24,
@@ -522,7 +554,9 @@ const styles = StyleSheet.create({
     marginTop: -2,
     backgroundColor: "#FFFFFF",
   },
-  waveSvg: { display: "flex" },
+  waveSvg: {
+    display: "flex",
+  },
   whiteSection: {
     flex: 1,
     backgroundColor: "#FFFFFF",
@@ -533,7 +567,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
     paddingBottom: 30,
   },
-  formWrap: { paddingTop: 8 },
+  formWrap: {
+    paddingTop: 8,
+  },
   formWrapWeb: {
     width: "100%",
     maxWidth: 440,
@@ -563,7 +599,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginBottom: 12,
   },
-  errorText: { color: "#DC2626", fontWeight: "700", fontSize: 13 },
+  errorText: {
+    color: "#DC2626",
+    fontWeight: "700",
+    fontSize: 13,
+  },
   termsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -628,5 +668,8 @@ const styles = StyleSheet.create({
     fontSize: 17,
     letterSpacing: 0.5,
   },
-  pressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
+  pressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.99 }],
+  },
 });

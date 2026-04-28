@@ -255,7 +255,7 @@ export default function ProfileScreen({ navigation }) {
             label="Terms & Conditions"
             onPress={() =>
               navigation.navigate("WebView", {
-                url: "https://tranquil-medovik-7b2e45.netlify.app/",
+                url: "https://cosmic-pika-2ec173.netlify.app",
                 title: "Terms & Conditions",
               })
             }
