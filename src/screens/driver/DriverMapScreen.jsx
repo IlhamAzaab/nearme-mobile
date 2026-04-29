@@ -859,22 +859,21 @@ export default function DriverMapScreen({ route, navigation }) {
         (delivery) => normalizeDeliveryId(delivery?.delivery_id) === targetId,
       );
 
+      const postPickupStatus =
+        promotedTargetId === targetId
+          ? promotedDelivery?.status || "on_the_way"
+          : "on_the_way";
+
       if (existingIndex >= 0) {
         nextDeliveries[existingIndex] = {
           ...nextDeliveries[existingIndex],
-          status:
-            promotedTargetId === targetId
-              ? promotedDelivery?.status || "on_the_way"
-              : "picked_up",
+          status: postPickupStatus,
         };
       } else {
         nextDeliveries = [
           {
             ...target,
-            status:
-              promotedTargetId === targetId
-                ? promotedDelivery?.status || "on_the_way"
-                : "picked_up",
+            status: postPickupStatus,
           },
           ...nextDeliveries,
         ];
@@ -1147,6 +1146,50 @@ export default function DriverMapScreen({ route, navigation }) {
   // ACTIONS (Correct endpoints: /driver/deliveries/:id/status)
   // ============================================================================
 
+  const patchDeliveryStatus = async (targetId, status) => {
+    const token = await getAccessToken();
+    if (!token) {
+      throw new Error("Authentication session is unavailable");
+    }
+
+    const res = await fetch(
+      API_BASE_URL + "/driver/deliveries/" + targetId + "/status",
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          status,
+          latitude: driverLocation ? driverLocation.latitude : null,
+          longitude: driverLocation ? driverLocation.longitude : null,
+        }),
+      },
+    );
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.message || "Failed to update delivery status");
+    }
+
+    return data;
+  };
+
+  const refreshMapAfterStatusAction = async () => {
+    const refreshLocation =
+      driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
+    await fetchPickupsAndDeliveries(refreshLocation, {
+      force: true,
+      immediate: true,
+    });
+  };
+
+  const finishStatusAction = () => {
+    setUpdating(false);
+    statusActionInProgressRef.current = false;
+  };
+
   const handlePickedUp = async () => {
     if (!currentTarget || updating || isMapRefreshing) return;
 
@@ -1157,69 +1200,51 @@ export default function DriverMapScreen({ route, navigation }) {
     setUpdating(true);
     statusActionInProgressRef.current = true;
     overlayCallbackRef.current = null;
-    applyOptimisticWorkflow({
-      action: "picked_up",
-      target: actionTarget,
-    });
-    pushStatusFocusSignal("picked_up", targetId).catch(() => {});
-
-    // Show short transition animation and continue to next stop.
     setOverlayActionType("pickup");
     setOverlayErrorMsg("");
     setOverlayStatus("processing");
-    overlayCallbackRef.current = () => {
-      const refreshLocation =
-        driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-      fetchPickupsAndDeliveries(refreshLocation, {
-        force: true,
-        immediate: true,
-      });
-      setUpdating(false);
-      statusActionInProgressRef.current = false;
-    };
     setOverlayVisible(true);
 
     try {
-      let token = await getAccessToken();
-      if (!token) {
-        throw new Error("Authentication session is unavailable");
+      // IMPORTANT:
+      // Mobile should send ONLY picked_up. The backend already auto-promotes
+      // the next picked_up delivery to on_the_way when no accepted pickups remain.
+      // Do not send a second manual on_the_way PATCH from the app, because it can
+      // race with the backend auto-promotion and cause Server error / stale UI.
+      const data = await patchDeliveryStatus(targetId, "picked_up");
+      
+      // DEFENSIVE CHECK: Verify backend actually updated the database
+      if (!data?.delivery || !["picked_up", "on_the_way"].includes(data.delivery.status)) {
+        throw new Error(
+          `Backend validation failed: delivery status is ${data?.delivery?.status || "unknown"}, expected picked_up or on_the_way. Database may not have been updated.`
+        );
       }
-      let res = await fetch(
-        API_BASE_URL + "/driver/deliveries/" + targetId + "/status",
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: "Bearer " + token,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            status: "picked_up",
-            latitude: driverLocation ? driverLocation.latitude : null,
-            longitude: driverLocation ? driverLocation.longitude : null,
-          }),
-        },
-      );
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const promotedDelivery = data?.promotedDelivery || null;
+      
+      const promotedDelivery = data?.promotedDelivery || null;
 
-        if (promotedDelivery?.id) {
-          await applyOptimisticWorkflow({
-            action: "picked_up",
-            target: actionTarget,
-            promotedDelivery,
-          });
-        }
-        return;
-      } else {
-        let errData = await res.json().catch(function () {
-          return {};
-        });
-        throw new Error(errData.message || "Failed to update status");
-      }
+      await applyOptimisticWorkflow({
+        action: "picked_up",
+        target: actionTarget,
+        promotedDelivery,
+      });
+      pushStatusFocusSignal(
+        promotedDelivery?.status || "picked_up",
+        promotedDelivery?.id || targetId,
+      ).catch(() => {});
+
+      setOverlayStatus("success");
+      overlayCallbackRef.current = async () => {
+        await refreshMapAfterStatusAction();
+        finishStatusAction();
+      };
     } catch (e) {
-      // Do not block UI flow with server error overlays.
       console.warn("Pickup status update failed", e?.message || e);
+      setOverlayErrorMsg(e?.message || "Pickup status update failed");
+      setOverlayStatus("error");
+      overlayCallbackRef.current = async () => {
+        await refreshMapAfterStatusAction();
+        finishStatusAction();
+      };
     }
   };
 
@@ -1233,83 +1258,58 @@ export default function DriverMapScreen({ route, navigation }) {
     setUpdating(true);
     statusActionInProgressRef.current = true;
     overlayCallbackRef.current = null;
-    applyOptimisticWorkflow({
-      action: "delivered",
-      target: actionTarget,
-    });
-    pushStatusFocusSignal("delivered", targetId).catch(() => {});
-    DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
-      deliveryId: targetId,
-      action: "delivered",
-      source: "driver_map",
-      location: driverLocation
-        ? {
-            latitude: driverLocation.latitude,
-            longitude: driverLocation.longitude,
-          }
-        : null,
-      triggeredAt: Date.now(),
-    });
-
-    // Show short transition animation and continue to next stop.
     setOverlayActionType("deliver");
     setOverlayErrorMsg("");
     setOverlayStatus("processing");
-    overlayCallbackRef.current = () => {
-      const refreshLocation =
-        driverLocation || lastFetchLocationRef.current || DEFAULT_LOCATION;
-      fetchPickupsAndDeliveries(refreshLocation, {
-        force: true,
-        immediate: true,
-      });
-      setUpdating(false);
-      statusActionInProgressRef.current = false;
-    };
     setOverlayVisible(true);
 
     try {
-      let token = await getAccessToken();
-      if (!token) {
-        throw new Error("Authentication session is unavailable");
+      const data = await patchDeliveryStatus(targetId, "delivered");
+      
+      // DEFENSIVE CHECK: Verify backend actually updated the database
+      if (!data?.delivery || data.delivery.status !== "delivered") {
+        throw new Error(
+          `Backend validation failed: delivery status is ${data?.delivery?.status || "unknown"}, expected delivered. Database may not have been updated.`
+        );
       }
-      let statusUrl =
-        API_BASE_URL + "/driver/deliveries/" + targetId + "/status";
-      let headers = {
-        Authorization: "Bearer " + token,
-        "Content-Type": "application/json",
-      };
-      let locBody = {
-        latitude: driverLocation ? driverLocation.latitude : null,
-        longitude: driverLocation ? driverLocation.longitude : null,
-      };
+      
+      const promotedDelivery = data?.promotedDelivery || null;
 
-      let finalRes = await fetch(statusUrl, {
-        method: "PATCH",
-        headers: headers,
-        body: JSON.stringify(Object.assign({ status: "delivered" }, locBody)),
+      await applyOptimisticWorkflow({
+        action: "delivered",
+        target: actionTarget,
+        promotedDelivery,
+      });
+      pushStatusFocusSignal(
+        promotedDelivery?.status || "delivered",
+        promotedDelivery?.id || targetId,
+      ).catch(() => {});
+      DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+        deliveryId: targetId,
+        action: "delivered",
+        source: "driver_map",
+        location: driverLocation
+          ? {
+              latitude: driverLocation.latitude,
+              longitude: driverLocation.longitude,
+            }
+          : null,
+        triggeredAt: Date.now(),
       });
 
-      if (finalRes.ok) {
-        const data = await finalRes.json().catch(() => ({}));
-        const promotedDelivery = data?.promotedDelivery || null;
-
-        if (promotedDelivery?.id) {
-          await applyOptimisticWorkflow({
-            action: "delivered",
-            target: actionTarget,
-            promotedDelivery,
-          });
-        }
-        return;
-      } else {
-        let errData = await finalRes.json().catch(function () {
-          return {};
-        });
-        throw new Error(errData.message || "Failed to mark as delivered");
-      }
+      setOverlayStatus("success");
+      overlayCallbackRef.current = async () => {
+        await refreshMapAfterStatusAction();
+        finishStatusAction();
+      };
     } catch (e) {
-      // Do not block UI flow with server error overlays.
       console.warn("Delivery status update failed", e?.message || e);
+      setOverlayErrorMsg(e?.message || "Delivery status update failed");
+      setOverlayStatus("error");
+      overlayCallbackRef.current = async () => {
+        await refreshMapAfterStatusAction();
+        finishStatusAction();
+      };
     }
   };
 
@@ -1478,8 +1478,9 @@ export default function DriverMapScreen({ route, navigation }) {
 
   useEffect(() => {
     if (loading || currentTarget) return;
+    if (overlayVisible || updating || statusActionInProgressRef.current) return;
     navigation.replace("DriverTabs", { screen: "Dashboard" });
-  }, [loading, currentTarget, navigation]);
+  }, [loading, currentTarget, navigation, overlayVisible, updating]);
 
   if (loading) {
     return <DriverMapSheetLoadingSkeleton />;
@@ -1524,8 +1525,9 @@ export default function DriverMapScreen({ route, navigation }) {
         status={overlayStatus}
         actionType={overlayActionType}
         minimal
-        autoCloseMs={2000}
+        autoCloseMs={overlayStatus === "processing" ? 60000 : 1500}
         onComplete={() => {
+          if (overlayStatus === "processing") return;
           setOverlayVisible(false);
           setOverlayStatus("processing");
           setOverlayErrorMsg("");

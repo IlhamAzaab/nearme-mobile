@@ -40,9 +40,6 @@ import {
 } from "react-native-safe-area-context";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
-const BIKE_SPEED_KMPH = 24;
-const NIGHT_START_HOUR = 20;
-const NIGHT_END_HOUR = 6;
 const CHECKOUT_ADDRESS_PIN_HTML =
   "<div style='width:44px;height:44px;display:flex;align-items:center;justify-content:center;'>" +
   "<svg width='44' height='44' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' aria-label='delivery pin'>" +
@@ -229,11 +226,16 @@ export default function CheckoutScreen({ route, navigation }) {
     const firstKmRate = Math.max(0, Number(promo.first_km_rate || 0));
     const beyondRate = Math.max(0, Number(promo.beyond_km_rate || 0));
 
-    if (distance <= maxKm) {
-      return distance * firstKmRate;
+    const distanceUnits = Math.max(1, Math.ceil(distance));
+    const maxUnits = Math.max(0, Math.ceil(maxKm));
+
+    if (maxUnits === 0 || distanceUnits <= maxUnits) {
+      return Math.round(distanceUnits * firstKmRate);
     }
 
-    return maxKm * firstKmRate + (distance - maxKm) * beyondRate;
+    const promoTotal =
+      maxUnits * firstKmRate + (distanceUnits - maxUnits) * beyondRate;
+    return Math.round(promoTotal);
   };
 
   const calculateDeliveryFee = (distanceKm) => {
@@ -474,45 +476,7 @@ export default function CheckoutScreen({ route, navigation }) {
     cart?.restaurant?.longitude,
   ]);
 
-  useEffect(() => {
-    const hasCoords = hasValidCoordinates(
-      position?.latitude,
-      position?.longitude,
-    );
-    const hasLocationDetails =
-      hasExplicitDeliveryLocation &&
-      hasCoords &&
-      Boolean(String(address || "").trim()) &&
-      Boolean(String(city || "").trim());
 
-    if (!cartId || !hasLocationDetails) {
-      return;
-    }
-
-    const nextSignature = getQuoteInputSignature();
-    if (
-      orderQuote?.quote_token &&
-      lastSuccessfulQuoteInputRef.current === nextSignature
-    ) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      fetchOrderQuote({ silent: true }).catch(() => {});
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [
-    address,
-    cartId,
-    city,
-    fetchOrderQuote,
-    getQuoteInputSignature,
-    hasExplicitDeliveryLocation,
-    orderQuote?.quote_token,
-    position?.latitude,
-    position?.longitude,
-  ]);
 
   const fetchCheckoutData = async () => {
     try {
@@ -711,6 +675,46 @@ export default function CheckoutScreen({ route, navigation }) {
   // Quote-token flow intentionally disabled: checkout uses stable local preview
   // and server performs final authoritative recalculation during /orders/place.
 
+  useEffect(() => {
+    const hasCoords = hasValidCoordinates(
+      position?.latitude,
+      position?.longitude,
+    );
+    const hasLocationDetails =
+      hasExplicitDeliveryLocation &&
+      hasCoords &&
+      Boolean(String(address || "").trim()) &&
+      Boolean(String(city || "").trim());
+
+    if (!cartId || !hasLocationDetails) {
+      return;
+    }
+
+    const nextSignature = getQuoteInputSignature();
+    if (
+      orderQuote?.quote_token &&
+      lastSuccessfulQuoteInputRef.current === nextSignature
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      fetchOrderQuote({ silent: true }).catch(() => {});
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [
+    address,
+    cartId,
+    city,
+    fetchOrderQuote,
+    getQuoteInputSignature,
+    hasExplicitDeliveryLocation,
+    orderQuote?.quote_token,
+    position?.latitude,
+    position?.longitude,
+  ]);
+
   const saveAddressAndLocation = async ({
     newAddress,
     newCity,
@@ -805,11 +809,6 @@ export default function CheckoutScreen({ route, navigation }) {
           Number.isFinite(effectiveDistanceKm) && effectiveDistanceKm > 0
             ? Number(Number(effectiveDistanceKm).toFixed(2))
             : undefined,
-        estimated_duration_min:
-          Number.isFinite(quoteEstimatedDurationMin) &&
-          quoteEstimatedDurationMin > 0
-            ? quoteEstimatedDurationMin
-            : estimatedDeliveryWindow?.midpoint || undefined,
       };
 
       if (activeQuote?.quote_token) {
@@ -940,7 +939,6 @@ export default function CheckoutScreen({ route, navigation }) {
   const quoteDeliveryFee = Number(orderQuote?.pricing?.delivery_fee);
   const quoteTotalAmount = Number(orderQuote?.pricing?.total_amount);
   const quoteDistanceKm = Number(orderQuote?.distance_km);
-  const quoteEstimatedDurationMin = Number(orderQuote?.estimated_duration_min);
   const quoteNormalDeliveryFee = Number(
     orderQuote?.launch_promo?.normal_delivery_fee,
   );
@@ -1005,42 +1003,6 @@ export default function CheckoutScreen({ route, navigation }) {
     standardDeliveryFee,
   ]);
 
-  const estimatedDeliveryWindow = useMemo(() => {
-    if (
-      Number.isFinite(quoteEstimatedDurationMin) &&
-      quoteEstimatedDurationMin > 0
-    ) {
-      const min = Math.max(1, Math.floor(quoteEstimatedDurationMin));
-      const max = Math.max(min, Math.ceil(quoteEstimatedDurationMin + 5));
-
-      return {
-        min,
-        max,
-        midpoint: Math.round((min + max) / 2),
-      };
-    }
-
-    if (!routeInfo?.distance) return null;
-
-    const distanceKm = Number(routeInfo.distance);
-    if (!Number.isFinite(distanceKm) || distanceKm <= 0) return null;
-
-    const bikeMinutes = (distanceKm / BIKE_SPEED_KMPH) * 60;
-    const hour = new Date().getHours();
-    const isNight = hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR;
-
-    const prepMin = isNight ? 20 : 15;
-    const prepMax = isNight ? 25 : 20;
-
-    const min = Math.max(1, Math.ceil(bikeMinutes + prepMin));
-    const max = Math.max(min, Math.ceil(bikeMinutes + prepMax));
-
-    return {
-      min,
-      max,
-      midpoint: Math.round((min + max) / 2),
-    };
-  }, [quoteEstimatedDurationMin, routeInfo]);
 
   const effectiveDistanceKm = useMemo(() => {
     if (Number.isFinite(quoteDistanceKm)) {
@@ -1183,15 +1145,6 @@ export default function CheckoutScreen({ route, navigation }) {
             <SkeletonBlock width="60%" height={16} />
           </View>
 
-          {/* Estimated Skeleton */}
-          <View style={styles.card}>
-            <SkeletonBlock
-              width="40%"
-              height={20}
-              style={{ marginBottom: 8 }}
-            />
-            <SkeletonBlock width="35%" height={16} />
-          </View>
 
           {/* Summary Skeleton */}
           <View style={styles.card}>
@@ -1332,29 +1285,6 @@ export default function CheckoutScreen({ route, navigation }) {
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>Phone Number</Text>
               <Text style={styles.value}>{phone || "No phone number"}</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ✅ Estimated */}
-        <View style={styles.card}>
-          <View style={styles.rowInfo}>
-            <View style={styles.iconContainer}>
-              <Feather name="clock" size={20} color="#06C168" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Estimated Delivery</Text>
-              <Text style={styles.value}>
-                {quoteLoading
-                  ? "Refreshing quote..."
-                  : routeLoading && !Number.isFinite(quoteEstimatedDurationMin)
-                    ? "Calculating..."
-                    : !hasExplicitDeliveryLocation
-                      ? "Location not provided"
-                      : estimatedDeliveryWindow
-                        ? `${estimatedDeliveryWindow.min}-${estimatedDeliveryWindow.max} mins`
-                        : "—"}
-              </Text>
             </View>
           </View>
         </View>

@@ -31,6 +31,7 @@ const AVAILABLE_DELIVERIES_CACHE_KEY =
   DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY;
 const DRIVER_STATUS_ENDPOINT = "/driver/working-hours-status";
 const DRIVER_POPUP_SOUND_AUTO_STOP_MS = 30000;
+const ENABLE_DRIVER_NOTIFICATION_SOUND = false;
 
 const DriverDeliveryNotificationContext = createContext(null);
 
@@ -53,6 +54,7 @@ export const useDriverDeliveryNotifications = () => {
 // ============================================================================
 
 async function createAlertSound() {
+  if (!ENABLE_DRIVER_NOTIFICATION_SOUND) return null;
   try {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
@@ -278,6 +280,7 @@ export function DriverDeliveryNotificationProvider({ children }) {
   // Load alert sound on mount
   // ──────────────────────────────────────────────
   useEffect(() => {
+    if (!ENABLE_DRIVER_NOTIFICATION_SOUND) return;
     createAlertSound().then((s) => {
       soundRef.current = s;
     });
@@ -294,6 +297,7 @@ export function DriverDeliveryNotificationProvider({ children }) {
   // Manage looping sound based on notification count
   // ──────────────────────────────────────────────
   useEffect(() => {
+    if (!ENABLE_DRIVER_NOTIFICATION_SOUND) return;
     if (notifications.length > 0) {
       if (!soundPlayingRef.current && soundRef.current) {
         soundRef.current.playAsync().catch(() => {});

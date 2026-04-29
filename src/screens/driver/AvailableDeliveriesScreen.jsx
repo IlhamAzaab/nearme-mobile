@@ -27,6 +27,7 @@ import {
   DeviceEventEmitter,
   Dimensions,
   FlatList,
+  InteractionManager,
   Platform,
   Pressable,
   RefreshControl,
@@ -867,6 +868,10 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     hasCompletedFirstFetchRef.current = hasCompletedFirstFetch;
   }, [hasCompletedFirstFetch]);
 
+  useEffect(() => {
+    fetchPendingDeliveriesRef.current = fetchPendingDeliveriesWithLocation;
+  }, [fetchPendingDeliveriesWithLocation]);
+
   // ============================================================================
   // CHECK DELIVERING MODE
   // ============================================================================
@@ -1130,9 +1135,6 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     }
   };
 
-  // Store fetch function in ref
-  fetchPendingDeliveriesRef.current = fetchPendingDeliveriesWithLocation;
-
   useEffect(() => {
     setIsSocketConnected(Boolean(isConnected));
   }, [isConnected]);
@@ -1234,6 +1236,8 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     const subscription = DeviceEventEmitter.addListener(
       DRIVER_DELIVERY_ACTION_EVENT,
       (payload) => {
+        if (payload?.source === "available_screen") return;
+
         const deliveryId = normalizeDeliveryId(payload?.deliveryId);
         const action = String(payload?.action || "")
           .trim()
@@ -1302,17 +1306,28 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   // ============================================================================
 
   const handleAcceptDelivery = async (deliveryId, deliverySnapshot = null) => {
-    if (isLoadingAfterAccept || accepting) {
+    const normalizedDeliveryId = normalizeDeliveryId(deliveryId);
+
+    if (
+      isLoadingAfterAccept ||
+      (normalizeDeliveryId(accepting) === normalizedDeliveryId && accepting) ||
+      accepting
+    ) {
       showToast("Updating requests...", "error");
       return;
     }
 
-    setAccepting(deliveryId);
+    if (!normalizedDeliveryId) return;
+
+    setAccepting(normalizedDeliveryId);
+    setIsLoadingAfterAccept(true);
     try {
       const token = await AsyncStorage.getItem("token");
       const delivery =
         deliverySnapshot ||
-        deliveries.find((d) => d.delivery_id === deliveryId);
+        deliveries.find(
+          (d) => normalizeDeliveryId(d?.delivery_id) === normalizedDeliveryId,
+        );
 
       const body = {
         driver_latitude: driverLocation?.latitude,
@@ -1339,7 +1354,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       };
 
       const res = await fetch(
-        `${API_BASE_URL}/driver/deliveries/${deliveryId}/accept`,
+        `${API_BASE_URL}/driver/deliveries/${normalizedDeliveryId}/accept`,
         {
           method: "POST",
           headers: {
@@ -1353,17 +1368,33 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       const data = await res.json();
 
       if (res.ok) {
-        declineDelivery(deliveryId);
-        DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
-          deliveryId: String(deliveryId),
-          action: "accepted",
-          source: "available_screen",
-        });
+        declineDelivery(normalizedDeliveryId);
+        mutateAvailableDeliveries((prev) =>
+          prev.filter(
+            (item) =>
+              normalizeDeliveryId(item?.delivery_id) !== normalizedDeliveryId,
+          ),
+        );
 
-        setIsLoadingAfterAccept(true);
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: ["driver", "available-deliveries"],
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ["driver", "active-deliveries"],
+          }),
+        ]);
+
         showToast("✅ Delivery accepted!");
         await fetchDeliveriesWithCurrentLocation(true, "delivery_accepted");
-        navigation.navigate("DriverMap", { deliveryId });
+
+        InteractionManager.runAfterInteractions(() => {
+          navigation.navigate("DriverMap", {
+            deliveryId: normalizedDeliveryId,
+            mode: "pickup",
+            acceptedAt: Date.now(),
+          });
+        });
       } else {
         if (data?.driver_status === "suspended") {
           Alert.alert(
@@ -1595,7 +1626,10 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         viewportHeight={viewportHeight}
         mapViewportHeight={mapViewportHeight}
         tabBarHeight={tabBarHeight}
-        accepting={accepting === item.delivery_id}
+        accepting={
+          normalizeDeliveryId(accepting) === normalizeDeliveryId(item.delivery_id) ||
+          isLoadingAfterAccept
+        }
         isSyncing={isLoadingAfterAccept || isDeliveriesSyncing || isPostCompleteHardLoading}
         onAccept={handleAcceptDelivery}
         onDecline={handleDecline}
@@ -2414,10 +2448,15 @@ function DeliveryCard({
             style={[
               styles.acceptBtn,
               !can_accept && styles.acceptBtnDisabled,
-              (accepting || isSyncing) && styles.acceptBtnLoading,
+              (accepting || isSyncing || isDeclined) && styles.acceptBtnLoading,
             ]}
-            onPress={() => onAccept(delivery_id, delivery)}
-            disabled={accepting || isSyncing || !can_accept}
+            onPress={() => {
+              if (accepting || isSyncing || !can_accept || isDeclined) {
+                return;
+              }
+              onAccept(delivery_id, delivery);
+            }}
+            disabled={accepting || isSyncing || !can_accept || isDeclined}
           >
             {accepting ? (
               <>

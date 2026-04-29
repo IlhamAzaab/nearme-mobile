@@ -29,7 +29,6 @@ import {
   getOrderStatus,
   useOrders,
 } from "../../context/OrderContext";
-import { formatETAClockTime } from "../../utils/etaFormatter";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -341,65 +340,6 @@ function SegmentedProgress({ currentStatus }) {
   );
 }
 
-// ─── ETA Helper ──────────────────────────────────────────────────────────────
-const getEstimatedTime = (status, order) => {
-  // Only show ETA after driver accepts
-  const showEtaStatuses = [
-    "accepted",
-    "driver_accepted",
-    "driver_assigned",
-    "received",
-    "preparing",
-    "ready",
-    "picked_up",
-    "on_the_way",
-  ];
-  if (!showEtaStatuses.includes(status)) return "";
-
-  const baseMins = order?.estimated_duration_min;
-  if (baseMins && baseMins > 0) {
-    let factor = 1;
-    switch (status) {
-      case "accepted":
-      case "driver_accepted":
-      case "driver_assigned":
-        factor = 0.65;
-        break;
-      case "received":
-      case "preparing":
-      case "ready":
-        factor = 0.5;
-        break;
-      case "picked_up":
-        factor = 0.45;
-        break;
-      case "on_the_way":
-        factor = 0.35;
-        break;
-      default:
-        return "";
-    }
-    const low = Math.max(1, Math.round(baseMins * factor));
-    const high = Math.max(low + 5, Math.round(baseMins * factor * 1.3));
-    const isOnTheWay = status === "on_the_way";
-    return formatETAClockTime(low, isOnTheWay ? low : high, { isOnTheWay });
-  }
-  // Fallback static estimates
-  const fallbacks = {
-    accepted: [10, 15],
-    driver_accepted: [10, 15],
-    driver_assigned: [10, 15],
-    received: [8, 12],
-    preparing: [8, 12],
-    ready: [5, 10],
-    picked_up: [5, 10],
-    on_the_way: [5, 5],
-  };
-  const range = fallbacks[status];
-  if (!range) return "";
-  const isOnTheWay = status === "on_the_way";
-  return formatETAClockTime(range[0], range[1], { isOnTheWay });
-};
 
 const getOrderIdentityKey = (order) => {
   if (!order) return "";
@@ -621,7 +561,6 @@ export default function OrdersScreen({ navigation }) {
     const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.placed;
     const itemCount = order.order_items?.length || order.items_count || 0;
     const isNew = newOrderIds.has(getOrderIdentityKey(order));
-    const eta = getEstimatedTime(status, order);
     const orderKey = order?._renderKey || getOrderRenderKey(order, index);
 
     return (
@@ -665,14 +604,6 @@ export default function OrdersScreen({ navigation }) {
                 {itemCount !== 1 ? "s" : ""}
               </Text>
 
-              {/* Estimated arrival */}
-              {eta ? (
-                <View style={styles.etaRow}>
-                  <Text style={styles.etaLabel}>Est. arrival: </Text>
-                  <Text style={styles.etaTime}>{eta}</Text>
-                </View>
-              ) : null}
-
               {/* Track Order Link */}
               <Pressable
                 onPress={() => navigateToOrder(order)}
@@ -681,7 +612,7 @@ export default function OrdersScreen({ navigation }) {
                   pressed && { opacity: 0.7 },
                 ]}
               >
-                <Text style={styles.trackLinkText}>Track Order →</Text>
+                <Text style={styles.trackLinkText}>Track Order</Text>
               </Pressable>
             </View>
           </View>

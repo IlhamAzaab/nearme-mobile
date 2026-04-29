@@ -1555,12 +1555,14 @@ export default function DashboardScreen({ navigation }) {
         // Clear stale list immediately so driver sees 'Updating...' not old bonus deliveries
         setAvailableDeliveries([]);
         setHasNearbyInitialSyncCompleted(false);
-        // Recalculate in background — blocks accept button until done
-        syncAvailableDeliveriesInBackground(token, "delivery_accepted", {
-          forceSync: true,
-          forceFreshLocation: true,
-        });
-        navigation.navigate("DriverMap", { deliveryId });
+        setTimeout(() => {
+          // Recalculate in background — blocks accept button until done
+          syncAvailableDeliveriesInBackground(token, "delivery_accepted", {
+            forceSync: true,
+            forceFreshLocation: true,
+          });
+          navigation.navigate("DriverMap", { deliveryId });
+        }, 0);
       } else {
         const data = await res.json();
         if (data?.driver_status === "suspended") {

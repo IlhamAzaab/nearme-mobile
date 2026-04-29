@@ -51,6 +51,7 @@ LogBox.ignoreLogs([
 const ADMIN_ORDER_STATUS_EVENT = "admin:order_status_changed";
 const DRIVER_DELIVERY_ACTION_EVENT = "driver:delivery_notification_action";
 const DRIVER_POPUP_SOUND_SECONDS = 30;
+const DISABLE_DRIVER_DELIVERY_POPUP = true;
 
 const normalizeDeliveries = (deliveries) => {
   if (!deliveries) return [];
@@ -193,6 +194,10 @@ function RealtimeProviders({ children }) {
 }
 
 function DriverNotificationLayer({ navigationRef }) {
+  if (DISABLE_DRIVER_DELIVERY_POPUP) {
+    return null;
+  }
+
   const {
     notifications,
     acceptDelivery,

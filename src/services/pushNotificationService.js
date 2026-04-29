@@ -115,7 +115,8 @@ Notifications.setNotificationHandler({
           `[Push] Suppressing banner for "${type}" — not for role "${normalizedRole}"`,
         );
         return {
-          shouldShowAlert: false,
+            shouldShowBanner: false,
+            shouldShowList: false,
           shouldPlaySound: false,
           shouldSetBadge: false,
         };
@@ -123,7 +124,8 @@ Notifications.setNotificationHandler({
     }
 
     return {
-      shouldShowAlert: !isAlarmPulse, // no banner for alarm pulses
+      shouldShowBanner: !isAlarmPulse, // no banner for alarm pulses
+      shouldShowList: !isAlarmPulse,
       shouldPlaySound: true, // always play sound
       shouldSetBadge: !isAlarmPulse,
       priority: Notifications.AndroidNotificationPriority.MAX,
@@ -243,6 +245,7 @@ class PushNotificationService {
     this.responseSubscription = null;
     this.isInitialized = false;
     this._userRole = null; // stored on initialize
+    this._lastRegisterSuccess = false;
 
     this._onUrgentNotification = null; // callback for in-app modal
     this._initializePromise = null;
@@ -1062,7 +1065,7 @@ class PushNotificationService {
    * Full initialization - call after login or on app start
    */
   async initialize(authToken) {
-    if (this.isInitialized && this._lastInitKey) {
+    if (this.isInitialized && this._lastInitKey && this._lastRegisterSuccess) {
       return { success: true, skipped: true, isExpoGo };
     }
     if (this._initializePromise) {
@@ -1101,6 +1104,7 @@ class PushNotificationService {
     try {
       // Register token with backend (will gracefully skip in Expo Go Android)
       const registered = await this.registerToken(authToken);
+      this._lastRegisterSuccess = Boolean(registered);
 
       // Setup listeners (even if backend fails, for local testing)
       this.setupForegroundHandler();
@@ -1140,6 +1144,7 @@ class PushNotificationService {
     this._userRole = null;
     this.isInitialized = false;
     this._lastInitKey = null;
+    this._lastRegisterSuccess = false;
   }
 
   // ─── LOCAL NOTIFICATIONS ──────────────────────────────────
