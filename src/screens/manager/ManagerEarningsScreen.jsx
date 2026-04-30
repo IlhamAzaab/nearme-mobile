@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import ManagerHeader from "../../components/manager/ManagerHeader";
 import { API_URL } from "../../config/env";
+import { getAccessToken } from "../../lib/authStorage";
 
 const periodLabels = {
   daily: "Today",
@@ -25,12 +26,14 @@ const periodLabels = {
 
 export default function ManagerEarningsScreen() {
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [summary, setSummary] = useState(null);
   const [orders, setOrders] = useState([]);
   const [period, setPeriod] = useState("daily");
   const [expandedOrder, setExpandedOrder] = useState(null);
 
-  const getPeriodParams = useCallback(() => {
+  const getPeriodRange = useCallback(() => {
     const now = new Date();
     let from, to;
     if (period === "daily") {
@@ -54,41 +57,85 @@ export default function ManagerEarningsScreen() {
       from = new Date(now.getFullYear(), now.getMonth(), 1);
       to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
     } else {
-      return "limit=100";
+      return null;
     }
-    return `from=${from.toISOString()}&to=${to.toISOString()}`;
+    return { from, to };
   }, [period]);
 
-  const fetchEarnings = useCallback(async () => {
-    setLoading(true);
-    try {
-      const token = await AsyncStorage.getItem("token");
-      if (!token) return;
-      const [summaryRes, ordersRes] = await Promise.all([
-        fetch(`${API_URL}/manager/earnings/summary?period=${period}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(
-          `${API_URL}/manager/earnings/orders?${getPeriodParams()}&limit=100`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
-        ),
-      ]);
-      if (summaryRes.ok) {
-        const d = await summaryRes.json();
-        setSummary(d.summary);
+  const getOrderParams = useCallback(() => {
+    const range = getPeriodRange();
+    if (!range) return "limit=100";
+    return `from=${range.from.toISOString()}&to=${range.to.toISOString()}`;
+  }, [getPeriodRange]);
+
+  const getSummaryParams = useCallback(() => {
+    const range = getPeriodRange();
+    if (!range) return "";
+    return `&from=${range.from.toISOString()}&to=${range.to.toISOString()}`;
+  }, [getPeriodRange]);
+
+  const fetchEarnings = useCallback(
+    async ({ isRefresh } = {}) => {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
       }
-      if (ordersRes.ok) {
-        const d = await ordersRes.json();
-        setOrders(d.orders || []);
+      setErrorMessage("");
+      try {
+        const token =
+          (await getAccessToken()) || (await AsyncStorage.getItem("token"));
+        if (!token) {
+          throw new Error("No authentication token");
+        }
+        const [summaryRes, ordersRes] = await Promise.all([
+          fetch(
+            `${API_URL}/manager/earnings/summary?period=${period}${getSummaryParams()}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          ),
+          fetch(
+            `${API_URL}/manager/earnings/orders?${getOrderParams()}&limit=100`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          ),
+        ]);
+        const summaryPayload = await summaryRes.json().catch(() => ({}));
+        const ordersPayload = await ordersRes.json().catch(() => ({}));
+        const summaryOk = summaryRes.ok && summaryPayload?.success !== false;
+        const ordersOk = ordersRes.ok && ordersPayload?.success !== false;
+
+        if (summaryOk) {
+          setSummary(summaryPayload.summary || null);
+        } else {
+          setErrorMessage(
+            summaryPayload?.message ||
+              `Failed to load summary (${summaryRes.status})`,
+          );
+        }
+
+        if (ordersOk) {
+          setOrders(ordersPayload.orders || []);
+        } else {
+          setErrorMessage(
+            (current) =>
+              current ||
+              ordersPayload?.message ||
+              `Failed to load orders (${ordersRes.status})`,
+          );
+        }
+      } catch (err) {
+        console.error("Failed to fetch earnings:", err);
+        setErrorMessage(err?.message || "Failed to load earnings");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-    } catch (err) {
-      console.error("Failed to fetch earnings:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [period, getPeriodParams]);
+    },
+    [period, getOrderParams, getSummaryParams],
+  );
 
   useEffect(() => {
     fetchEarnings();
@@ -117,13 +164,16 @@ export default function ManagerEarningsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <ManagerHeader title="Manager Earnings" onRefresh={fetchEarnings} />
+      <ManagerHeader
+        title="Manager Earnings"
+        onRefresh={() => fetchEarnings({ isRefresh: true })}
+      />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl
-            refreshing={false}
-            onRefresh={fetchEarnings}
+            refreshing={refreshing}
+            onRefresh={() => fetchEarnings({ isRefresh: true })}
             colors={["#06C168"]}
           />
         }
@@ -152,12 +202,24 @@ export default function ManagerEarningsScreen() {
           ))}
         </ScrollView>
 
-        {loading ? (
+        {loading && !summary && orders.length === 0 ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#06C168" />
           </View>
         ) : (
           <>
+            {errorMessage ? (
+              <View style={styles.errorCard}>
+                <Text style={styles.errorTitle}>Unable to load earnings</Text>
+                <Text style={styles.errorSubtitle}>{errorMessage}</Text>
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={() => fetchEarnings({ isRefresh: true })}
+                >
+                  <Text style={styles.retryText}>Try Again</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             {/* Earnings Hero */}
             <View style={styles.heroCard}>
               <Text style={styles.heroLabel}>
@@ -559,6 +621,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingTop: 100,
   },
+  errorCard: {
+    backgroundColor: "#FFF7ED",
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#FED7AA",
+    marginBottom: 16,
+  },
+  errorTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#9A3412",
+    marginBottom: 6,
+  },
+  errorSubtitle: { fontSize: 12, color: "#9A3412", marginBottom: 12 },
+  retryButton: {
+    alignSelf: "flex-start",
+    backgroundColor: "#FB923C",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  retryText: { color: "#fff", fontSize: 12, fontWeight: "700" },
 
   // Period
   periodScroll: { marginBottom: 16 },

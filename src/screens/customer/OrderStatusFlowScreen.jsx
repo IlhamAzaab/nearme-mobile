@@ -183,6 +183,89 @@ async function cacheDriverLastLocation(orderId, location) {
   }
 }
 
+function resolveDriverInfo(payload) {
+  if (!payload || typeof payload !== "object") return null;
+
+  const pickDriver = (source) =>
+    source?.driver ||
+    source?.driver_info ||
+    source?.driverInfo ||
+    source?.driver_profile ||
+    source?.driverProfile ||
+    source?.assigned_driver ||
+    source?.assignedDriver ||
+    source?.delivery_driver ||
+    source?.deliveryDriver ||
+    source?.courier ||
+    source?.rider;
+  
+  const buildFromFlatFields = (source) => {
+    if (!source || typeof source !== "object") return null;
+    const fullName =
+      source.driver_name ||
+      source.driver_full_name ||
+      source.driverFullName ||
+      source.driverName;
+    const phone =
+      source.driver_phone || source.driverPhone || source.driver_mobile;
+    const vehicleModel =
+      source.vehicle_model ||
+      source.driver_vehicle_model ||
+      source.bike_model ||
+      source.bikeModel;
+    const vehicleNumber =
+      source.vehicle_number ||
+      source.driver_vehicle_number ||
+      source.license_plate ||
+      source.bike_number ||
+      source.bikeNumber;
+    const vehicleType =
+      source.vehicle_type || source.driver_vehicle_type || source.vehicleType;
+    const vehicleColor =
+      source.vehicle_color ||
+      source.driver_vehicle_color ||
+      source.vehicleColor;
+    const photoUrl =
+      source.driver_photo ||
+      source.driver_photo_url ||
+      source.driver_avatar ||
+      source.driver_avatar_url ||
+      source.driverPhoto;
+
+    if (!fullName && !phone && !vehicleModel && !vehicleNumber && !photoUrl) {
+      return null;
+    }
+
+    return {
+      full_name: fullName || "",
+      phone: phone || "",
+      vehicle_model: vehicleModel || "",
+      vehicle_number: vehicleNumber || "",
+      vehicle_type: vehicleType || "",
+      vehicle_color: vehicleColor || "",
+      photo_url: photoUrl || "",
+    };
+  };
+  const direct = pickDriver(payload);
+  if (direct && typeof direct === "object") return direct;
+
+  const flat = buildFromFlatFields(payload);
+  if (flat) return flat;
+
+  const nestedOrder =
+    payload.order || payload.orderData || payload.order_details;
+  const nestedDelivery = payload.delivery || payload.delivery_info;
+
+  const nested = pickDriver(nestedOrder) || pickDriver(nestedDelivery);
+  if (nested && typeof nested === "object") return nested;
+
+  return (
+    buildFromFlatFields(nestedOrder) ||
+    buildFromFlatFields(nestedDelivery) ||
+    null
+  );
+}
+
 // =============================================================================
 // CONSTANTS
 // =============================================================================
@@ -1480,7 +1563,9 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
         "placed",
     ),
   );
-  const [driverInfo, setDriverInfo] = useState(null);
+  const [driverInfo, setDriverInfo] = useState(
+    () => resolveDriverInfo(params) || resolveDriverInfo(params.order) || null,
+  );
   const [estimatedTime, setEstimatedTime] = useState("");
   const [driverLocation, setDriverLocation] = useState(null);
   const [deliveryLocation, setDeliveryLocation] = useState(null);
@@ -1538,7 +1623,10 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
     try {
       const token = await getAccessToken();
       const cancelUrl = `${API_BASE_URL}/orders/${activeOrderId}/cancel`;
-      console.log("[Order Cancel] Attempting cancel for orderId:", activeOrderId);
+      console.log(
+        "[Order Cancel] Attempting cancel for orderId:",
+        activeOrderId,
+      );
 
       const res = await fetch(cancelUrl, {
         method: "POST",
@@ -1570,31 +1658,49 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
           ],
         );
       } else if (res.status === 404) {
-        console.error("[Order Cancel] Order not found (404) for orderId:", activeOrderId);
+        console.error(
+          "[Order Cancel] Order not found (404) for orderId:",
+          activeOrderId,
+        );
         setShowCancelModal(false);
         Alert.alert(
           "Order Not Found",
           "The order could not be found in the system. It may have already been cancelled or processed. Please refresh and try again.",
         );
       } else if (res.status === 409) {
-        console.warn("[Order Cancel] Conflict (409) for orderId:", activeOrderId, data);
+        console.warn(
+          "[Order Cancel] Conflict (409) for orderId:",
+          activeOrderId,
+          data,
+        );
         setShowCancelModal(false);
         Alert.alert(
           "Cannot Cancel",
           data.message || "The restaurant has already accepted your order.",
         );
       } else if (res.status === 400) {
-        console.error("[Order Cancel] Bad request (400) for orderId:", activeOrderId, data);
+        console.error(
+          "[Order Cancel] Bad request (400) for orderId:",
+          activeOrderId,
+          data,
+        );
         setShowCancelModal(false);
         Alert.alert(
           "Invalid Request",
           data.message || "Unable to cancel order. Please check and try again.",
         );
       } else {
-        console.error("[Order Cancel] Failed with status", res.status, "for orderId:", activeOrderId, data);
+        console.error(
+          "[Order Cancel] Failed with status",
+          res.status,
+          "for orderId:",
+          activeOrderId,
+          data,
+        );
         Alert.alert(
           "Error",
-          data.message || `Failed to cancel order (Error: ${res.status}). Please try again.`,
+          data.message ||
+            `Failed to cancel order (Error: ${res.status}). Please try again.`,
         );
       }
     } catch (err) {
@@ -1870,6 +1976,12 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
         return;
       }
 
+      const realtimeDriver = resolveDriverInfo(payload);
+      if (realtimeDriver) {
+        setDriverInfo(realtimeDriver);
+        cacheDriverInfo(activeOrderId, realtimeDriver);
+      }
+
       const locationPayload =
         payload?.driver_location || payload?.driverLocation;
       const driverLat = Number(
@@ -2126,6 +2238,11 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
         if (res.ok) {
           const data = await res.json();
           const o = data.order || data;
+          const orderDriver = resolveDriverInfo(data) || resolveDriverInfo(o);
+          if (orderDriver) {
+            setDriverInfo(orderDriver);
+            cacheDriverInfo(orderId, orderDriver);
+          }
           setOrderData({
             restaurantName:
               o.restaurant_name || orderData.restaurantName || "Restaurant",
@@ -2220,9 +2337,10 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
           data.effective_status || data.delivery_status || data.status || "",
         );
 
-        if (data.driver) {
-          setDriverInfo(data.driver);
-          cacheDriverInfo(orderId, data.driver);
+        const statusDriver = resolveDriverInfo(data);
+        if (statusDriver) {
+          setDriverInfo(statusDriver);
+          cacheDriverInfo(orderId, statusDriver);
         }
 
         const driverLat = Number(data.driverLocation?.latitude);
@@ -2638,8 +2756,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
             </View>
             <Text style={st.reportHeroTitle}>Thank you for your order!</Text>
             <Text style={st.reportHeroSubtitle}>
-              Your delivery is complete and everything is now marked as
-              received.
+              Your delivery is complete and successfully delivered.
             </Text>
             <Text style={st.reportHeroGoodNote}>
               We hope your meal brought a smile to your day. We look forward to
@@ -2674,10 +2791,6 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
             </View>
             <View style={st.reportDivider} />
 
-            <View style={st.reportRow}>
-              <Text style={st.reportLabel}>Items</Text>
-              <Text style={st.reportValue}>{itemCount}</Text>
-            </View>
             <View style={st.reportDivider} />
 
             <View style={st.reportRow}>

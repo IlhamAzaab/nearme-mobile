@@ -38,11 +38,19 @@ export default function OnboardingStep3Screen({ navigation }) {
         "Please grant media library permission",
       );
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.8,
     });
-    if (result.canceled || !result.assets?.length) return;
-    const file = result.assets[0];
+    if (result.canceled) return;
+    const file = result.assets?.[0];
+    if (!file) {
+      Alert.alert("Error", "No image selected. Please try again.");
+      return;
+    }
+    if (file.type && file.type !== "image") {
+      Alert.alert("Invalid File", "Please select an image file only.");
+      return;
+    }
     setUploading((prev) => ({ ...prev, [docType]: true }));
     try {
       const token = await AsyncStorage.getItem("token");

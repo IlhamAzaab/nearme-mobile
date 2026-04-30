@@ -115,12 +115,20 @@ export default function DriverDepositsScreen({ navigation }) {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.8,
     });
-    if (!result.canceled && result.assets?.length > 0) {
-      setProofFile(result.assets[0]);
+    if (result.canceled) return;
+    const selectedAsset = result.assets?.[0];
+    if (!selectedAsset) {
+      Alert.alert("Error", "No image selected. Please try again.");
+      return;
     }
+    if (selectedAsset.type && selectedAsset.type !== "image") {
+      Alert.alert("Invalid File", "Please select an image file only.");
+      return;
+    }
+    setProofFile(selectedAsset);
   };
 
   const handleSubmit = async () => {

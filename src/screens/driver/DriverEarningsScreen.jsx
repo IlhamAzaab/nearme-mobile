@@ -217,7 +217,12 @@ export default function DriverEarningsScreen({ navigation }) {
       if (!isDateInSelectedPeriod(deliveryKey, period, todayKey)) {
         return sum;
       }
-      return sum + Number(item?.extra_distance_km || 0);
+      const sequence = Number(item?.delivery_sequence ?? 1);
+      const isFirst = Number.isFinite(sequence) ? sequence <= 1 : true;
+      const distance = isFirst
+        ? Number(item?.total_distance_km || item?.extra_distance_km || 0)
+        : Number(item?.extra_distance_km || item?.total_distance_km || 0);
+      return sum + distance;
     }, 0);
   }, [earnings, period]);
 

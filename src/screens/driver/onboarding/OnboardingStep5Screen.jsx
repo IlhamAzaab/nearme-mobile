@@ -123,56 +123,54 @@ Version 1.0.0 - Effective Date: ${new Date().toLocaleDateString()}
 1. Service Scope
 This agreement is between Meezo Platform ("Manager") and you ("Delivery Partner"). Meezo is a food delivery service platform. By accepting these terms, you agree to provide food pickup and delivery services through Meezo.
 
-2. Pickup Distance and Earnings (Partner to Restaurant)
-- You will receive upto LKR 30 for travel from your location to the restaurant, up to 1 km.
-- If this pickup distance exceeds 1 km, no additional pickup earning is paid for the excess distance.
-- You can accept such orders if you want.
-
-3. Delivery Distance Earnings (Restaurant to Customer)
+2.. Delivery Earnings
 - You will receive full earnings based on total delivery distance from restaurant to customer.
 - Meezo pays LKR 35-50 per km depending on operating conditions; default base rate is LKR 40 per km.
+- Delivery distance is calculated using the most efficient route from restaurant to customer.
+- For multi-order trips, distance is calculated based on the actual route taken for all deliveries.
+- Upto 5km you will recieve the full distance-based earnings. Beyond 5km, a reduced rate of LKR 5-15 per km applies for the extra distance to ensure fair compensation.
 
-4. Multi-Order Trip Bonuses
+3. Multi-Order Trip Bonuses
 - Meezo will pay a bonus for you when accepting additional deliveries in the same trip.
-- Second accepted delivery bonus: LKR 10-20.
-- Third and more accepted deliveries bonus: LKR 15-30 each.
+- Second accepted delivery bonus: LKR 0-20.
+- Third and more accepted deliveries bonus: LKR 0-30 each.
 - You can accept up to 5 active deliveries in one trip.
 
-5. Active Delivery Commitment
+4. Active Delivery Commitment
 - Once you start delivering food to customers, you must complete all active deliveries in that trip.
 - New order notifications are sent after all active deliveries are completed.
 
-6. Order Collection and Responsibility
+5. Order Collection and Responsibility
 - At the restaurant, request each order using the order number shown in the app.
 - You must verify all listed food items are packed correctly before pickup.
 - After pickup, you are responsible for the order and associated cash-handling obligations.
 
-7. Cash on Delivery and Settlement Rules
+6. Cash on Delivery and Settlement Rules
 - All payments are handled as Cash on Delivery (COD).
 - You must collect the exact payable amount from the customer as shown in the delivery page .
 - You must settle the full collected amount to Meezo daily, either by bank transfer or direct payment to a manager.
 - Daily settlement must be completed before 12:00 AM (midnight).
 
-8. Tips and Priority Orders
+7. Tips and Priority Orders
 - Platform tip amounts may be added to delivery details based on order conditions.
 - If a tip appears in the delivery details, the order should be treated as priority.
 - You may also receive additional direct tips from customers.
 - Platform tip range is LKR 20-200, including weight-based allocations where applicable.
 
-9. Fair Earnings for Extra Active Deliveries
+8. Fair Earnings for Extra Active Deliveries
 - For extra active deliveries in the same trip, base delivery earnings will pay based on the additional travel-time factors to maintain fairness.
 
-10. Restaurant Queue Priority
+9. Restaurant Queue Priority
 - Delivery partners are assigned a dedicated service queue and are not required to wait in the regular customer queue.
 
-11. Compliance and Conduct
+10. Compliance and Conduct
 - You must follow applicable traffic, safety, and platform rules while delivering.
 - Repeated violations, settlement delays, misconduct, or fraudulent behavior may result in account suspension or termination.
 
-12. Updates to Terms
+11. Updates to Terms
 Meezo may update these terms when required for operations, legal compliance, or safety. Continued use of the platform after updates constitutes acceptance of revised terms.
 
-13. Acceptance
+12. Acceptance
 By selecting the acceptance option below, you confirm that you have read, understood, and accepted these Meezo Delivery Partner Terms and Conditions.
 `;
 

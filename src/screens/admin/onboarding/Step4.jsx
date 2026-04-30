@@ -77,7 +77,7 @@ const CONTRACT_SECTIONS = [
   {
     title: "6. Bank Account and Payout Responsibility",
     content:
-      "You authorize Meezo to route all payouts to the bank account provided during onboarding. You are responsible for ensuring that bank details remain accurate and updated. Meezo is not liable for payout delays or failures caused by incorrect bank information submitted by the restaurant.",
+      "You authorize Meezo to route all payouts to the bank account provided during onboarding. You are responsible for ensuring that bank details remain accurate and updated. Meezo is not liable for payout delays or failures caused by incorrect bank information submitted by the restaurant. And if your bank is not BOC Meezo will reduce 30/= as transaction fee.",
   },
   {
     title: "7. Accuracy of Information",

@@ -62,6 +62,17 @@ function formatReverseGeocodeResult(place) {
   return parts.join(", ") || "Unknown location";
 }
 
+function buildRestaurantPinHtml() {
+  return (
+    "<div style='display:flex;align-items:center;justify-content:center;width:52px;height:52px;'>" +
+    "<svg width='52' height='52' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' aria-label='restaurant pin'>" +
+    "<path d='M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z' fill='#E11D48'/>" +
+    "<circle cx='12' cy='9' r='3' fill='#FFFFFF'/>" +
+    "</svg>" +
+    "</div>"
+  );
+}
+
 // Step Progress Bar Component
 function StepProgress({ currentStep, totalSteps }) {
   const steps = ["Personal", "Restaurant", "Bank", "Contract", "Review"];
@@ -209,6 +220,24 @@ function TimePicker({ label, value, onChange }) {
   const [showHourPicker, setShowHourPicker] = useState(false);
   const [showMinutePicker, setShowMinutePicker] = useState(false);
 
+  const clampTimeValue = (text, max) => {
+    if (text === "") return "";
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) return "";
+    const clamped = Math.min(Math.max(Math.trunc(numeric), 0), max);
+    return String(clamped).padStart(2, "0");
+  };
+
+  const handleHourInput = (text) => {
+    const normalized = clampTimeValue(text.replace(/[^0-9]/g, ""), 23);
+    setSelectedHour(normalized);
+  };
+
+  const handleMinuteInput = (text) => {
+    const normalized = clampTimeValue(text.replace(/[^0-9]/g, ""), 59);
+    setSelectedMinute(normalized);
+  };
+
   useEffect(() => {
     if (selectedHour && selectedMinute) {
       onChange(`${selectedHour}:${selectedMinute}`);
@@ -244,12 +273,36 @@ function TimePicker({ label, value, onChange }) {
         </TouchableOpacity>
       </View>
 
+      <View style={timePickerStyles.manualRow}>
+        <TextInput
+          style={timePickerStyles.manualInput}
+          value={selectedHour}
+          onChangeText={handleHourInput}
+          placeholder="HH"
+          placeholderTextColor="#9CA3AF"
+          keyboardType="number-pad"
+          maxLength={2}
+        />
+        <Text style={timePickerStyles.manualSeparator}>:</Text>
+        <TextInput
+          style={timePickerStyles.manualInput}
+          value={selectedMinute}
+          onChangeText={handleMinuteInput}
+          placeholder="MM"
+          placeholderTextColor="#9CA3AF"
+          keyboardType="number-pad"
+          maxLength={2}
+        />
+      </View>
+
       {/* Hour Picker Modal */}
       {showHourPicker && (
         <View style={timePickerStyles.pickerContainer}>
           <ScrollView
             style={timePickerStyles.pickerScroll}
             showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
           >
             {hours.map((hour) => (
               <TouchableOpacity
@@ -284,6 +337,8 @@ function TimePicker({ label, value, onChange }) {
           <ScrollView
             style={timePickerStyles.pickerScroll}
             showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
           >
             {minutes.map((minute) => (
               <TouchableOpacity
@@ -353,6 +408,31 @@ const timePickerStyles = StyleSheet.create({
   separator: {
     fontSize: 24,
     fontWeight: "bold",
+    color: "#06C168",
+    marginHorizontal: 8,
+  },
+  manualRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    justifyContent: "center",
+  },
+  manualInput: {
+    width: 64,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+    textAlign: "center",
+  },
+  manualSeparator: {
+    fontSize: 18,
+    fontWeight: "700",
     color: "#06C168",
     marginHorizontal: 8,
   },
@@ -426,6 +506,7 @@ export default function Step2() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState({});
   const [locating, setLocating] = useState(false);
+  const [scrollEnabled, setScrollEnabled] = useState(true);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -606,16 +687,28 @@ export default function Step2() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: [ImagePicker.MediaType.Images],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: fieldKey === "logo" ? [1, 1] : [16, 9],
         quality: 0.8,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        setFileUris((prev) => ({ ...prev, [fieldKey]: result.assets[0].uri }));
-        setFiles((prev) => ({ ...prev, [fieldKey]: result.assets[0] }));
+      if (result.canceled) return;
+
+      const selectedAsset = result.assets?.[0];
+
+      if (!selectedAsset) {
+        Alert.alert("Error", "No image selected. Please try again.");
+        return;
       }
+
+      if (selectedAsset.type && selectedAsset.type !== "image") {
+        Alert.alert("Invalid File", "Please select an image file only.");
+        return;
+      }
+
+      setFileUris((prev) => ({ ...prev, [fieldKey]: selectedAsset.uri }));
+      setFiles((prev) => ({ ...prev, [fieldKey]: selectedAsset }));
     } catch (err) {
       console.error("Image picker error:", err);
       Alert.alert("Error", "Failed to select image");
@@ -854,6 +947,8 @@ export default function Step2() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={scrollEnabled}
+          nestedScrollEnabled
         >
           {/* Header */}
           <View style={styles.header}>
@@ -947,7 +1042,13 @@ export default function Step2() {
                 to pin the restaurant accurately.
               </Text>
 
-              <View style={styles.mapContainer}>
+              <View
+                style={styles.mapContainer}
+                onStartShouldSetResponder={() => true}
+                onResponderGrant={() => setScrollEnabled(false)}
+                onResponderRelease={() => setScrollEnabled(true)}
+                onResponderTerminate={() => setScrollEnabled(true)}
+              >
                 {mapLoading ? (
                   <View style={styles.mapLoadingWrap}>
                     <ActivityIndicator size="large" color="#06C168" />
@@ -967,9 +1068,11 @@ export default function Step2() {
                             {
                               id: "restaurant",
                               coordinate: position,
-                              type: "restaurant",
+                              type: "customer",
                               title: "Pinned restaurant location",
-                              emoji: "",
+                              customHtml: buildRestaurantPinHtml(),
+                              iconSize: [52, 52],
+                              iconAnchor: [26, 50],
                             },
                           ]
                         : []

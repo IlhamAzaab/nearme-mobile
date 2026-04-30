@@ -231,15 +231,27 @@ export default function Step1() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: [ImagePicker.MediaType.Images],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: imageType === "profilePhoto" ? [1, 1] : [16, 10],
         quality: 0.8,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        await uploadImage(imageType, result.assets[0]);
+      if (result.canceled) return;
+
+      const selectedAsset = result.assets?.[0];
+
+      if (!selectedAsset) {
+        Alert.alert("Error", "No image selected. Please try again.");
+        return;
       }
+
+      if (selectedAsset.type && selectedAsset.type !== "image") {
+        Alert.alert("Invalid File", "Please select an image file only.");
+        return;
+      }
+
+      await uploadImage(imageType, selectedAsset);
     } catch (err) {
       console.error("Image picker error:", err);
       Alert.alert("Error", "Failed to select image");

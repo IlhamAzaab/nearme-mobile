@@ -1018,7 +1018,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                   onChangeText={(value) =>
                     handleInputChange("regular_size", value)
                   }
-                  placeholder="e.g., Regular"
+                  placeholder="eg: Regular"
                   placeholderTextColor="#9ca3af"
                 />
               </View>
@@ -1031,7 +1031,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                   onChangeText={(value) =>
                     handleInputChange("regular_portion", value)
                   }
-                  placeholder="e.g., 500g"
+                  placeholder="eg: 2"
                   placeholderTextColor="#9ca3af"
                 />
               </View>
@@ -1078,7 +1078,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                   style={modalStyles.input}
                   value={formData.extra_size}
                   onChangeText={(value) => handleInputChange("extra_size", value)}
-                  placeholder="e.g., Large"
+                  placeholder="eg: Large"
                   placeholderTextColor="#9ca3af"
                 />
               </View>
@@ -1091,7 +1091,7 @@ function AddProductModal({ visible, food, onClose, onSave }) {
                   onChangeText={(value) =>
                     handleInputChange("extra_portion", value)
                   }
-                  placeholder="e.g., 750g"
+                  placeholder="eg: 4"
                   placeholderTextColor="#9ca3af"
                 />
               </View>

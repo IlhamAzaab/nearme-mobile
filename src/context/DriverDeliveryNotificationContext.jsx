@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { DeviceEventEmitter } from "react-native";
 import { API_BASE_URL } from "../constants/api";
 import {
   DRIVER_AVAILABLE_DELIVERIES_CACHE_BASE_KEY,
@@ -32,6 +33,7 @@ const AVAILABLE_DELIVERIES_CACHE_KEY =
 const DRIVER_STATUS_ENDPOINT = "/driver/working-hours-status";
 const DRIVER_POPUP_SOUND_AUTO_STOP_MS = 30000;
 const ENABLE_DRIVER_NOTIFICATION_SOUND = false;
+const DRIVER_DELIVERY_ACTION_EVENT = "driver:delivery_notification_action";
 
 const DriverDeliveryNotificationContext = createContext(null);
 
@@ -527,6 +529,13 @@ export function DriverDeliveryNotificationProvider({ children }) {
         extra_time_minutes: data.extra_time_minutes || 0,
         delivery_sequence: data.delivery_sequence || 1,
         earnings_data: data.earnings_data || null,
+      });
+
+      DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+        action: "new_delivery",
+        deliveryId: data.delivery_id,
+        payload: data,
+        source: "driver_notification_context",
       });
     };
 

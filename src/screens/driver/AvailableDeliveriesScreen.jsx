@@ -818,7 +818,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   const fetchDeliveriesWithCurrentLocation = useCallback(
     async (isBackgroundRefresh = false, triggerReason = "manual") => {
       const canReuseKnownLocation =
-        triggerReason === "socket_new_delivery_fallback" ||
+        triggerReason === "socket_new_delivery" ||
         triggerReason === "socket_tip_update_fallback";
 
       const knownLocation =
@@ -973,7 +973,6 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     const backoffEligibleReasons = new Set([
       "movement_200m",
       "screen_focus_movement_200m",
-      "socket_new_delivery_fallback",
       "socket_tip_update_fallback",
     ]);
     if (
@@ -1147,23 +1146,9 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
       if (inDeliveringModeRef.current) return;
       setShowNewDeliveryBanner(true);
 
-      const normalizedId = normalizeDeliveryId(payload?.delivery_id);
-      const hasCoordinates = hasValidDeliveryCoordinates(payload);
-
-      if (normalizedId && hasCoordinates) {
-        mutateAvailableDeliveriesRef.current?.((prev) => {
-          const withoutIncoming = prev.filter(
-            (delivery) =>
-              normalizeDeliveryId(delivery?.delivery_id) !== normalizedId,
-          );
-          return [payload, ...withoutIncoming];
-        });
-        return;
-      }
-
       fetchDeliveriesWithCurrentLocationRef.current?.(
         true,
-        "socket_new_delivery_fallback",
+        "socket_new_delivery",
       );
     };
 
@@ -1245,6 +1230,15 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         const eventLocation = isValidLocation(payload?.location)
           ? payload.location
           : null;
+
+        if (action === "new_delivery") {
+          if (!isFocusedRef.current || inDeliveringModeRef.current) return;
+          fetchDeliveriesWithCurrentLocationRef.current?.(
+            true,
+            "socket_new_delivery",
+          );
+          return;
+        }
 
         if (!deliveryId) return;
 
@@ -1478,7 +1472,6 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     fetchDeliveriesWithCurrentLocation(false, "pull_to_refresh");
   }, [fetchDeliveriesWithCurrentLocation, inDeliveringMode]);
 
-
   const getTipAmount = useCallback((delivery) => {
     return Number.parseFloat(delivery?.pricing?.tip_amount || 0);
   }, []);
@@ -1627,10 +1620,14 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         mapViewportHeight={mapViewportHeight}
         tabBarHeight={tabBarHeight}
         accepting={
-          normalizeDeliveryId(accepting) === normalizeDeliveryId(item.delivery_id) ||
-          isLoadingAfterAccept
+          normalizeDeliveryId(accepting) ===
+            normalizeDeliveryId(item.delivery_id) || isLoadingAfterAccept
         }
-        isSyncing={isLoadingAfterAccept || isDeliveriesSyncing || isPostCompleteHardLoading}
+        isSyncing={
+          isLoadingAfterAccept ||
+          isDeliveriesSyncing ||
+          isPostCompleteHardLoading
+        }
         onAccept={handleAcceptDelivery}
         onDecline={handleDecline}
         hasActiveDeliveries={currentRoute.active_deliveries > 0}
@@ -1716,7 +1713,11 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
 
       {isDeliveriesSyncing && (
         <View style={styles.syncingBanner}>
-          <ActivityIndicator size="small" color="#06C168" style={{ marginRight: 8 }} />
+          <ActivityIndicator
+            size="small"
+            color="#06C168"
+            style={{ marginRight: 8 }}
+          />
           <Text style={styles.syncingText}>Updating delivery requests...</Text>
         </View>
       )}
@@ -1749,10 +1750,12 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
           <DriverMapSheetLoadingSkeleton />
         ) : isPostCompleteHardLoading ? (
           <DriverMapSheetLoadingSkeleton />
-        ) : (deliveries.length === 0 && isDeliveriesSyncing) ? (
+        ) : deliveries.length === 0 && isDeliveriesSyncing ? (
           // Syncing in progress — show skeleton, never blank or empty state
           <DriverMapSheetLoadingSkeleton />
-        ) : deliveries.length === 0 && hasCompletedFirstFetch && !isDeliveriesSyncing ? (
+        ) : deliveries.length === 0 &&
+          hasCompletedFirstFetch &&
+          !isDeliveriesSyncing ? (
           // Strictly only show empty state when: first fetch done + not syncing + truly empty
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyEmoji}>📦</Text>
@@ -1767,7 +1770,10 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
                 style={styles.refreshBtn}
                 onPress={() => {
                   // Hard-reset all throttle / in-flight state for immediate refresh
-                  deliveriesSyncRetryStateRef.current = { consecutiveFailures: 0, nextAllowedAt: 0 };
+                  deliveriesSyncRetryStateRef.current = {
+                    consecutiveFailures: 0,
+                    nextAllowedAt: 0,
+                  };
                   if (abortControllerRef.current) {
                     abortControllerRef.current.abort();
                   }
@@ -1796,7 +1802,6 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
           // Has not completed first fetch yet — show skeleton instead of blank
           <DriverMapSheetLoadingSkeleton />
         ) : (
-
           <Animated.View
             style={{
               flex: 1,
@@ -1952,6 +1957,17 @@ function DeliveryCard({
   const tipAmount = parseFloat(pricing?.tip_amount || 0);
   const isStackedDelivery = hasActiveDeliveries;
   const showRoutes = !hasActiveDeliveries;
+
+  const rtcDistanceKm = Number(
+    route_impact?.restaurant_to_customer_km ||
+      delivery?.restaurant_to_customer_km ||
+      0,
+  );
+  const displayDistanceKm = isStackedDelivery
+    ? Number(extra_distance_km || 0)
+    : rtcDistanceKm > 0
+      ? rtcDistanceKm
+      : Number(total_delivery_distance_km || r1_distance_km || 0);
 
   // Decode polyline helper
   const decodePolyline = (encoded) => {
@@ -2374,12 +2390,7 @@ function DeliveryCard({
             <Ionicons name="map-outline" size={16} color="#6B7280" />
             <Text style={styles.statValueCompact}>
               {isStackedDelivery ? "+" : ""}
-              {Number(
-                isStackedDelivery
-                  ? extra_distance_km
-                  : total_delivery_distance_km || r1_distance_km || 0,
-              ).toFixed(1)}{" "}
-              km
+              {Number(displayDistanceKm || 0).toFixed(1)} km
             </Text>
           </View>
           <View style={styles.statItemCompact}>

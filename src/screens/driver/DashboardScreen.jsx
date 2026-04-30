@@ -409,6 +409,19 @@ export default function DashboardScreen({ navigation }) {
       setHasNearbyInitialSyncCompleted(true);
     };
 
+    let scheduledApply = null;
+    const scheduleApplySnapshot = (snapshot) => {
+      if (scheduledApply) {
+        clearTimeout(scheduledApply);
+      }
+
+      // Defer state updates so we never update during another screen render.
+      scheduledApply = setTimeout(() => {
+        scheduledApply = null;
+        applySnapshot(snapshot);
+      }, 0);
+    };
+
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
       const query = event?.query;
       if (!query) return;
@@ -420,7 +433,7 @@ export default function DashboardScreen({ navigation }) {
 
       const data = query.state?.data;
       if (!data) return;
-      applySnapshot(data);
+      scheduleApplySnapshot(data);
     });
 
     const existing = queryClient.getQueriesData({
@@ -434,7 +447,12 @@ export default function DashboardScreen({ navigation }) {
       }
     }
 
-    return () => unsubscribe();
+    return () => {
+      if (scheduledApply) {
+        clearTimeout(scheduledApply);
+      }
+      unsubscribe();
+    };
   }, [driverUserId, queryClient]);
 
   // Alert helpers
@@ -512,7 +530,10 @@ export default function DashboardScreen({ navigation }) {
 
       // ✅ Check if cached result is still fresh (within 45 seconds)
       const statusCached = queryClient.getQueryData(["driver", "status-info"]);
-      if (statusCached && Date.now() - (statusCached._timestamp || 0) < STATUS_INFO_CACHE_TTL_MS) {
+      if (
+        statusCached &&
+        Date.now() - (statusCached._timestamp || 0) < STATUS_INFO_CACHE_TTL_MS
+      ) {
         console.log("[Dashboard] Using cached status info (TTL still fresh)");
         return;
       }
@@ -521,7 +542,9 @@ export default function DashboardScreen({ navigation }) {
       if (DASHBOARD_API_REQUESTS.has("status-info")) {
         const cached = DASHBOARD_API_REQUESTS.get("status-info");
         if (Date.now() - cached.timestamp < 5000) {
-          console.log("[Dashboard] Status info request already in-flight, skipping");
+          console.log(
+            "[Dashboard] Status info request already in-flight, skipping",
+          );
           await cached.promise;
           return;
         }
@@ -534,7 +557,10 @@ export default function DashboardScreen({ navigation }) {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
-      DASHBOARD_API_REQUESTS.set("status-info", { promise: requestPromise, timestamp: Date.now() });
+      DASHBOARD_API_REQUESTS.set("status-info", {
+        promise: requestPromise,
+        timestamp: Date.now(),
+      });
 
       const res = await requestPromise;
 
@@ -719,8 +745,14 @@ export default function DashboardScreen({ navigation }) {
       }
 
       // ✅ Check cache first (45 seconds TTL)
-      const cachedStatus = queryClient.getQueryData(["driver", "working-hours"]);
-      if (cachedStatus && Date.now() - (cachedStatus._timestamp || 0) < STATUS_INFO_CACHE_TTL_MS) {
+      const cachedStatus = queryClient.getQueryData([
+        "driver",
+        "working-hours",
+      ]);
+      if (
+        cachedStatus &&
+        Date.now() - (cachedStatus._timestamp || 0) < STATUS_INFO_CACHE_TTL_MS
+      ) {
         console.log("[Dashboard] Using cached working hours (TTL still fresh)");
         return;
       }
@@ -729,7 +761,9 @@ export default function DashboardScreen({ navigation }) {
       if (DASHBOARD_API_REQUESTS.has("working-hours")) {
         const cached = DASHBOARD_API_REQUESTS.get("working-hours");
         if (Date.now() - cached.timestamp < 5000) {
-          console.log("[Dashboard] Working hours request already in-flight, skipping");
+          console.log(
+            "[Dashboard] Working hours request already in-flight, skipping",
+          );
           await cached.promise;
           return;
         }
@@ -742,7 +776,10 @@ export default function DashboardScreen({ navigation }) {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
-      DASHBOARD_API_REQUESTS.set("working-hours", { promise: requestPromise, timestamp: Date.now() });
+      DASHBOARD_API_REQUESTS.set("working-hours", {
+        promise: requestPromise,
+        timestamp: Date.now(),
+      });
 
       const res = await requestPromise;
 
@@ -876,11 +913,6 @@ export default function DashboardScreen({ navigation }) {
     async (token, reason = "dashboard_open", options = {}) => {
       if (nearbySyncInFlightRef.current) return;
 
-      const now = Date.now();
-      if (now < Number(nearbySyncBackoffRef.current.nextAllowedAt || 0)) {
-        return;
-      }
-
       const forceSync = Boolean(options?.forceSync);
       const forceFreshLocation = Boolean(options?.forceFreshLocation);
 
@@ -889,6 +921,15 @@ export default function DashboardScreen({ navigation }) {
         "tip_updated",
         "delivery_accepted",
       ]);
+
+      const now = Date.now();
+      const shouldBypassBackoff = forceSync || forceReasons.has(reason);
+      if (
+        !shouldBypassBackoff &&
+        now < Number(nearbySyncBackoffRef.current.nextAllowedAt || 0)
+      ) {
+        return;
+      }
 
       const currentLocation =
         await resolveVerifiedDriverLocation(forceFreshLocation);
@@ -1000,7 +1041,7 @@ export default function DashboardScreen({ navigation }) {
   const fetchDashboardData = useCallback(async () => {
     // ✅ Mounted guard: prevent state updates after unmount
     let mounted = true;
-    
+
     try {
       const token = await getAccessToken();
       if (!token || !mounted) {
@@ -1012,9 +1053,17 @@ export default function DashboardScreen({ navigation }) {
       }
 
       // ✅ Check if cached dashboard is still fresh (45 seconds)
-      const dashCached = queryClient.getQueryData(["driver", "dashboard-stats"]);
-      if (dashCached && Date.now() - (dashCached._timestamp || 0) < DASHBOARD_STATS_CACHE_TTL_MS) {
-        console.log("[Dashboard] Using cached dashboard stats (TTL still fresh)");
+      const dashCached = queryClient.getQueryData([
+        "driver",
+        "dashboard-stats",
+      ]);
+      if (
+        dashCached &&
+        Date.now() - (dashCached._timestamp || 0) < DASHBOARD_STATS_CACHE_TTL_MS
+      ) {
+        console.log(
+          "[Dashboard] Using cached dashboard stats (TTL still fresh)",
+        );
         if (mounted) {
           applyDashboardSnapshot(dashCached);
           setLoading(false);
@@ -1027,7 +1076,9 @@ export default function DashboardScreen({ navigation }) {
       if (DASHBOARD_API_REQUESTS.has("dashboard")) {
         const cached = DASHBOARD_API_REQUESTS.get("dashboard");
         if (Date.now() - cached.timestamp < 5000) {
-          console.log("[Dashboard] Dashboard fetch already in-flight, skipping");
+          console.log(
+            "[Dashboard] Dashboard fetch already in-flight, skipping",
+          );
           await cached.promise;
           return;
         }
@@ -1088,7 +1139,10 @@ export default function DashboardScreen({ navigation }) {
         }),
       ]);
 
-      DASHBOARD_API_REQUESTS.set("dashboard", { promise: dashboardPromise, timestamp: Date.now() });
+      DASHBOARD_API_REQUESTS.set("dashboard", {
+        promise: dashboardPromise,
+        timestamp: Date.now(),
+      });
 
       const [
         statsRes,
@@ -1158,7 +1212,10 @@ export default function DashboardScreen({ navigation }) {
         _timestamp: Date.now(),
       };
 
-      queryClient.setQueryData(["driver", "dashboard-stats"], dashboardSnapshot);
+      queryClient.setQueryData(
+        ["driver", "dashboard-stats"],
+        dashboardSnapshot,
+      );
       queryClient.setQueryData(DASHBOARD_CACHE_KEY, dashboardSnapshot);
 
       saveDashboardAsyncCache(dashboardSnapshot).catch(() => {});
@@ -1189,12 +1246,18 @@ export default function DashboardScreen({ navigation }) {
       // ✅ Only refresh if forced or 15+ seconds since last refresh (prevent hammering)
       const timeSinceLastRefresh = now - lastDashboardRefreshAtRef.current;
       if (!force && timeSinceLastRefresh < 15000) {
-        console.log(`[Dashboard] Skipping refresh (${timeSinceLastRefresh}ms since last)`);
+        console.log(
+          `[Dashboard] Skipping refresh (${timeSinceLastRefresh}ms since last)`,
+        );
         return;
       }
 
       lastDashboardRefreshAtRef.current = now;
-      console.log("[Dashboard] Triggering dashboard refresh (force:", force, ")");
+      console.log(
+        "[Dashboard] Triggering dashboard refresh (force:",
+        force,
+        ")",
+      );
       await Promise.all([fetchStatusInfo(), fetchDashboardData()]);
     },
     [fetchDashboardData, fetchStatusInfo],
@@ -1280,6 +1343,24 @@ export default function DashboardScreen({ navigation }) {
         const action = String(payload?.action || "")
           .trim()
           .toLowerCase();
+        if (action === "new_delivery") {
+          if (!isFocusedRef.current) {
+            pendingDashboardRefreshRef.current = true;
+            return;
+          }
+
+          setTimeout(async () => {
+            const token = await AsyncStorage.getItem("token");
+            if (!token) return;
+            syncAvailableDeliveriesInBackgroundRef.current?.(
+              token,
+              "new_delivery",
+              { forceSync: true },
+            );
+          }, 0);
+          return;
+        }
+
         if (action !== "accepted") return;
 
         // Defer refresh to avoid cross-render updates.
@@ -1302,26 +1383,6 @@ export default function DashboardScreen({ navigation }) {
 
     const handleNewDelivery = async (payload) => {
       if (!isFocusedRef.current) return;
-
-      const incomingId = normalizeDeliveryId(payload?.delivery_id);
-      const canHydrateFromPayload =
-        incomingId && hasValidDeliveryCoordinates(payload);
-
-      if (canHydrateFromPayload) {
-        setAvailableDeliveries((prev) => {
-          const next = [
-            payload,
-            ...(prev || []).filter(
-              (delivery) =>
-                normalizeDeliveryId(delivery?.delivery_id) !== incomingId,
-            ),
-          ];
-          persistNearbyDeliveriesCacheRef.current?.(next);
-          return next;
-        });
-        setHasNearbyInitialSyncCompleted(true);
-        return;
-      }
 
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
@@ -1582,7 +1643,6 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
-
   // ============================================================================
   // HELPER FUNCTIONS
   // ============================================================================
@@ -1671,6 +1731,11 @@ export default function DashboardScreen({ navigation }) {
     const isFirstDelivery = isFirstDeliveryRequest(delivery);
     const routeImpact = delivery.route_impact || {};
 
+    const rtcDistance = Number(
+      routeImpact.restaurant_to_customer_km ||
+        delivery.restaurant_to_customer_km ||
+        0,
+    );
     const totalDistance = Number(
       delivery.total_delivery_distance_km ||
         routeImpact.total_distance_km ||
@@ -1689,10 +1754,14 @@ export default function DashboardScreen({ navigation }) {
     const extraMinutes = Number(routeImpact.extra_time_minutes || 0);
 
     const primaryDistance = isFirstDelivery
-      ? totalDistance > 0
-        ? totalDistance
-        : extraDistance
-      : extraDistance;
+      ? rtcDistance > 0
+        ? rtcDistance
+        : totalDistance > 0
+          ? totalDistance
+          : extraDistance
+      : extraDistance > 0
+        ? extraDistance
+        : totalDistance;
 
     const primaryMinutes = isFirstDelivery
       ? totalMinutes > 0
@@ -1813,7 +1882,6 @@ export default function DashboardScreen({ navigation }) {
     refreshDashboardOnDemand,
     syncAvailableDeliveriesInBackground,
   ]);
-
 
   useEffect(() => {
     if (!statusMessage) {
@@ -2331,7 +2399,9 @@ export default function DashboardScreen({ navigation }) {
                     </View>
                   ))}
                 </View>
-              ) : nearbySyncError && nearbyDeliveries.length === 0 && !isNearbySyncing ? (
+              ) : nearbySyncError &&
+                nearbyDeliveries.length === 0 &&
+                !isNearbySyncing ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="warning-outline" size={52} color="#f59e0b" />
                   <Text style={styles.emptyStateTitle}>
@@ -2343,7 +2413,10 @@ export default function DashboardScreen({ navigation }) {
                   <TouchableOpacity
                     style={styles.retryNearbyButton}
                     onPress={() => {
-                      nearbySyncBackoffRef.current = { consecutiveFailures: 0, nextAllowedAt: 0 };
+                      nearbySyncBackoffRef.current = {
+                        consecutiveFailures: 0,
+                        nextAllowedAt: 0,
+                      };
                       nearbySyncInFlightRef.current = false;
                       fetchDashboardData();
                     }}
@@ -2353,7 +2426,9 @@ export default function DashboardScreen({ navigation }) {
                     </Text>
                   </TouchableOpacity>
                 </View>
-              ) : nearbyDeliveries.length === 0 && hasNearbyInitialSyncCompleted && !isNearbySyncing ? (
+              ) : nearbyDeliveries.length === 0 &&
+                hasNearbyInitialSyncCompleted &&
+                !isNearbySyncing ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="cube-outline" size={64} color="#cbd5e1" />
                   <Text style={styles.emptyStateTitle}>No requests nearby</Text>
@@ -2383,7 +2458,6 @@ export default function DashboardScreen({ navigation }) {
                   ))}
                 </View>
               ) : (
-
                 visibleNearbyDeliveries.map((delivery, index) => {
                   const breakdown = getEarningsBreakdown(delivery);
                   const tripSummary = getDistanceAndTimeSummary(delivery);
@@ -2482,13 +2556,17 @@ export default function DashboardScreen({ navigation }) {
                       <TouchableOpacity
                         style={[
                           styles.acceptButton,
-                          (acceptingOrder === delivery.delivery_id || isNearbySyncing) &&
+                          (acceptingOrder === delivery.delivery_id ||
+                            isNearbySyncing) &&
                             styles.acceptButtonDisabled,
                         ]}
                         onPress={() =>
                           handleAcceptDelivery(delivery.delivery_id)
                         }
-                        disabled={acceptingOrder === delivery.delivery_id || isNearbySyncing}
+                        disabled={
+                          acceptingOrder === delivery.delivery_id ||
+                          isNearbySyncing
+                        }
                       >
                         {acceptingOrder === delivery.delivery_id ? (
                           <>
@@ -2520,7 +2598,6 @@ export default function DashboardScreen({ navigation }) {
                     </View>
                   );
                 })
-
               )}
               {remainingNearbyCount > 0 && (
                 <TouchableOpacity

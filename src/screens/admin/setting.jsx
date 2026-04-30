@@ -328,46 +328,65 @@ export default function Settings() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: [ImagePicker.MediaType.Images],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: imageType === "logo" ? [1, 1] : [16, 9],
         quality: 0.8,
         base64: true,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        setUploading(imageType);
+      if (result.canceled) return;
 
-        const token = await getAccessToken();
-        if (!token) throw new Error("No authentication token found");
-        const base64String = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      const selectedAsset = result.assets?.[0];
 
-        const response = await fetch(`${API_URL}/admin/upload-image`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ imageData: base64String }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.message || "Failed to upload image");
-        }
-
-        const fieldName = imageType === "logo" ? "logo_url" : "cover_image_url";
-        setRestaurantFormData((prev) => ({
-          ...prev,
-          [fieldName]: data.url,
-        }));
-
-        setUploading(null);
+      if (!selectedAsset) {
+        Alert.alert("Error", "No image selected. Please try again.");
+        return;
       }
+
+      if (selectedAsset.type && selectedAsset.type !== "image") {
+        Alert.alert("Invalid File", "Please select an image file only.");
+        return;
+      }
+
+      if (!selectedAsset.base64) {
+        Alert.alert(
+          "Error",
+          "Could not read the selected image. Please choose another image.",
+        );
+        return;
+      }
+
+      setUploading(imageType);
+
+      const token = await getAccessToken();
+      if (!token) throw new Error("No authentication token found");
+      const base64String = `data:image/jpeg;base64,${selectedAsset.base64}`;
+
+      const response = await fetch(`${API_URL}/admin/upload-image`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ imageData: base64String }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to upload image");
+      }
+
+      const fieldName = imageType === "logo" ? "logo_url" : "cover_image_url";
+      setRestaurantFormData((prev) => ({
+        ...prev,
+        [fieldName]: data.url,
+      }));
     } catch (err) {
       console.error("Error uploading image:", err);
       Alert.alert("Error", err.message || "Failed to upload image");
+    } finally {
       setUploading(null);
     }
   };
