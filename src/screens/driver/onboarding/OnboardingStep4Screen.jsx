@@ -204,18 +204,6 @@ export default function OnboardingStep4Screen({ navigation }) {
             </Text>
           </View>
 
-          <View style={s.securityBox}>
-            <Text style={s.securityText}>
-              Security: Your bank details are encrypted and stored securely.
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={s.backBtn}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={s.backBtnText}>Back</Text>
-          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>

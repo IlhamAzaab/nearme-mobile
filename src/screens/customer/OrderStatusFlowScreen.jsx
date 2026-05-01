@@ -117,12 +117,13 @@ async function getCachedDriverInfo(orderId) {
 }
 
 async function cacheDriverInfo(orderId, driver) {
-  if (!orderId || !driver) return;
+  const normalized = normalizeDriverInfo(driver);
+  if (!orderId || !normalized) return;
 
   try {
     const raw = await AsyncStorage.getItem(DRIVER_INFO_CACHE_KEY);
     const map = raw ? JSON.parse(raw) : {};
-    map[String(orderId)] = driver;
+    map[String(orderId)] = normalized;
     await AsyncStorage.setItem(DRIVER_INFO_CACHE_KEY, JSON.stringify(map));
   } catch {
     // ignore cache write failures
@@ -183,87 +184,227 @@ async function cacheDriverLastLocation(orderId, location) {
   }
 }
 
+function normalizeDriverInfo(driver) {
+  if (!driver || typeof driver !== "object") return null;
+
+  const vehicle = driver.vehicle || driver.driverVehicle || {};
+
+  const driverId =
+    driver.id ||
+    driver.driver_id ||
+    driver.driverId ||
+    driver.user_id ||
+    driver.userId ||
+    driver.driver?.id ||
+    driver.driver?.driver_id;
+
+  const fullName =
+    driver.full_name ||
+    driver.fullName ||
+    driver.name ||
+    driver.driver_name ||
+    driver.driverName ||
+    driver.driverFullName ||
+    driver.driver_full_name ||
+    driver.driver?.full_name ||
+    driver.driver?.name ||
+    "";
+
+  const phone =
+    driver.phone ||
+    driver.mobile ||
+    driver.phone_number ||
+    driver.driver_phone ||
+    driver.driverPhone ||
+    driver.driver_mobile ||
+    driver.driver?.phone ||
+    "";
+
+  const vehicleModel =
+    driver.vehicle_model ||
+    driver.driver_vehicle_model ||
+    driver.vehicleModel ||
+    vehicle.model ||
+    vehicle.vehicle_model ||
+    driver.bike_model ||
+    driver.bikeModel ||
+    "";
+
+  const vehicleNumber =
+    driver.vehicle_number ||
+    driver.driver_vehicle_number ||
+    driver.vehicleNumber ||
+    driver.license_plate ||
+    driver.plate_number ||
+    vehicle.vehicle_number ||
+    vehicle.plate_number ||
+    driver.bike_number ||
+    driver.bikeNumber ||
+    "";
+
+  const vehicleType =
+    driver.vehicle_type ||
+    driver.driver_vehicle_type ||
+    driver.vehicleType ||
+    driver.driver_type ||
+    vehicle.vehicle_type ||
+    vehicle.type ||
+    "";
+
+  const vehicleColor =
+    driver.vehicle_color ||
+    driver.driver_vehicle_color ||
+    driver.vehicleColor ||
+    vehicle.color ||
+    vehicle.vehicle_color ||
+    "";
+
+  const photoUrl =
+    driver.photo_url ||
+    driver.profile_photo_url ||
+    driver.avatar_url ||
+    driver.driver_photo ||
+    driver.driver_photo_url ||
+    driver.driver_avatar ||
+    driver.driver_avatar_url ||
+    driver.driverPhoto ||
+    driver.profileImage ||
+    driver.profile_image ||
+    driver.driver?.profile_photo_url ||
+    "";
+
+  const rating =
+    driver.rating || driver.driver_rating || driver.driverRating || null;
+
+  const hasAnyDriverData =
+    driverId ||
+    fullName ||
+    phone ||
+    vehicleModel ||
+    vehicleNumber ||
+    vehicleType ||
+    vehicleColor ||
+    photoUrl ||
+    rating != null;
+
+  if (!hasAnyDriverData) return null;
+
+  return {
+    ...driver,
+    id: driverId || driver.id || "",
+    driver_id: driverId || driver.driver_id || "",
+    full_name: fullName || "Assigned Driver",
+    phone,
+    vehicle_model: vehicleModel,
+    vehicle_number: vehicleNumber,
+    vehicle_type: vehicleType,
+    vehicle_color: vehicleColor,
+    photo_url: photoUrl,
+    profile_photo_url: photoUrl,
+    rating,
+  };
+}
+
 function resolveDriverInfo(payload) {
   if (!payload || typeof payload !== "object") return null;
 
-  const pickDriver = (source) =>
-    source?.driver ||
-    source?.driver_info ||
-    source?.driverInfo ||
-    source?.driver_profile ||
-    source?.driverProfile ||
-    source?.assigned_driver ||
-    source?.assignedDriver ||
-    source?.delivery_driver ||
-    source?.deliveryDriver ||
-    source?.courier ||
-    source?.rider;
-  
+  const pickDriver = (source) => {
+    if (!source || typeof source !== "object") return null;
+
+    return (
+      source.driver ||
+      source.driver_info ||
+      source.driverInfo ||
+      source.driver_profile ||
+      source.driverProfile ||
+      source.assigned_driver ||
+      source.assignedDriver ||
+      source.delivery_driver ||
+      source.deliveryDriver ||
+      source.courier ||
+      source.rider ||
+      null
+    );
+  };
+
   const buildFromFlatFields = (source) => {
     if (!source || typeof source !== "object") return null;
-    const fullName =
-      source.driver_name ||
-      source.driver_full_name ||
-      source.driverFullName ||
-      source.driverName;
-    const phone =
-      source.driver_phone || source.driverPhone || source.driver_mobile;
-    const vehicleModel =
-      source.vehicle_model ||
-      source.driver_vehicle_model ||
-      source.bike_model ||
-      source.bikeModel;
-    const vehicleNumber =
-      source.vehicle_number ||
-      source.driver_vehicle_number ||
-      source.license_plate ||
-      source.bike_number ||
-      source.bikeNumber;
-    const vehicleType =
-      source.vehicle_type || source.driver_vehicle_type || source.vehicleType;
-    const vehicleColor =
-      source.vehicle_color ||
-      source.driver_vehicle_color ||
-      source.vehicleColor;
-    const photoUrl =
-      source.driver_photo ||
-      source.driver_photo_url ||
-      source.driver_avatar ||
-      source.driver_avatar_url ||
-      source.driverPhoto;
 
-    if (!fullName && !phone && !vehicleModel && !vehicleNumber && !photoUrl) {
-      return null;
-    }
-
-    return {
-      full_name: fullName || "",
-      phone: phone || "",
-      vehicle_model: vehicleModel || "",
-      vehicle_number: vehicleNumber || "",
-      vehicle_type: vehicleType || "",
-      vehicle_color: vehicleColor || "",
-      photo_url: photoUrl || "",
-    };
+    return normalizeDriverInfo({
+      id:
+        source.driver_id ||
+        source.driverId ||
+        source.assigned_driver_id ||
+        source.driver_user_id,
+      driver_id:
+        source.driver_id ||
+        source.driverId ||
+        source.assigned_driver_id ||
+        source.driver_user_id,
+      full_name:
+        source.driver_name ||
+        source.driver_full_name ||
+        source.driverFullName ||
+        source.driverName ||
+        source.full_name,
+      phone:
+        source.driver_phone ||
+        source.driverPhone ||
+        source.driver_mobile ||
+        source.phone,
+      vehicle_model:
+        source.vehicle_model ||
+        source.driver_vehicle_model ||
+        source.bike_model ||
+        source.bikeModel,
+      vehicle_number:
+        source.vehicle_number ||
+        source.driver_vehicle_number ||
+        source.license_plate ||
+        source.bike_number ||
+        source.bikeNumber,
+      vehicle_type:
+        source.vehicle_type || source.driver_vehicle_type || source.vehicleType,
+      vehicle_color:
+        source.vehicle_color ||
+        source.driver_vehicle_color ||
+        source.vehicleColor,
+      photo_url:
+        source.driver_photo ||
+        source.driver_photo_url ||
+        source.driver_avatar ||
+        source.driver_avatar_url ||
+        source.driverPhoto ||
+        source.profile_photo_url,
+      rating: source.driver_rating || source.rating,
+    });
   };
-  const direct = pickDriver(payload);
-  if (direct && typeof direct === "object") return direct;
 
-  const flat = buildFromFlatFields(payload);
-  if (flat) return flat;
+  const direct =
+    normalizeDriverInfo(pickDriver(payload)) || buildFromFlatFields(payload);
 
-  const nestedOrder =
-    payload.order || payload.orderData || payload.order_details;
-  const nestedDelivery = payload.delivery || payload.delivery_info;
+  if (direct) return direct;
 
-  const nested = pickDriver(nestedOrder) || pickDriver(nestedDelivery);
-  if (nested && typeof nested === "object") return nested;
+  const nestedSources = [
+    payload.order,
+    payload.orderData,
+    payload.order_details,
+    payload.delivery,
+    payload.delivery_info,
+    payload.delivery_details,
+    payload.deliveryDetails,
+    payload.data,
+    payload.result,
+  ];
 
-  return (
-    buildFromFlatFields(nestedOrder) ||
-    buildFromFlatFields(nestedDelivery) ||
-    null
-  );
+  for (const source of nestedSources) {
+    const nested =
+      normalizeDriverInfo(pickDriver(source)) || buildFromFlatFields(source);
+
+    if (nested) return nested;
+  }
+
+  return null;
 }
 
 // =============================================================================
@@ -329,6 +470,14 @@ const ETA_VISIBLE_STATUSES = new Set([
   "driver_assigned",
   "picked_up",
   "on_the_way",
+]);
+const DRIVER_DETAIL_STATUSES = new Set([
+  "accepted",
+  "driver_accepted",
+  "driver_assigned",
+  "picked_up",
+  "on_the_way",
+  "at_customer",
 ]);
 const RESTAURANT_MARKER_HTML = `
   <div style="width:30px;height:42px;display:flex;align-items:flex-start;justify-content:center;">
@@ -1368,19 +1517,44 @@ const DeliveredAnimation = React.memo(() => {
 
 /* ─── Driver Card ─── */
 const DriverCard = React.memo(({ driver }) => {
-  if (!driver) return null;
+  if (!driver) {
+    return (
+      <View style={st.driverCard}>
+        <View style={st.driverAvatarWrap}>
+          <View style={st.driverAvatarFallback}>
+            <Ionicons name="time-outline" size={20} color="#06C168" />
+          </View>
+        </View>
+        <View style={st.driverMeta}>
+          <Text style={st.driverName} numberOfLines={1}>
+            Driver details
+          </Text>
+          <Text style={st.driverRowText}>
+            We will show driver info shortly.
+          </Text>
+        </View>
+      </View>
+    );
+  }
   const vehicleNumber = driver.vehicle_number || driver.license_plate;
   const vehicleModel =
     driver.vehicle_model ||
     driver?.driverInfo?.vehicle_model ||
     driver?.vehicle?.model ||
     "";
+  const vehicleType =
+    driver.vehicle_type ||
+    driver.driver_vehicle_type ||
+    driver.vehicleType ||
+    "";
+
+  const photoUri = driver.photo_url || driver.profile_photo_url;
 
   return (
     <View style={st.driverCard}>
       <View style={st.driverAvatarWrap}>
-        {driver.photo_url ? (
-          <OptimizedImage uri={driver.photo_url} style={st.driverAvatar} />
+        {photoUri ? (
+          <OptimizedImage uri={photoUri} style={st.driverAvatar} />
         ) : (
           <View style={st.driverAvatarFallback}>
             <Ionicons name="person" size={20} color="#06C168" />
@@ -1395,12 +1569,17 @@ const DriverCard = React.memo(({ driver }) => {
         {vehicleNumber && (
           <View style={st.driverRow}>
             <Ionicons name="bicycle" size={11} color="#6B7280" />
-            <Text style={st.driverRowText}>{vehicleNumber}</Text>
+            <Text style={st.driverRowText}>Plate: {vehicleNumber}</Text>
           </View>
         )}
+        {vehicleType ? (
+          <View style={st.driverRow}>
+            <Text style={st.driverRowText}>Vehicle: {vehicleType}</Text>
+          </View>
+        ) : null}
         {vehicleModel ? (
           <View style={st.driverRow}>
-            <Text style={st.driverRowText}>{vehicleModel}</Text>
+            <Text style={st.driverRowText}>Model: {vehicleModel}</Text>
           </View>
         ) : null}
         {driver.phone ? (
@@ -1564,7 +1743,11 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
     ),
   );
   const [driverInfo, setDriverInfo] = useState(
-    () => resolveDriverInfo(params) || resolveDriverInfo(params.order) || null,
+    () =>
+      normalizeDriverInfo(params.driverInfo) ||
+      resolveDriverInfo(params) ||
+      resolveDriverInfo(params.order) ||
+      null,
   );
   const [estimatedTime, setEstimatedTime] = useState("");
   const [driverLocation, setDriverLocation] = useState(null);
@@ -1737,6 +1920,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
   const lastOnTheWayEtaRefreshRef = useRef(0);
   const orderIdRef = useRef(orderId);
   const currentStatusRef = useRef(currentStatus);
+  const driverFetchInFlightRef = useRef(false);
 
   useEffect(() => {
     orderIdRef.current = orderId;
@@ -1758,19 +1942,9 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
     () => getNextStepMessage(currentStatus),
     [currentStatus],
   );
-  const shouldShowDriverCard =
-    !!driverInfo &&
-    (currentStatus === "accepted" ||
-      currentStatus === "driver_accepted" ||
-      currentStatus === "driver_assigned" ||
-      currentStatus === "picked_up" ||
-      isOTW);
-  const shouldHideDeliveryAddress =
-    currentStatus === "accepted" ||
-    currentStatus === "driver_accepted" ||
-    currentStatus === "driver_assigned" ||
-    currentStatus === "picked_up" ||
-    currentStatus === "on_the_way";
+  const shouldShowDriverSection = DRIVER_DETAIL_STATUSES.has(currentStatus);
+  const shouldShowDriverCard = shouldShowDriverSection && !!driverInfo;
+  const shouldHideDeliveryAddress = DRIVER_DETAIL_STATUSES.has(currentStatus);
   const mapSectionHeight = useMemo(
     () =>
       Math.max(
@@ -2102,6 +2276,37 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
     };
   }, [orderId]);
 
+  const fetchDriverInfoIfNeeded = useCallback(async () => {
+    if (
+      !orderId ||
+      driverInfo ||
+      driverFetchInFlightRef.current ||
+      !DRIVER_DETAIL_STATUSES.has(currentStatus)
+    ) {
+      return;
+    }
+
+    driverFetchInFlightRef.current = true;
+    try {
+      const token = await getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/orders/${orderId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const o = data.order || data;
+      const orderDriver = resolveDriverInfo(data) || resolveDriverInfo(o);
+      if (orderDriver) {
+        setDriverInfo(orderDriver);
+        cacheDriverInfo(orderId, orderDriver);
+      }
+    } catch (err) {
+      console.log("Fetch driver info fallback error:", err);
+    } finally {
+      driverFetchInFlightRef.current = false;
+    }
+  }, [orderId, driverInfo, currentStatus]);
+
   useEffect(() => {
     let mounted = true;
 
@@ -2152,6 +2357,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
       orderId,
       status: currentStatus,
       order: orderData.order || params.order,
+      driverInfo: driverInfo || params.driverInfo || null,
       totalAmount: resolveOrderDisplayTotal(
         orderData.order,
         orderData.totalAmount ?? params.totalAmount ?? 0,
@@ -2174,6 +2380,10 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
     orderData.restaurantName,
     orderData.restaurantLogoUrl,
   ]);
+
+  useEffect(() => {
+    fetchDriverInfoIfNeeded();
+  }, [fetchDriverInfoIfNeeded]);
 
   const shouldShowEstimatedArrival =
     shouldShowEta &&
@@ -2337,10 +2547,30 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
           data.effective_status || data.delivery_status || data.status || "",
         );
 
-        const statusDriver = resolveDriverInfo(data);
+        const statusDriver =
+          resolveDriverInfo(data) ||
+          resolveDriverInfo(data.order) ||
+          resolveDriverInfo(data.delivery) ||
+          resolveDriverInfo(data.delivery_status) ||
+          null;
+
         if (statusDriver) {
           setDriverInfo(statusDriver);
           cacheDriverInfo(orderId, statusDriver);
+        } else {
+          console.log(
+            "[ORDER TRACKING] No driver info in delivery-status response",
+            {
+              orderId,
+              keys: Object.keys(data || {}),
+              status: data?.status || data?.delivery_status,
+              driver_id:
+                data?.driver_id ||
+                data?.delivery?.driver_id ||
+                data?.order?.driver_id ||
+                null,
+            },
+          );
         }
 
         const driverLat = Number(data.driverLocation?.latitude);
@@ -3029,7 +3259,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
           <ProgressBar stepIndex={stepIndex} />
 
           {/* 3) Driver card (accepted / picked_up / on_the_way) */}
-          {shouldShowDriverCard && <DriverCard driver={driverInfo} />}
+          {shouldShowDriverSection && <DriverCard driver={driverInfo} />}
 
           {/* ── Delivered: premium thank-you screen ── */}
           {isDone ? (

@@ -268,6 +268,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [currentVisibleIndex, setCurrentVisibleIndex] = useState(0);
   const hasCompletedFirstFetchRef = useRef(false);
+  const lastFocusRefreshAtRef = useRef(0);
   const deliveriesRef = useRef([]);
   const currentRouteRef = useRef({
     total_stops: 0,
@@ -491,40 +492,35 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
     let cancelled = false;
 
     const maybeSyncOnFocus = async () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < 2500) return;
+      lastFocusRefreshAtRef.current = now;
+
       const modeCheck = await checkDeliveringMode();
       if (cancelled || modeCheck?.restricted) return;
 
-      const focusLocation = await getLocation();
+      const knownLocation =
+        (isValidLocation(driverLocationRef.current) &&
+          driverLocationRef.current) ||
+        (isValidLocation(lastFetchLocationRef.current) &&
+          lastFetchLocationRef.current) ||
+        null;
+
+      const focusLocation = isValidLocation(knownLocation)
+        ? knownLocation
+        : await getLocation();
+
       if (cancelled || !isValidLocation(focusLocation)) return;
 
       setDriverLocation(focusLocation);
       setIsLocationResolved(true);
+      lastFetchLocationRef.current = focusLocation;
 
-      const lastFetchedLocation = lastFetchLocationRef.current;
-
-      if (!isValidLocation(lastFetchedLocation)) {
-        lastFetchLocationRef.current = focusLocation;
-        await fetchPendingDeliveriesRef.current?.(
-          focusLocation,
-          true,
-          "screen_focus_first_sync",
-        );
-        return;
-      }
-
-      const movedDistance = approximateDistanceMeters(
-        lastFetchedLocation,
+      await fetchPendingDeliveriesRef.current?.(
         focusLocation,
+        true,
+        "screen_focus_force",
       );
-
-      if (movedDistance >= DATA_REFRESH_THRESHOLD) {
-        lastFetchLocationRef.current = focusLocation;
-        await fetchPendingDeliveriesRef.current?.(
-          focusLocation,
-          true,
-          "screen_focus_movement_200m",
-        );
-      }
     };
 
     maybeSyncOnFocus();
@@ -1380,7 +1376,6 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
         ]);
 
         showToast("✅ Delivery accepted!");
-        await fetchDeliveriesWithCurrentLocation(true, "delivery_accepted");
 
         InteractionManager.runAfterInteractions(() => {
           navigation.navigate("DriverMap", {
@@ -1389,6 +1384,8 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
             acceptedAt: Date.now(),
           });
         });
+
+        void fetchDeliveriesWithCurrentLocation(true, "delivery_accepted");
       } else {
         if (data?.driver_status === "suspended") {
           Alert.alert(
@@ -1629,7 +1626,7 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
           isPostCompleteHardLoading
         }
         onAccept={handleAcceptDelivery}
-        onDecline={handleDecline}
+        onRefresh={onRefresh}
         hasActiveDeliveries={currentRoute.active_deliveries > 0}
         isFirstDelivery={isFirstNonDeclined}
         isDeclined={isDeclined}
@@ -1901,7 +1898,7 @@ function DeliveryCard({
   accepting,
   isSyncing = false,
   onAccept,
-  onDecline,
+  onRefresh,
   onBack,
   hasActiveDeliveries,
   isFirstDelivery = false,
@@ -1922,10 +1919,8 @@ function DeliveryCard({
     route_impact = {},
     can_accept = true,
     reason,
-    driver_to_restaurant_route,
     restaurant_to_customer_route,
     order_items = [],
-    total_delivery_distance_km = 0,
   } = safeDelivery;
 
   // Extract route impact fields
@@ -1965,9 +1960,7 @@ function DeliveryCard({
   );
   const displayDistanceKm = isStackedDelivery
     ? Number(extra_distance_km || 0)
-    : rtcDistanceKm > 0
-      ? rtcDistanceKm
-      : Number(total_delivery_distance_km || r1_distance_km || 0);
+    : rtcDistanceKm;
 
   // Decode polyline helper
   const decodePolyline = (encoded) => {
@@ -2006,13 +1999,6 @@ function DeliveryCard({
   };
 
   // Prepare route paths
-  const driverToRestaurantPath = driver_to_restaurant_route?.encoded_polyline
-    ? decodePolyline(driver_to_restaurant_route.encoded_polyline)
-    : driver_to_restaurant_route?.coordinates?.map((coord) => ({
-        latitude: coord[1],
-        longitude: coord[0],
-      })) || [];
-
   const restaurantToCustomerPath =
     restaurant_to_customer_route?.encoded_polyline
       ? decodePolyline(restaurant_to_customer_route.encoded_polyline)
@@ -2021,25 +2007,6 @@ function DeliveryCard({
           longitude: coord[0],
         })) || [];
 
-  const hasPolylineData =
-    driverToRestaurantPath.length > 0 || restaurantToCustomerPath.length > 0;
-
-  const pickupAddress =
-    restaurant?.address ||
-    delivery?.pickup_address ||
-    delivery?.restaurant_address ||
-    restaurant?.city ||
-    "No pickup address";
-
-  const dropoffAddress =
-    customer?.address ||
-    delivery?.dropoff_address ||
-    delivery?.delivery_address ||
-    delivery?.customer_address ||
-    customer?.city ||
-    "No drop-off address";
-
-  // Generate curved path for stacked deliveries (fallback)
   const generateCurvedPath = useCallback((start, end, numPoints = 50) => {
     if (!start || !end) return [];
 
@@ -2078,21 +2045,6 @@ function DeliveryCard({
     return points;
   }, []);
 
-  // Curved paths for stacked deliveries
-  const driverToRestaurantCurved = useMemo(() => {
-    if (!driverLocation || !restaurant) return [];
-    return generateCurvedPath(
-      {
-        latitude: driverLocation.latitude,
-        longitude: driverLocation.longitude,
-      },
-      {
-        latitude: parseFloat(restaurant.latitude),
-        longitude: parseFloat(restaurant.longitude),
-      },
-    );
-  }, [driverLocation, restaurant, generateCurvedPath]);
-
   const restaurantToCustomerCurved = useMemo(() => {
     if (!restaurant || !customer) return [];
     return generateCurvedPath(
@@ -2106,6 +2058,21 @@ function DeliveryCard({
       },
     );
   }, [restaurant, customer, generateCurvedPath]);
+
+  const pickupAddress =
+    restaurant?.address ||
+    delivery?.pickup_address ||
+    delivery?.restaurant_address ||
+    restaurant?.city ||
+    "No pickup address";
+
+  const dropoffAddress =
+    customer?.address ||
+    delivery?.dropoff_address ||
+    delivery?.delivery_address ||
+    delivery?.customer_address ||
+    customer?.city ||
+    "No drop-off address";
 
   const fitCoordinates = useMemo(() => {
     const points = [];
@@ -2130,10 +2097,7 @@ function DeliveryCard({
         longitude: parseFloat(customer.longitude),
       });
     }
-
-    driverToRestaurantPath.forEach((p) => points.push(p));
     restaurantToCustomerPath.forEach((p) => points.push(p));
-    driverToRestaurantCurved.forEach((p) => points.push(p));
     restaurantToCustomerCurved.forEach((p) => points.push(p));
 
     return points;
@@ -2141,9 +2105,7 @@ function DeliveryCard({
     driverLocation,
     restaurant,
     customer,
-    driverToRestaurantPath,
     restaurantToCustomerPath,
-    driverToRestaurantCurved,
     restaurantToCustomerCurved,
   ]);
 
@@ -2233,22 +2195,7 @@ function DeliveryCard({
               },
             ]}
             polylines={[
-              ...(showRoutes &&
-              hasPolylineData &&
-              driverToRestaurantPath.length > 1
-                ? [
-                    {
-                      id: "driverToRestaurant",
-                      coordinates: driverToRestaurantPath,
-                      strokeColor: "#1a1a1a",
-                      strokeWidth: 4,
-                      dashArray: isStackedDelivery ? "10 8" : "",
-                    },
-                  ]
-                : []),
-              ...(showRoutes &&
-              hasPolylineData &&
-              restaurantToCustomerPath.length > 1
+              ...(showRoutes && restaurantToCustomerPath.length > 1
                 ? [
                     {
                       id: "restaurantToCustomer",
@@ -2259,44 +2206,7 @@ function DeliveryCard({
                     },
                   ]
                 : []),
-              ...(showRoutes &&
-              !hasPolylineData &&
-              driverToRestaurantCurved.length > 0
-                ? [
-                    {
-                      id: "driverToRestaurantCurved",
-                      coordinates: driverToRestaurantCurved,
-                      strokeColor: "#1a1a1a",
-                      strokeWidth: 4,
-                      dashArray: isStackedDelivery ? "10 8" : "",
-                    },
-                  ]
-                : []),
-              ...(showRoutes &&
-              !hasPolylineData &&
-              restaurantToCustomerCurved.length > 0
-                ? [
-                    {
-                      id: "restaurantToCustomerCurved",
-                      coordinates: restaurantToCustomerCurved,
-                      strokeColor: "#1a1a1a",
-                      strokeWidth: 3,
-                      dashArray: isStackedDelivery ? "10 8" : "",
-                    },
-                  ]
-                : []),
-              ...(isStackedDelivery && driverToRestaurantCurved.length > 0
-                ? [
-                    {
-                      id: "stackedDriverToRestaurant",
-                      coordinates: driverToRestaurantCurved,
-                      strokeColor: "#1a1a1a",
-                      strokeWidth: 4,
-                      dashArray: "10 8",
-                    },
-                  ]
-                : []),
-              ...(isStackedDelivery && restaurantToCustomerCurved.length > 0
+              ...(isStackedDelivery && restaurantToCustomerCurved.length > 1
                 ? [
                     {
                       id: "stackedRestaurantToCustomer",
@@ -2322,13 +2232,10 @@ function DeliveryCard({
         </Pressable>
       )}
 
-      {onDecline && !isDeclined && (
-        <Pressable
-          style={styles.floatingDeclineBtn}
-          onPress={() => onDecline(delivery_id, cardIndex)}
-        >
-          <Text style={styles.declineBtnIcon}>✕</Text>
-          <Text style={styles.declineBtnText}>Decline</Text>
+      {onRefresh && (
+        <Pressable style={styles.floatingDeclineBtn} onPress={onRefresh}>
+          <Text style={styles.declineBtnIcon}>↻</Text>
+          <Text style={styles.declineBtnText}>Refresh</Text>
         </Pressable>
       )}
 
@@ -2389,17 +2296,15 @@ function DeliveryCard({
           <View style={styles.statItemCompact}>
             <Ionicons name="map-outline" size={16} color="#6B7280" />
             <Text style={styles.statValueCompact}>
-              {isStackedDelivery ? "+" : ""}
               {Number(displayDistanceKm || 0).toFixed(1)} km
             </Text>
           </View>
           <View style={styles.statItemCompact}>
             <Ionicons name="time-outline" size={16} color="#6B7280" />
             <Text style={styles.statValueCompact}>
-              {isStackedDelivery ? "+" : ""}
               {Number(
                 isStackedDelivery
-                  ? extra_time_minutes
+                  ? extra_time_minutes || 0
                   : estimated_time_minutes || 0,
               ).toFixed(0)}{" "}
               mins

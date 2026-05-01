@@ -103,12 +103,6 @@ export default function OnboardingStep5Screen({ navigation }) {
               <Text style={s.submitBtnText}>Submit Application</Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity
-            style={s.backBtn}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={s.backBtnText}>Back</Text>
-          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>

@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDriverDeliveryNotifications } from "../context/DriverDeliveryNotificationContext";
 import AvailableDeliveriesScreen from "../screens/driver/AvailableDeliveriesScreen";
@@ -36,9 +36,52 @@ import {
 } from "../utils/driverAvailableUnseen";
 import { fetchDriverActiveDeliveries } from "../services/driverActiveDeliveriesService";
 import { getAccessToken } from "../lib/authStorage";
+import { API_URL } from "../config/env";
+import { useAuth } from "../app/providers/AuthProvider";
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+
+function DriverLoadingScreen() {
+  return (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color="#06C168" />
+    </View>
+  );
+}
+
+function getInitialRoute(driverData) {
+  if (!driverData) {
+    return "DriverTabs";
+  }
+
+  const {
+    force_password_change,
+    onboarding_completed,
+    onboarding_step,
+    driver_status,
+  } = driverData;
+
+  if (force_password_change) {
+    return "DriverProfile";
+  }
+
+  if (!onboarding_completed) {
+    const step = Math.min(Math.max(onboarding_step || 1, 1), 5);
+    return `DriverOnboardingStep${step}`;
+  }
+
+  const normalizedStatus = String(driver_status || "").toLowerCase();
+  if (
+    normalizedStatus === "pending" ||
+    normalizedStatus === "suspended" ||
+    normalizedStatus === "rejected"
+  ) {
+    return "DriverPending";
+  }
+
+  return "DriverTabs";
+}
 
 // Tab icon component
 function TabIcon({ label, focused, badge = 0 }) {
@@ -293,10 +336,79 @@ function PaymentStack() {
 }
 
 export default function DriverNavigator() {
+  const { logout } = useAuth();
+  const [isChecking, setIsChecking] = useState(true);
+  const [initialRoute, setInitialRoute] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const controller = new AbortController();
+
+    const checkDriverStatus = async () => {
+      setIsChecking(true);
+      const [token, role] = await Promise.all([
+        getAccessToken(),
+        AsyncStorage.getItem("role"),
+      ]);
+
+      if (!mounted) return;
+
+      if (!token || role !== "driver") {
+        setInitialRoute("DriverTabs");
+        setIsChecking(false);
+        return;
+      }
+
+      try {
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const res = await fetch(`${API_URL}/onboarding/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (res.status === 401 || res.status === 403) {
+          await logout();
+          return;
+        }
+
+        if (!res.ok) {
+          setInitialRoute("DriverTabs");
+          return;
+        }
+
+        const data = await res.json();
+        const route = getInitialRoute(data?.driver);
+        setInitialRoute(route);
+      } catch (error) {
+        if (!mounted) return;
+        setInitialRoute("DriverTabs");
+      } finally {
+        if (mounted) {
+          setIsChecking(false);
+        }
+      }
+    };
+
+    checkDriverStatus();
+
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
+  }, [logout]);
+
+  if (isChecking || !initialRoute) {
+    return <DriverLoadingScreen />;
+  }
+
   return (
     <>
       <DriverLiveLocationSync />
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator
+        initialRouteName={initialRoute}
+        screenOptions={{ headerShown: false, animation: "fade" }}
+      >
         <Stack.Screen name="DriverTabs" component={DriverTabs} />
         <Stack.Screen name="DriverMap" component={DriverMapScreen} />
         <Stack.Screen
@@ -359,6 +471,12 @@ export default function DriverNavigator() {
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#06C168",
+  },
   tabBar: {
     height: 70,
     paddingTop: 8,

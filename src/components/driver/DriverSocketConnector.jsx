@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { DeviceEventEmitter } from "react-native";
 import { useSocket } from "../../context/SocketContext";
 import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNotificationContext";
 
@@ -17,6 +18,7 @@ import { useDriverDeliveryNotifications } from "../../context/DriverDeliveryNoti
 const DriverSocketConnector = ({ driverId, location }) => {
   const { on, off, emit, isConnected } = useSocket();
   const { addNotification } = useDriverDeliveryNotifications();
+  const DRIVER_DELIVERY_ACTION_EVENT = "driver:delivery_notification_action";
 
   // Send location updates to server
   useEffect(() => {
@@ -46,6 +48,12 @@ const DriverSocketConnector = ({ driverId, location }) => {
         message: `${data.restaurant?.name || "Restaurant"} → ${data.customer?.address || "Customer"}`,
         type: "delivery",
         data,
+      });
+      DeviceEventEmitter.emit(DRIVER_DELIVERY_ACTION_EVENT, {
+        action: "new_delivery",
+        deliveryId: data.delivery_id || data.deliveryId,
+        payload: data,
+        source: "driver_socket_connector",
       });
     };
 
