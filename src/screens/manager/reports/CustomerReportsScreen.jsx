@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -43,6 +44,9 @@ const CustomerReportsScreen = () => {
   const [sortOrder, setSortOrder] = useState("desc");
   const [page, setPage] = useState(1);
   const [result, setResult] = useState(null);
+  const [detailVisible, setDetailVisible] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailData, setDetailData] = useState(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -152,6 +156,32 @@ const CustomerReportsScreen = () => {
         },
       ],
     );
+  };
+
+  const handleOpenDetails = async (customer) => {
+    const token = await AsyncStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      setDetailLoading(true);
+      setDetailVisible(true);
+      const res = await fetch(
+        `${API_URL}/manager/reports/customers/${customer.id}/details?limit=10`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.message || "Failed to load customer details");
+      }
+      setDetailData(json);
+    } catch (err) {
+      Alert.alert("Error", err.message || "Failed to load customer details");
+      setDetailVisible(false);
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const summary = result?.summary || {};
@@ -351,6 +381,13 @@ const CustomerReportsScreen = () => {
 
                     <View style={styles.actionRow}>
                       <TouchableOpacity
+                        onPress={() => handleOpenDetails(customer)}
+                        disabled={actionLoadingId === customer.id}
+                        style={styles.actionView}
+                      >
+                        <Text style={styles.actionViewText}>View</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
                         onPress={() => handleSuspendToggle(customer)}
                         disabled={actionLoadingId === customer.id}
                         style={styles.actionSuspend}
@@ -397,6 +434,103 @@ const CustomerReportsScreen = () => {
         )}
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <Modal
+        visible={detailVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDetailVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            {detailLoading ? (
+              <View style={styles.center}>
+                <ActivityIndicator size="large" color="#13ECB9" />
+              </View>
+            ) : (
+              <>
+                <Text style={styles.modalTitle}>Customer Details</Text>
+                <Text style={styles.modalSubtitle}>
+                  {detailData?.customer?.username || "N/A"}
+                </Text>
+
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalLabel}>Email</Text>
+                  <Text style={styles.modalValue}>
+                    {detailData?.customer?.email || "N/A"}
+                  </Text>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalLabel}>Phone</Text>
+                  <Text style={styles.modalValue}>
+                    {detailData?.customer?.phone || "N/A"}
+                  </Text>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalLabel}>City</Text>
+                  <Text style={styles.modalValue}>
+                    {detailData?.customer?.city || "N/A"}
+                  </Text>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalLabel}>Joined</Text>
+                  <Text style={styles.modalValue}>
+                    {detailData?.customer?.created_at
+                      ? new Date(detailData.customer.created_at).toLocaleString()
+                      : "N/A"}
+                  </Text>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalLabel}>Total Orders</Text>
+                  <Text style={styles.modalValue}>
+                    {detailData?.summary?.total_orders || 0}
+                  </Text>
+                </View>
+
+                <Text style={styles.modalSectionTitle}>Recent Orders</Text>
+                <ScrollView style={{ maxHeight: 220 }}>
+                  {(detailData?.orders || []).length === 0 ? (
+                    <Text style={styles.modalEmpty}>No orders yet.</Text>
+                  ) : (
+                    detailData.orders.map((order) => (
+                      <View key={order.id} style={styles.orderRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.orderTitle}>
+                            #{order.order_number || order.id?.slice(-6)}
+                          </Text>
+                          <Text style={styles.orderSub}>
+                            {order.restaurant_name || "Restaurant"}
+                          </Text>
+                          <Text style={styles.orderSub}>
+                            {order.placed_at
+                              ? new Date(order.placed_at).toLocaleString()
+                              : ""}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: "flex-end" }}>
+                          <Text style={styles.orderAmount}>
+                            Rs.{Number(order.total_amount || 0).toFixed(0)}
+                          </Text>
+                          <Text style={styles.orderStatus}>
+                            {order.status || ""}
+                          </Text>
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+
+                <TouchableOpacity
+                  style={styles.modalCloseBtn}
+                  onPress={() => setDetailVisible(false)}
+                >
+                  <Text style={styles.modalCloseText}>Close</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -650,6 +784,63 @@ const styles = StyleSheet.create({
     padding: 16,
     textAlign: "center",
   },
+  actionView: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#E0F2FE",
+    alignItems: "center",
+  },
+  actionViewText: { fontSize: 12, fontWeight: "700", color: "#0C4A6E" },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalCard: {
+    width: "100%",
+    maxHeight: "90%",
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 20,
+  },
+  modalTitle: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
+  modalSubtitle: { fontSize: 14, color: "#64748B", marginBottom: 12 },
+  modalSectionTitle: {
+    marginTop: 16,
+    marginBottom: 8,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  modalInfoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+  },
+  modalLabel: { fontSize: 12, color: "#64748B" },
+  modalValue: { fontSize: 12, color: "#0F172A", fontWeight: "600" },
+  modalEmpty: { fontSize: 12, color: "#94A3B8" },
+  modalCloseBtn: {
+    marginTop: 16,
+    backgroundColor: "#0F172A",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  modalCloseText: { color: "#fff", fontWeight: "700" },
+  orderRow: {
+    flexDirection: "row",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+  },
+  orderTitle: { fontSize: 13, fontWeight: "700", color: "#0F172A" },
+  orderSub: { fontSize: 11, color: "#64748B" },
+  orderAmount: { fontSize: 12, fontWeight: "700", color: "#0F766E" },
+  orderStatus: { fontSize: 11, color: "#64748B" },
 });
 
 function Stat({ label, value }) {

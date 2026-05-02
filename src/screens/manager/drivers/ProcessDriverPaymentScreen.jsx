@@ -213,6 +213,48 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
             )}
           </View>
 
+          {driver.bank_details && (
+            <View style={styles.bankCard}>
+              <View style={styles.bankHeader}>
+                <Ionicons name="business-outline" size={16} color="#059669" />
+                <Text style={styles.bankHeaderText}>
+                  Driver Bank Account — Transfer Here
+                </Text>
+              </View>
+              <View style={styles.bankBody}>
+                <View>
+                  <Text style={styles.bankLabel}>Account Number</Text>
+                  <Text style={styles.bankAccountNumber}>
+                    {driver.bank_details.account_number}
+                  </Text>
+                </View>
+                <View style={styles.bankDivider} />
+                <View style={styles.bankGrid}>
+                  <View>
+                    <Text style={styles.bankLabel}>Account Holder</Text>
+                    <Text style={styles.bankValue}>
+                      {driver.bank_details.account_holder_name}
+                    </Text>
+                  </View>
+                  <View>
+                    <Text style={styles.bankLabel}>Bank Name</Text>
+                    <Text style={styles.bankValue}>
+                      {driver.bank_details.bank_name}
+                    </Text>
+                  </View>
+                </View>
+                {driver.bank_details.branch_name && (
+                  <View>
+                    <Text style={styles.bankLabel}>Branch</Text>
+                    <Text style={styles.bankValue}>
+                      {driver.bank_details.branch_name}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
           {/* Balance Card */}
           <View style={styles.balanceCard}>
             <Text style={styles.balanceLabel}>Current Available Balance</Text>
@@ -542,6 +584,43 @@ const styles = StyleSheet.create({
     color: "#111816",
     marginTop: 4,
   },
+
+  bankCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    backgroundColor: "#ECFDF5",
+    overflow: "hidden",
+    marginBottom: 12,
+  },
+  bankHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(16,185,129,0.12)",
+    borderBottomWidth: 1,
+    borderBottomColor: "#A7F3D0",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  bankHeaderText: { fontSize: 11, fontWeight: "700", color: "#065F46" },
+  bankBody: { padding: 14, gap: 10 },
+  bankLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#10B981",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 2,
+  },
+  bankAccountNumber: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#111816",
+  },
+  bankDivider: { height: 1, backgroundColor: "rgba(16,185,129,0.2)" },
+  bankGrid: { flexDirection: "row", gap: 12 },
+  bankValue: { fontSize: 12, fontWeight: "600", color: "#111816" },
 
   /* Fields */
   fieldGroup: { marginBottom: 14 },

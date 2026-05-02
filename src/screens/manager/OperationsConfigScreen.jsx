@@ -96,6 +96,29 @@ const OperationsConfigScreen = ({ navigation }) => {
   ]);
   const [maxOrderDistanceKm, setMaxOrderDistanceKm] = useState("25");
 
+  // Section 8: Launch Promotion
+  const [launchPromoEnabled, setLaunchPromoEnabled] = useState(true);
+  const [launchPromoFirstKmRate, setLaunchPromoFirstKmRate] = useState("1");
+  const [launchPromoMaxKm, setLaunchPromoMaxKm] = useState("5");
+  const [launchPromoBeyondKmRate, setLaunchPromoBeyondKmRate] = useState("40");
+  const [launchPromoCustomers, setLaunchPromoCustomers] = useState([]);
+  const [calculatorDistanceKm, setCalculatorDistanceKm] = useState("3.3");
+
+  const fetchLaunchPromoCustomers = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem("token");
+      const res = await fetch(`${API_URL}/manager/launch-promotion/customers`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to fetch launch promo customers");
+      const data = await res.json();
+      setLaunchPromoCustomers(data.customers || []);
+    } catch (err) {
+      console.error("Launch promo customers fetch error:", err);
+      setLaunchPromoCustomers([]);
+    }
+  }, [fetchLaunchPromoCustomers]);
+
   const fetchConfig = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem("token");
@@ -159,6 +182,17 @@ const OperationsConfigScreen = ({ navigation }) => {
       if (config.max_order_distance_km !== undefined) {
         setMaxOrderDistanceKm(String(config.max_order_distance_km));
       }
+
+      setLaunchPromoEnabled(Boolean(config.launch_promo_enabled ?? true));
+      setLaunchPromoFirstKmRate(
+        String(config.launch_promo_first_km_rate ?? 1),
+      );
+      setLaunchPromoMaxKm(String(config.launch_promo_max_km ?? 5));
+      setLaunchPromoBeyondKmRate(
+        String(config.launch_promo_beyond_km_rate ?? 40),
+      );
+
+      fetchLaunchPromoCustomers();
     } catch (err) {
       console.error(err);
       setError("Failed to load configuration");
@@ -219,6 +253,11 @@ const OperationsConfigScreen = ({ navigation }) => {
           min_subtotal: parseFloat(c.min_subtotal) || 0,
         })),
         max_order_distance_km: parseFloat(maxOrderDistanceKm) || 25,
+        launch_promo_enabled: Boolean(launchPromoEnabled),
+        launch_promo_first_km_rate: parseFloat(launchPromoFirstKmRate) || 1,
+        launch_promo_max_km: parseFloat(launchPromoMaxKm) || 5,
+        launch_promo_beyond_km_rate:
+          parseFloat(launchPromoBeyondKmRate) || 40,
       };
 
       if (
@@ -245,6 +284,7 @@ const OperationsConfigScreen = ({ navigation }) => {
         throw new Error(data.message || "Failed to save");
       }
       setSaved(true);
+      fetchLaunchPromoCustomers();
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       setError(err.message);
@@ -252,6 +292,73 @@ const OperationsConfigScreen = ({ navigation }) => {
       setSaving(false);
     }
   };
+
+  const calculateNormalDeliveryFeeForDistance = (distanceKm) => {
+    if (distanceKm === null || distanceKm === undefined || Number.isNaN(distanceKm)) {
+      return null;
+    }
+
+    const parsedDistance = Number(distanceKm);
+    if (parsedDistance < 0) return null;
+
+    const tiers = [...deliveryFeeTiers]
+      .map((t) => ({
+        max_km: Number(t.max_km),
+        fee: Number(t.fee),
+      }))
+      .filter((t) => Number.isFinite(t.max_km) && Number.isFinite(t.fee))
+      .sort((a, b) => a.max_km - b.max_km);
+
+    for (const tier of tiers) {
+      if (parsedDistance <= tier.max_km) return Number(tier.fee.toFixed(2));
+    }
+
+    const baseKm = Number(overflowTier.base_km);
+    const baseFee = Number(overflowTier.base_fee);
+    const per100m = Number(overflowTier.extra_per_100m);
+
+    if (!Number.isFinite(baseKm) || !Number.isFinite(baseFee) || !Number.isFinite(per100m)) {
+      return null;
+    }
+
+    const extraMeters = Math.max(0, (parsedDistance - baseKm) * 1000);
+    const extra100mUnits = Math.ceil(extraMeters / 100);
+    return Number((baseFee + extra100mUnits * per100m).toFixed(2));
+  };
+
+  const calculatePromoDeliveryFeeForDistance = (distanceKm) => {
+    if (distanceKm === null || distanceKm === undefined || Number.isNaN(distanceKm)) {
+      return null;
+    }
+
+    const distance = Math.max(0, Number(distanceKm));
+    const maxKm = Math.max(0, Number(launchPromoMaxKm));
+    const firstKmRate = Math.max(0, Number(launchPromoFirstKmRate));
+    const beyondRate = Math.max(0, Number(launchPromoBeyondKmRate));
+
+    const fee =
+      distance <= maxKm
+        ? distance * firstKmRate
+        : maxKm * firstKmRate + (distance - maxKm) * beyondRate;
+
+    return Number(fee.toFixed(2));
+  };
+
+  const parsedCalculatorDistance = Number(calculatorDistanceKm);
+  const calculatorDistanceIsValid =
+    calculatorDistanceKm !== "" &&
+    Number.isFinite(parsedCalculatorDistance) &&
+    parsedCalculatorDistance >= 0;
+  const calculatorNormalFee = calculatorDistanceIsValid
+    ? calculateNormalDeliveryFeeForDistance(parsedCalculatorDistance)
+    : null;
+  const calculatorPromoFee = calculatorDistanceIsValid
+    ? calculatePromoDeliveryFeeForDistance(parsedCalculatorDistance)
+    : null;
+  const calculatorDifference =
+    calculatorNormalFee !== null && calculatorPromoFee !== null
+      ? Number((calculatorNormalFee - calculatorPromoFee).toFixed(2))
+      : null;
 
   // Tier handlers
   const updateServiceTier = (idx, field, value) => {
@@ -880,6 +987,183 @@ const OperationsConfigScreen = ({ navigation }) => {
             </View>
           </View>
 
+          {/* SECTION 8: Launch Promotion */}
+          <View style={styles.sectionCard}>
+            <View
+              style={[
+                styles.sectionHeader,
+                { backgroundColor: "rgba(16,185,129,0.08)" },
+              ]}
+            >
+              <View style={styles.sectionHeaderRow}>
+                <Ionicons name="pricetag-outline" size={18} color="#059669" />
+                <Text style={styles.sectionTitle}>
+                  Launch Promotion (First Delivery)
+                </Text>
+                <View style={[styles.badge, { backgroundColor: "#D1FAE5" }]}>
+                  <Text style={[styles.badgeText, { color: "#047857" }]}>
+                    Customer Facing
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.sectionDesc}>
+                Applies only to first-ever order after customer accepts popup
+              </Text>
+            </View>
+            <View style={styles.sectionBody}>
+              <TouchableOpacity
+                style={styles.toggleRow}
+                onPress={() => setLaunchPromoEnabled((prev) => !prev)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.toggleIcon}>
+                  <Ionicons
+                    name={launchPromoEnabled ? "checkbox" : "square-outline"}
+                    size={20}
+                    color={launchPromoEnabled ? "#13ECB9" : "#9CA3AF"}
+                  />
+                </View>
+                <Text style={styles.toggleText}>Enable launch promotion</Text>
+              </TouchableOpacity>
+
+              <View style={styles.fieldRow3}>
+                <Field
+                  label="Promo price per 1km (Rs.)"
+                  value={launchPromoFirstKmRate}
+                  onChangeText={setLaunchPromoFirstKmRate}
+                />
+                <Field
+                  label="Promo valid up to (km)"
+                  value={launchPromoMaxKm}
+                  onChangeText={setLaunchPromoMaxKm}
+                />
+                <Field
+                  label="Beyond promo per 1km (Rs.)"
+                  value={launchPromoBeyondKmRate}
+                  onChangeText={setLaunchPromoBeyondKmRate}
+                />
+              </View>
+
+              <View style={styles.formulaCard}>
+                <Text style={styles.formulaText}>
+                  Formula: up to {launchPromoMaxKm} km = distance x Rs. {launchPromoFirstKmRate}. Above {launchPromoMaxKm} km = ({launchPromoMaxKm} x Rs. {launchPromoFirstKmRate}) + ((distance - {launchPromoMaxKm}) x Rs. {launchPromoBeyondKmRate}).
+                </Text>
+              </View>
+
+              <View style={styles.calcCard}>
+                <Text style={styles.calcTitle}>Live Calculator</Text>
+                <View style={styles.calcRow}>
+                  <View style={styles.calcInputCol}>
+                    <Text style={styles.fieldLabel}>Distance (km)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={calculatorDistanceKm}
+                      onChangeText={setCalculatorDistanceKm}
+                      keyboardType="decimal-pad"
+                      placeholder="e.g. 3.3"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                  <View style={styles.calcSummaryCard}>
+                    <Text style={styles.calcSummaryLabel}>
+                      Promo Fee (1st Order)
+                    </Text>
+                    <Text style={styles.calcSummaryValue}>
+                      {calculatorPromoFee === null
+                        ? "--"
+                        : `Rs. ${calculatorPromoFee.toFixed(2)}`}
+                    </Text>
+                  </View>
+                  <View style={styles.calcSummaryCardAlt}>
+                    <Text style={styles.calcSummaryLabelAlt}>
+                      Normal Fee (2nd+ Orders)
+                    </Text>
+                    <Text style={styles.calcSummaryValueAlt}>
+                      {calculatorNormalFee === null
+                        ? "--"
+                        : `Rs. ${calculatorNormalFee.toFixed(2)}`}
+                    </Text>
+                  </View>
+                </View>
+                {calculatorDifference !== null && (
+                  <Text
+                    style={[
+                      styles.calcDifference,
+                      calculatorDifference >= 0
+                        ? styles.calcDifferencePositive
+                        : styles.calcDifferenceWarn,
+                    ]}
+                  >
+                    Difference (normal - promo): Rs. {calculatorDifference.toFixed(2)}
+                  </Text>
+                )}
+                {!calculatorDistanceIsValid && (
+                  <Text style={styles.calcError}>
+                    Enter a valid non-negative distance to see calculation.
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.customerHeaderRow}>
+                <Text style={styles.customerHeaderText}>
+                  Customers who accepted promotion ({launchPromoCustomers.length})
+                </Text>
+                <TouchableOpacity onPress={fetchLaunchPromoCustomers}>
+                  <Text style={styles.customerRefresh}>Refresh</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.customerTable}>
+                <View style={styles.customerTableHeader}>
+                  <Text style={[styles.customerCell, styles.customerCellHeader]}>
+                    Customer
+                  </Text>
+                  <Text style={[styles.customerCell, styles.customerCellHeader]}>
+                    Phone
+                  </Text>
+                  <Text style={[styles.customerCell, styles.customerCellHeader]}>
+                    Accepted
+                  </Text>
+                  <Text style={[styles.customerCell, styles.customerCellHeader]}>
+                    Orders
+                  </Text>
+                </View>
+                {launchPromoCustomers.length === 0 ? (
+                  <View style={styles.customerRow}>
+                    <Text style={styles.customerEmptyText}>
+                      No customers have acknowledged this promotion yet.
+                    </Text>
+                  </View>
+                ) : (
+                  launchPromoCustomers.map((customer) => (
+                    <View key={customer.id} style={styles.customerRow}>
+                      <View style={styles.customerCell}>
+                        <Text style={styles.customerName}>
+                          {customer.username || "-"}
+                        </Text>
+                        <Text style={styles.customerMeta}>
+                          {customer.email || "-"}
+                        </Text>
+                      </View>
+                      <Text style={styles.customerCell}>
+                        {customer.phone || "-"}
+                      </Text>
+                      <Text style={styles.customerCell}>
+                        {customer.launch_promo_acknowledged_at
+                          ? new Date(
+                              customer.launch_promo_acknowledged_at,
+                            ).toLocaleString()
+                          : "-"}
+                      </Text>
+                      <Text style={styles.customerCell}>
+                        {customer.orders_count || 0}
+                      </Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            </View>
+          </View>
+
           {/* Spacer */}
           <View style={{ height: 100 }} />
         </ScrollView>
@@ -990,6 +1274,119 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#111816",
   },
+
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  toggleIcon: { width: 24, alignItems: "center" },
+  toggleText: { fontSize: 13, fontWeight: "600", color: "#111816" },
+
+  formulaCard: {
+    backgroundColor: "#F8FAFA",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 10,
+    marginTop: 6,
+  },
+  formulaText: { fontSize: 11, color: "#618980" },
+
+  calcCard: {
+    backgroundColor: "#F8FAFA",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 10,
+    marginTop: 10,
+  },
+  calcTitle: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#618980",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  calcRow: { gap: 10 },
+  calcInputCol: { marginBottom: 8 },
+  calcSummaryCard: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    backgroundColor: "#ECFDF5",
+    padding: 10,
+    marginBottom: 8,
+  },
+  calcSummaryLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#047857",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  calcSummaryValue: { fontSize: 16, fontWeight: "800", color: "#065F46" },
+  calcSummaryCardAlt: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#fff",
+    padding: 10,
+  },
+  calcSummaryLabelAlt: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  calcSummaryValueAlt: { fontSize: 16, fontWeight: "800", color: "#111816" },
+  calcDifference: { fontSize: 11, fontWeight: "600", marginTop: 6 },
+  calcDifferencePositive: { color: "#047857" },
+  calcDifferenceWarn: { color: "#B45309" },
+  calcError: { fontSize: 11, color: "#DC2626", marginTop: 6 },
+
+  customerHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  customerHeaderText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#618980",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  customerRefresh: { fontSize: 12, color: "#13ECB9", fontWeight: "600" },
+  customerTable: {
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  customerTableHeader: {
+    flexDirection: "row",
+    backgroundColor: "#F8FAFA",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  customerRow: {
+    flexDirection: "row",
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  customerCell: { flex: 1, fontSize: 10, color: "#111816" },
+  customerCellHeader: { fontWeight: "700", color: "#618980" },
+  customerName: { fontSize: 11, fontWeight: "700", color: "#111816" },
+  customerMeta: { fontSize: 9, color: "#94A3B8", marginTop: 2 },
+  customerEmptyText: { fontSize: 10, color: "#94A3B8" },
 
   // Tier rows
   tierHeaderRow: { flexDirection: "row", gap: 6, marginBottom: 4 },

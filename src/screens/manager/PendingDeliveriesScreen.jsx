@@ -32,10 +32,19 @@ export default function PendingDeliveriesScreen() {
       const res = await fetch(`${API_URL}/manager/pending-deliveries`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setDeliveries(data.deliveries || []);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error("Pending deliveries fetch failed:", data);
+        setDeliveries([]);
+        return;
       }
+
+      const list = Array.isArray(data?.deliveries)
+        ? data.deliveries
+        : data?.success
+          ? data.deliveries || []
+          : [];
+      setDeliveries(list);
     } catch (err) {
       console.error("Failed to fetch pending deliveries:", err);
     } finally {
@@ -181,8 +190,22 @@ export default function PendingDeliveriesScreen() {
               <Text style={[styles.statBoxValue, { color: "#EA580C" }]}>
                 {formatTime(
                   Math.round(
-                    deliveries.reduce((sum, d) => sum + d.waiting_minutes, 0) /
-                      deliveries.length,
+                    deliveries.reduce((sum, d) => {
+                      if (typeof d.waiting_minutes === "number") {
+                        return sum + d.waiting_minutes;
+                      }
+                      if (d.res_accepted_at) {
+                        return (
+                          sum +
+                          Math.floor(
+                            (Date.now() -
+                              new Date(d.res_accepted_at).getTime()) /
+                              60000,
+                          )
+                        );
+                      }
+                      return sum;
+                    }, 0) / deliveries.length,
                   ),
                 )}
               </Text>
@@ -209,9 +232,18 @@ export default function PendingDeliveriesScreen() {
 
         {/* Delivery Cards */}
         {deliveries.map((d) => {
-          const order = d.orders;
+          const order = Array.isArray(d.orders) ? d.orders[0] : d.orders || d.order;
           if (!order) return null;
-          const urgency = getUrgencyColors(d.waiting_minutes);
+          const waitingMinutes =
+            typeof d.waiting_minutes === "number"
+              ? d.waiting_minutes
+              : d.res_accepted_at
+                ? Math.floor(
+                    (Date.now() - new Date(d.res_accepted_at).getTime()) /
+                      60000,
+                  )
+                : 0;
+          const urgency = getUrgencyColors(waitingMinutes);
           const currentTip = parseFloat(d.tip_amount || 0);
           const hasTip = currentTip > 0;
           const isExpanded = expandedId === d.id;
@@ -268,7 +300,7 @@ export default function PendingDeliveriesScreen() {
                               { color: urgency.text },
                             ]}
                           >
-                            {formatTime(d.waiting_minutes)} waiting
+                            {formatTime(waitingMinutes)} waiting
                           </Text>
                         </View>
                       </View>
@@ -306,12 +338,12 @@ export default function PendingDeliveriesScreen() {
                       <Text
                         style={[styles.pendingText, { color: urgency.text }]}
                       >
-                        Pending for {formatTime(d.waiting_minutes)}
+                        Pending for {formatTime(waitingMinutes)}
                       </Text>
                       <Text style={styles.pendingSince}>
                         Since{" "}
-                        {order.accepted_at
-                          ? new Date(order.accepted_at).toLocaleTimeString(
+                        {d.res_accepted_at
+                          ? new Date(d.res_accepted_at).toLocaleTimeString(
                               "en-US",
                               {
                                 hour: "2-digit",
@@ -325,7 +357,7 @@ export default function PendingDeliveriesScreen() {
                   </View>
                   <View style={styles.pendingBannerRight}>
                     <Text style={[styles.pendingMins, { color: urgency.text }]}>
-                      {d.waiting_minutes}
+                      {waitingMinutes}
                     </Text>
                     <Text
                       style={[styles.pendingMinsLabel, { color: urgency.text }]}

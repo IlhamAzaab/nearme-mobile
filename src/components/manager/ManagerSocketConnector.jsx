@@ -48,16 +48,27 @@ const ManagerSocketConnector = ({ managerId }) => {
       });
     };
 
+    const handleCustomerCreated = (data) => {
+      addNotification({
+        title: 'New Customer Signup',
+        message: `${data.name || 'New customer'} (${data.phone || 'N/A'}) from ${data.city || 'N/A'}. Total customers: ${data.total_customers || 0}.`,
+        type: 'customer_created',
+        data,
+      });
+    };
+
     on('new_restaurant', handleNewRestaurant);
     on('driver_registration', handleDriverRegistration);
     on('withdrawal_request', handleWithdrawalRequest);
     on('system_alert', handleSystemAlert);
+    on('manager:customer_created', handleCustomerCreated);
 
     return () => {
       off('new_restaurant', handleNewRestaurant);
       off('driver_registration', handleDriverRegistration);
       off('withdrawal_request', handleWithdrawalRequest);
       off('system_alert', handleSystemAlert);
+      off('manager:customer_created', handleCustomerCreated);
     };
   }, [isConnected, on, off, addNotification]);
 

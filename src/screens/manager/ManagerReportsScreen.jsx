@@ -54,8 +54,15 @@ const ManagerReportsScreen = ({ navigation }) => {
       desc: "View deliveries waiting for a driver to accept",
       iconBg: "#FEE2E2",
       iconColor: "#DC2626",
-      screen: "Deliveries", // tab name
-      isTab: true,
+      screen: "PendingDeliveries",
+    },
+    {
+      icon: "people-outline",
+      title: "Customer Management",
+      desc: "Review customers, orders, and contact details",
+      iconBg: "#FFE4E6",
+      iconColor: "#E11D48",
+      screen: "CustomerReports",
     },
   ];
 
@@ -111,11 +118,7 @@ const ManagerReportsScreen = ({ navigation }) => {
   ];
 
   const handleNavigate = (item) => {
-    if (item.isTab) {
-      navigation.navigate("PendingDeliveries");
-    } else {
-      navigation.navigate(item.screen);
-    }
+    navigation.navigate(item.screen);
   };
 
   const renderCard = (item, index) => (

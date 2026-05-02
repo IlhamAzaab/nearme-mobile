@@ -248,7 +248,69 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
             {restaurant.admin_email || "No admin email"}
           </Text>
           <Text style={styles.restPhone}>{restaurant.phone || "No phone"}</Text>
+          {(restaurant.admin_name || restaurant.admin_phone) && (
+            <View style={styles.adminContactWrap}>
+              {restaurant.admin_name && (
+                <View style={styles.adminContactRow}>
+                  <Ionicons name="person-outline" size={14} color="#6B7280" />
+                  <Text style={styles.adminContactText}>
+                    {restaurant.admin_name}
+                  </Text>
+                </View>
+              )}
+              {restaurant.admin_phone && (
+                <View style={styles.adminContactRow}>
+                  <Ionicons name="call-outline" size={14} color="#6B7280" />
+                  <Text style={styles.adminContactText}>
+                    {restaurant.admin_phone}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
+
+        {restaurant.bank_details && (
+          <View style={styles.bankCard}>
+            <View style={styles.bankHeader}>
+              <Ionicons name="business-outline" size={16} color="#059669" />
+              <Text style={styles.bankHeaderText}>
+                Bank Account — Transfer Here
+              </Text>
+            </View>
+            <View style={styles.bankBody}>
+              <View>
+                <Text style={styles.bankLabel}>Account Number</Text>
+                <Text style={styles.bankAccountNumber}>
+                  {restaurant.bank_details.account_number}
+                </Text>
+              </View>
+              <View style={styles.bankDivider} />
+              <View style={styles.bankGrid}>
+                <View>
+                  <Text style={styles.bankLabel}>Account Holder</Text>
+                  <Text style={styles.bankValue}>
+                    {restaurant.bank_details.account_holder_name}
+                  </Text>
+                </View>
+                <View>
+                  <Text style={styles.bankLabel}>Bank Name</Text>
+                  <Text style={styles.bankValue}>
+                    {restaurant.bank_details.bank_name}
+                  </Text>
+                </View>
+              </View>
+              {restaurant.bank_details.branch_name && (
+                <View>
+                  <Text style={styles.bankLabel}>Branch</Text>
+                  <Text style={styles.bankValue}>
+                    {restaurant.bank_details.branch_name}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
 
         {/* Balance Card */}
         <View style={styles.balanceCard}>
@@ -457,6 +519,58 @@ const styles = StyleSheet.create({
   restName: { fontSize: 16, fontWeight: "800", color: "#111827" },
   restEmail: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   restPhone: { fontSize: 11, color: "#9CA3AF", marginTop: 2 },
+  adminContactWrap: {
+    marginTop: 10,
+    width: "100%",
+    borderTopWidth: 1,
+    borderTopColor: "#F3F4F6",
+    paddingTop: 8,
+    gap: 4,
+  },
+  adminContactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  adminContactText: { fontSize: 12, color: "#374151", fontWeight: "600" },
+
+  bankCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    backgroundColor: "#ECFDF5",
+    overflow: "hidden",
+    marginBottom: 12,
+  },
+  bankHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(16,185,129,0.12)",
+    borderBottomWidth: 1,
+    borderBottomColor: "#A7F3D0",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  bankHeaderText: { fontSize: 11, fontWeight: "700", color: "#065F46" },
+  bankBody: { padding: 14, gap: 10 },
+  bankLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#10B981",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 2,
+  },
+  bankAccountNumber: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#111816",
+  },
+  bankDivider: { height: 1, backgroundColor: "rgba(16,185,129,0.2)" },
+  bankGrid: { flexDirection: "row", gap: 12 },
+  bankValue: { fontSize: 12, fontWeight: "600", color: "#111816" },
 
   balanceCard: {
     backgroundColor: "#FEF2F2",

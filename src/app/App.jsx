@@ -14,12 +14,18 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import AppErrorBoundary from "../components/common/AppErrorBoundary";
 import UrgentNotificationModal from "../components/common/UrgentNotificationModal";
 import DeliveryNotificationOverlay from "../components/driver/DeliveryNotificationOverlay";
+import ManagerNotificationOverlay from "../components/manager/ManagerNotificationOverlay";
+import ManagerSocketConnector from "../components/manager/ManagerSocketConnector";
 import { API_URL } from "../config/env";
 import { CustomAlertProvider } from "../context/CustomAlertContext";
 import {
   DriverDeliveryNotificationProvider,
   useDriverDeliveryNotifications,
 } from "../context/DriverDeliveryNotificationContext";
+import {
+  ManagerNotificationProvider,
+  useManagerNotifications,
+} from "../context/ManagerNotificationContext";
 import { OrderProvider } from "../context/OrderContext";
 import { SocketProvider } from "../context/SocketContext";
 import { initializeApiAuthFetch } from "../lib/apiAuthFetch";
@@ -349,6 +355,51 @@ function DriverNotificationLayer({ navigationRef }) {
       onAccept={handleAccept}
       onViewDelivery={handleViewDelivery}
       timeRemaining={timeRemaining}
+    />
+  );
+}
+
+function ManagerNotificationLayer({ navigationRef }) {
+  const { userRole } = useAuth();
+  const { notifications, markAsRead } = useManagerNotifications();
+  const normalizedRole = userRole
+    ? String(userRole).trim().toLowerCase()
+    : null;
+
+  if (normalizedRole !== "manager" || notifications.length === 0) {
+    return null;
+  }
+
+  const activeNotification = notifications[0];
+  const handleDismiss = () => {
+    if (activeNotification?.id) {
+      markAsRead(activeNotification.id);
+    }
+  };
+
+  const handleViewDetails = () => {
+    if (!navigationRef.current) return;
+    if (activeNotification?.type === "customer_created") {
+      navigationRef.current.navigate("Reports", {
+        screen: "CustomerReports",
+      });
+    }
+    handleDismiss();
+  };
+
+  const actions = [];
+  if (activeNotification?.type === "customer_created") {
+    actions.push({ label: "View Customers", primary: true, onPress: handleViewDetails });
+  }
+
+  return (
+    <ManagerNotificationOverlay
+      visible={true}
+      title={activeNotification.title || "Manager Alert"}
+      message={activeNotification.message || "You have a new notification."}
+      type={activeNotification.type || "info"}
+      actions={actions}
+      onDismiss={handleDismiss}
     />
   );
 }
@@ -814,30 +865,36 @@ export default function App() {
           />
           <ThemeProvider>
             <AuthProvider>
-              <NotificationProvider>
-                <OrderProvider>
-                  <RealtimeProviders>
-                    <AppErrorBoundary scope="Navigation tree">
-                      <NavigationContainer ref={navigationRef}>
-                        <RootNavigator />
-                        <DriverNotificationLayer
-                          navigationRef={navigationRef}
-                        />
-                        {/* Urgent notification modal - renders above everything */}
-                        <UrgentNotificationModal
-                          visible={shouldShowUrgentModal}
-                          title={urgentNotification?.title}
-                          body={urgentNotification?.body}
-                          data={urgentNotification?.data}
-                          onAccept={handleAcceptUrgent}
-                          onReject={handleRejectUrgent}
-                          onDismiss={handleDismissUrgent}
-                        />
-                      </NavigationContainer>
-                    </AppErrorBoundary>
-                  </RealtimeProviders>
-                </OrderProvider>
-              </NotificationProvider>
+              <ManagerNotificationProvider>
+                <NotificationProvider>
+                  <OrderProvider>
+                    <RealtimeProviders>
+                      <AppErrorBoundary scope="Navigation tree">
+                        <NavigationContainer ref={navigationRef}>
+                          <RootNavigator />
+                          <ManagerSocketConnector />
+                          <ManagerNotificationLayer
+                            navigationRef={navigationRef}
+                          />
+                          <DriverNotificationLayer
+                            navigationRef={navigationRef}
+                          />
+                          {/* Urgent notification modal - renders above everything */}
+                          <UrgentNotificationModal
+                            visible={shouldShowUrgentModal}
+                            title={urgentNotification?.title}
+                            body={urgentNotification?.body}
+                            data={urgentNotification?.data}
+                            onAccept={handleAcceptUrgent}
+                            onReject={handleRejectUrgent}
+                            onDismiss={handleDismissUrgent}
+                          />
+                        </NavigationContainer>
+                      </AppErrorBoundary>
+                    </RealtimeProviders>
+                  </OrderProvider>
+                </NotificationProvider>
+              </ManagerNotificationProvider>
             </AuthProvider>
           </ThemeProvider>
         </CustomAlertProvider>

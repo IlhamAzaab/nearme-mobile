@@ -24,6 +24,7 @@ const ManagerNotificationOverlay = ({
     driver: '🛵',
     restaurant: '🏪',
     payment: '💰',
+    customer_created: '🧑',
   };
 
   return (

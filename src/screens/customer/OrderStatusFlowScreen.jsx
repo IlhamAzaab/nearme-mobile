@@ -1569,17 +1569,12 @@ const DriverCard = React.memo(({ driver }) => {
         {vehicleNumber && (
           <View style={st.driverRow}>
             <Ionicons name="bicycle" size={11} color="#6B7280" />
-            <Text style={st.driverRowText}>Plate: {vehicleNumber}</Text>
+            <Text style={st.driverRowText}>{vehicleNumber}</Text>
           </View>
         )}
-        {vehicleType ? (
-          <View style={st.driverRow}>
-            <Text style={st.driverRowText}>Vehicle: {vehicleType}</Text>
-          </View>
-        ) : null}
         {vehicleModel ? (
           <View style={st.driverRow}>
-            <Text style={st.driverRowText}>Model: {vehicleModel}</Text>
+            <Text style={st.driverRowText}>{vehicleModel}</Text>
           </View>
         ) : null}
         {driver.phone ? (

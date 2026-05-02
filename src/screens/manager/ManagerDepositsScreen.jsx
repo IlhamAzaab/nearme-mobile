@@ -40,14 +40,6 @@ const DRIVER_DRAWER_ITEMS = [
   { route: "AddDriver", label: "Add Driver", icon: "person-add-outline" },
 ];
 
-const periods = [
-  { key: "today", label: "Today" },
-  { key: "yesterday", label: "Yesterday" },
-  { key: "this_week", label: "This Week" },
-  { key: "this_month", label: "This Month" },
-  { key: "all_time", label: "All Time" },
-];
-
 export default function ManagerDepositsScreen() {
   const navigation = useNavigation();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -55,7 +47,6 @@ export default function ManagerDepositsScreen() {
   const [tabLoading, setTabLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("pending");
-  const [selectedPeriod, setSelectedPeriod] = useState("today");
   const [summary, setSummary] = useState({
     total_sales_today: 0,
     todays_sales: 0,
@@ -64,6 +55,7 @@ export default function ManagerDepositsScreen() {
     paid: 0,
     pending_deposits_count: 0,
   });
+  const [driversData, setDriversData] = useState({ drivers: [], totals: {} });
   const [deposits, setDeposits] = useState([]);
   const prevTabRef = useRef(activeTab);
 
@@ -86,23 +78,40 @@ export default function ManagerDepositsScreen() {
     }
   }, []);
 
-  const fetchSummary = useCallback(
-    async (period) => {
-      try {
-        const token = await AsyncStorage.getItem("token");
-        const p = period || selectedPeriod;
-        const res = await fetch(
-          `${API_URL}/driver/deposits/manager/summary?period=${p}`,
-          { headers: { Authorization: `Bearer ${token}` } },
-        );
-        const data = await res.json();
-        if (data.success) setSummary(data.summary);
-      } catch (error) {
-        console.error("Failed to fetch summary:", error);
+  const fetchSummary = useCallback(async (period) => {
+    try {
+      const token = await AsyncStorage.getItem("token");
+      const p = period || "today";
+      const res = await fetch(
+        `${API_URL}/driver/deposits/manager/summary?period=${p}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const data = await res.json();
+      if (data.success) setSummary(data.summary);
+    } catch (error) {
+      console.error("Failed to fetch summary:", error);
+    }
+  }, []);
+
+  const fetchDriversDetailed = useCallback(async (period) => {
+    try {
+      const token = await AsyncStorage.getItem("token");
+      const p = period || "today";
+      const res = await fetch(
+        `${API_URL}/driver/deposits/manager/drivers-detailed?period=${p}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const data = await res.json();
+      if (data.success) {
+        setDriversData({
+          drivers: data.drivers || [],
+          totals: data.totals || {},
+        });
       }
-    },
-    [selectedPeriod],
-  );
+    } catch (error) {
+      console.error("Failed to fetch drivers:", error);
+    }
+  }, []);
 
   const fetchDeposits = useCallback(async () => {
     try {
@@ -126,11 +135,15 @@ export default function ManagerDepositsScreen() {
     async (showLoading = true) => {
       if (showLoading) setLoading(true);
       else setRefreshing(true);
-      await Promise.all([fetchSummary(), fetchDeposits()]);
+      await Promise.all([
+        fetchSummary("today"),
+        fetchDriversDetailed("today"),
+        fetchDeposits(),
+      ]);
       setLoading(false);
       setRefreshing(false);
     },
-    [fetchSummary, fetchDeposits],
+    [fetchSummary, fetchDriversDetailed, fetchDeposits],
   );
 
   useEffect(() => {
@@ -194,23 +207,6 @@ export default function ManagerDepositsScreen() {
     return deposit.proof_url;
   };
 
-  const getPeriodTitle = () => {
-    const map = {
-      today: "Overall Performance",
-      yesterday: "Yesterday's Report",
-      this_week: "This Week",
-      this_month: "This Month",
-      all_time: "All Time",
-    };
-    return map[selectedPeriod] || "Overall Performance";
-  };
-
-  const getSalesLabel = () => {
-    if (selectedPeriod === "today") return "Today's Sales";
-    if (selectedPeriod === "yesterday") return "Day's Sales";
-    return "Period Sales";
-  };
-
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -258,50 +254,15 @@ export default function ManagerDepositsScreen() {
           />
         }
       >
-        {/* Period Selector */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.periodScroll}
-        >
-          {periods.map((p) => (
-            <TouchableOpacity
-              key={p.key}
-              style={[
-                styles.periodBtn,
-                selectedPeriod === p.key && styles.periodBtnActive,
-              ]}
-              onPress={() => {
-                setSelectedPeriod(p.key);
-                setRefreshing(true);
-                fetchSummary(p.key).then(() => setRefreshing(false));
-              }}
-            >
-              <Text
-                style={[
-                  styles.periodText,
-                  selectedPeriod === p.key && styles.periodTextActive,
-                ]}
-              >
-                {p.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
         {/* Summary Hero */}
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>
             <View>
-              <Text style={styles.heroLabel}>{getPeriodTitle()}</Text>
+              <Text style={styles.heroLabel}>Overall Performance</Text>
               <Text style={styles.heroAmount}>
                 {formatCurrency(summary.total_sales_today)}
               </Text>
-              <Text style={styles.heroSubLabel}>
-                {selectedPeriod === "today"
-                  ? "Total Sales Today"
-                  : "Total Sales"}
-              </Text>
+              <Text style={styles.heroSubLabel}>Total Sales Today</Text>
             </View>
             <View style={styles.heroIconWrap}>
               <Ionicons name="trending-up" size={20} color="#111816" />
@@ -310,7 +271,7 @@ export default function ManagerDepositsScreen() {
           <View style={styles.heroDivider} />
           <View style={styles.heroBottom}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.heroMetaLabel}>{getSalesLabel()}</Text>
+              <Text style={styles.heroMetaLabel}>Today's Sales</Text>
               <Text style={styles.heroMetaValue}>
                 {formatCurrency(summary.todays_sales)}
               </Text>
@@ -350,6 +311,78 @@ export default function ManagerDepositsScreen() {
             </Text>
           </View>
         </View>
+
+        {driversData.drivers.length > 0 && (
+          <View style={styles.driverBalancesCard}>
+            <View style={styles.driverBalancesHeader}>
+              <View style={styles.driverBalancesTitle}>
+                <Ionicons name="people-outline" size={16} color="#13ECB9" />
+                <Text style={styles.driverBalancesTitleText}>
+                  Driver Balances
+                </Text>
+              </View>
+              <View style={styles.driverBalancesTotal}>
+                <Text style={styles.driverBalancesTotalLabel}>
+                  Total Pending
+                </Text>
+                <Text style={styles.driverBalancesTotalValue}>
+                  {formatCurrency(
+                    driversData.totals?.total_pending_balance || 0,
+                  )}
+                </Text>
+              </View>
+            </View>
+
+            {driversData.drivers.map((driver) => (
+              <View key={driver.id} style={styles.driverBalanceRow}>
+                <View style={styles.driverBalanceTop}>
+                  <View style={styles.driverBalanceAvatar}>
+                    <Text style={styles.driverBalanceAvatarText}>
+                      {getDriverInitials(driver.full_name)}
+                    </Text>
+                  </View>
+                  <View style={styles.driverBalanceInfo}>
+                    <Text style={styles.driverBalanceName}>
+                      {driver.full_name || "Unknown Driver"}
+                    </Text>
+                    <Text style={styles.driverBalanceContact}>
+                      {driver.phone || driver.email || "No contact"}
+                    </Text>
+                  </View>
+                  <View style={styles.driverBalancePending}>
+                    <Text
+                      style={[
+                        styles.driverBalancePendingValue,
+                        driver.pending_balance > 0
+                          ? styles.driverBalancePendingWarn
+                          : styles.driverBalancePendingOk,
+                      ]}
+                    >
+                      {formatCurrency(driver.pending_balance)}
+                    </Text>
+                    <Text style={styles.driverBalancePendingLabel}>
+                      Pending
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.driverBalanceBreakdown}>
+                  <View style={styles.driverBalanceChip}>
+                    <Text style={styles.driverBalanceChipLabel}>Collected</Text>
+                    <Text style={styles.driverBalanceChipValue}>
+                      {formatCurrency(driver.total_collected_today)}
+                    </Text>
+                  </View>
+                  <View style={styles.driverBalanceChip}>
+                    <Text style={styles.driverBalanceChipLabel}>Paid</Text>
+                    <Text style={styles.driverBalanceChipValue}>
+                      {formatCurrency(driver.total_paid_today)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Tabs */}
         <View style={styles.tabBar}>
@@ -553,21 +586,6 @@ const styles = StyleSheet.create({
     paddingTop: 40,
   },
 
-  // Period
-  periodScroll: { marginBottom: 12 },
-  periodBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#DBE6E3",
-    marginRight: 8,
-  },
-  periodBtnActive: { backgroundColor: "#13ECB9", borderColor: "#13ECB9" },
-  periodText: { fontSize: 11, fontWeight: "700", color: "#618980" },
-  periodTextActive: { color: "#111816" },
-
   // Hero
   heroCard: {
     backgroundColor: "#13ECB9",
@@ -650,6 +668,112 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   metricValue: { fontSize: 18, fontWeight: "700", color: "#111816" },
+
+  driverBalancesCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#DBE6E3",
+    marginBottom: 12,
+    overflow: "hidden",
+  },
+  driverBalancesHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#DBE6E3",
+    backgroundColor: "#F8FAFA",
+  },
+  driverBalancesTitle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  driverBalancesTitleText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111816",
+  },
+  driverBalancesTotal: { alignItems: "flex-end" },
+  driverBalancesTotalLabel: {
+    fontSize: 10,
+    color: "#618980",
+    fontWeight: "500",
+  },
+  driverBalancesTotalValue: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111816",
+    marginTop: 2,
+  },
+  driverBalanceRow: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#DBE6E3",
+  },
+  driverBalanceTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  driverBalanceAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(19,236,185,0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  driverBalanceAvatarText: {
+    color: "#13ECB9",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  driverBalanceInfo: { flex: 1, minWidth: 0 },
+  driverBalanceName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111816",
+  },
+  driverBalanceContact: {
+    fontSize: 11,
+    color: "#618980",
+    marginTop: 2,
+  },
+  driverBalancePending: { alignItems: "flex-end" },
+  driverBalancePendingValue: { fontSize: 13, fontWeight: "700" },
+  driverBalancePendingWarn: { color: "#D97706" },
+  driverBalancePendingOk: { color: "#16A34A" },
+  driverBalancePendingLabel: {
+    fontSize: 10,
+    color: "#618980",
+    marginTop: 2,
+  },
+  driverBalanceBreakdown: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+  },
+  driverBalanceChip: {
+    flex: 1,
+    backgroundColor: "#F3F4F6",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  driverBalanceChipLabel: {
+    fontSize: 10,
+    color: "#618980",
+    fontWeight: "500",
+  },
+  driverBalanceChipValue: {
+    fontSize: 12,
+    color: "#111816",
+    fontWeight: "700",
+    marginTop: 2,
+  },
 
   // Tabs
   tabBar: {

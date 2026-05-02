@@ -32,6 +32,7 @@ const NOTIFICATION_ROLE_MAP = {
   order_reminder: "admin",
   new_delivery: "driver",
   unassigned_delivery_alert: "manager",
+  customer_created: "manager",
   payment_received: "driver",
   deposit_approved: "driver",
   admin_payment_received: "admin",
@@ -1048,6 +1049,9 @@ class PushNotificationService {
         break;
       case "unassigned_delivery_alert":
         nav.navigate("Reports", { screen: "PendingDeliveries" });
+        break;
+      case "customer_created":
+        nav.navigate("Reports", { screen: "CustomerReports" });
         break;
       case "milestone":
         // Navigate based on user screen in data
