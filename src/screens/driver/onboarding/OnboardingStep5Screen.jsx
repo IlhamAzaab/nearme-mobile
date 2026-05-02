@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,17 +15,21 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import StepProgress from "../../../components/driver/StepProgress";
 import { API_URL } from "../../../config/env";
 import { NEARME_LOGO_ARTBOARD5_XML } from "../../../assets/NearMeLogoArtboard5Xml";
+const TERMS_URL = "https://friendly-torrone-f06da3.netlify.app/";
+const PRIVACY_URL = "https://frabjous-douhua-6c3f75.netlify.app/";
 
 export default function OnboardingStep5Screen({ navigation }) {
   const [contractHtml] = useState(DEFAULT_CONTRACT);
   const [contractAccepted, setContractAccepted] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    if (!contractAccepted)
+    if (!contractAccepted || !termsAccepted || !privacyAccepted)
       return Alert.alert(
         "Error",
-        "Please read and accept the terms and conditions",
+        "Please read and accept the contract, terms and privacy policy",
       );
     setSubmitting(true);
     try {
@@ -40,6 +45,8 @@ export default function OnboardingStep5Screen({ navigation }) {
           contractVersion: "1.0.0",
           userAgent: "Meezo Mobile App",
           contractHtml,
+          termsAccepted,
+          privacyAccepted,
         }),
       });
       const data = await res.json();
@@ -56,6 +63,19 @@ export default function OnboardingStep5Screen({ navigation }) {
       Alert.alert("Error", "Network error. Please try again.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openExternal = async (url, setter) => {
+    try {
+      const can = await Linking.canOpenURL(url);
+      if (can) await Linking.openURL(url);
+      else Alert.alert("Unable to open link", url);
+    } catch (e) {
+      console.error("openExternal error", e);
+      Alert.alert("Error", "Unable to open link. Please try again.");
+    } finally {
+      if (typeof setter === "function") setter(true);
     }
   };
 
@@ -89,13 +109,59 @@ export default function OnboardingStep5Screen({ navigation }) {
               and Conditions.
             </Text>
           </TouchableOpacity>
+
+          {/* Terms & Privacy Links + Acceptance */}
+          <View style={{ marginBottom: 12 }}>
+            <View style={s.linkRow}>
+              <TouchableOpacity
+                style={[s.linkBox, termsAccepted && s.linkBoxActive]}
+                onPress={() => setTermsAccepted((p) => !p)}
+              >
+                {termsAccepted ? <Text style={s.linkTick}>✓</Text> : null}
+              </TouchableOpacity>
+              <Text style={s.linkLabel}>
+                I accept the{" "}
+                <Text
+                  style={s.linkText}
+                  onPress={() => openExternal(TERMS_URL, setTermsAccepted)}
+                >
+                  Terms & Conditions
+                </Text>
+                .
+              </Text>
+            </View>
+
+            <View style={s.linkRow}>
+              <TouchableOpacity
+                style={[s.linkBox, privacyAccepted && s.linkBoxActive]}
+                onPress={() => setPrivacyAccepted((p) => !p)}
+              >
+                {privacyAccepted ? <Text style={s.linkTick}>✓</Text> : null}
+              </TouchableOpacity>
+              <Text style={s.linkLabel}>
+                I accept the{" "}
+                <Text
+                  style={s.linkText}
+                  onPress={() => openExternal(PRIVACY_URL, setPrivacyAccepted)}
+                >
+                  Privacy Policy
+                </Text>
+                .
+              </Text>
+            </View>
+          </View>
           <TouchableOpacity
             style={[
               s.submitBtn,
-              (!contractAccepted || submitting) && s.btnDisabled,
+              (!(contractAccepted && termsAccepted && privacyAccepted) ||
+                submitting) &&
+                s.btnDisabled,
             ]}
             onPress={handleSubmit}
-            disabled={!contractAccepted || submitting}
+            disabled={
+              !(contractAccepted && termsAccepted && privacyAccepted) ||
+              submitting
+            }
           >
             {submitting ? (
               <ActivityIndicator size="small" color="#fff" />
@@ -266,4 +332,39 @@ const s = StyleSheet.create({
     backgroundColor: "#e5e7eb",
   },
   backBtnText: { fontSize: 14, color: "#6b7280" },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  linkBox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: "#9ca3af",
+    borderRadius: 4,
+    marginRight: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+  },
+  linkBoxActive: {
+    backgroundColor: "#06C168",
+    borderColor: "#06C168",
+  },
+  linkTick: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  linkLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: "#374151",
+  },
+  linkText: {
+    color: "#06C168",
+    textDecorationLine: "underline",
+    fontWeight: "600",
+  },
 });

@@ -7,6 +7,7 @@ import {
   Animated,
   Alert,
   Easing,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -20,6 +21,8 @@ import { API_URL } from "../../../config/env";
 import { getAccessToken } from "../../../lib/authStorage";
 
 const CONTRACT_VERSION = "1.1.0";
+const TERMS_URL = "https://whimsical-sopapillas-ef4bec.netlify.app";
+const PRIVACY_URL = "https://moonlit-dieffenbachia-52f106.netlify.app/";
 
 const MEEZO_LOGO_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <svg id="Layer_1" data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080">
@@ -248,6 +251,8 @@ export default function Step4() {
   const navigation = useNavigation();
 
   const [accepted, setAccepted] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ipAddress, setIpAddress] = useState(null);
   const [deviceInfo, setDeviceInfo] = useState("");
@@ -289,8 +294,11 @@ export default function Step4() {
   }, []);
 
   const handleSubmit = async () => {
-    if (!accepted) {
-      Alert.alert("Required", "Please accept the contract to continue");
+    if (!accepted || !termsAccepted || !privacyAccepted) {
+      Alert.alert(
+        "Required",
+        "Please accept the contract, terms and privacy policy to continue",
+      );
       return;
     }
 
@@ -310,6 +318,8 @@ export default function Step4() {
           ipAddress: ipAddress || null,
           userAgent: deviceInfo,
           acceptedAt: new Date().toISOString(),
+          termsAccepted: termsAccepted,
+          privacyAccepted: privacyAccepted,
         }),
       });
 
@@ -329,6 +339,23 @@ export default function Step4() {
       Alert.alert("Error", "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openExternal = async (url, setter) => {
+    try {
+      const can = await Linking.canOpenURL(url);
+      if (can) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert("Unable to open link", url);
+      }
+    } catch (e) {
+      console.error("openExternal error", e);
+      Alert.alert("Error", "Unable to open link. Please try again.");
+    } finally {
+      // mark as accepted after user clicked the link
+      if (typeof setter === "function") setter(true);
     }
   };
 
@@ -417,6 +444,52 @@ export default function Step4() {
             </Text>
           </TouchableOpacity>
 
+          {/* Terms & Privacy Links + Acceptance */}
+          <View style={{ marginBottom: 12 }}>
+            <View style={styles.linkRow}>
+              <TouchableOpacity
+                style={[styles.linkBox, termsAccepted && styles.linkBoxActive]}
+                onPress={() => setTermsAccepted((p) => !p)}
+              >
+                {termsAccepted ? <Text style={styles.linkTick}>✓</Text> : null}
+              </TouchableOpacity>
+              <Text style={styles.linkLabel}>
+                I accept the{" "}
+                <Text
+                  style={styles.linkText}
+                  onPress={() => openExternal(TERMS_URL, setTermsAccepted)}
+                >
+                  Terms & Conditions
+                </Text>
+                .
+              </Text>
+            </View>
+
+            <View style={styles.linkRow}>
+              <TouchableOpacity
+                style={[
+                  styles.linkBox,
+                  privacyAccepted && styles.linkBoxActive,
+                ]}
+                onPress={() => setPrivacyAccepted((p) => !p)}
+              >
+                {privacyAccepted ? (
+                  <Text style={styles.linkTick}>✓</Text>
+                ) : null}
+              </TouchableOpacity>
+              <Text style={styles.linkLabel}>
+                I accept the{" "}
+                <Text
+                  style={styles.linkText}
+                  onPress={() => openExternal(PRIVACY_URL, setPrivacyAccepted)}
+                >
+                  Privacy Policy
+                </Text>
+                .
+              </Text>
+            </View>
+          </View>
+
           {/* IP Address Info */}
           {ipAddress && (
             <View style={styles.ipContainer}>
@@ -440,10 +513,13 @@ export default function Step4() {
             <TouchableOpacity
               style={[
                 styles.submitButton,
-                (!accepted || loading) && styles.submitButtonDisabled,
+                (!(accepted && termsAccepted && privacyAccepted) || loading) &&
+                  styles.submitButtonDisabled,
               ]}
               onPress={handleSubmit}
-              disabled={!accepted || loading}
+              disabled={
+                !(accepted && termsAccepted && privacyAccepted) || loading
+              }
               activeOpacity={0.8}
             >
               {loading ? (
@@ -630,12 +706,12 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     flex: 2,
-    backgroundColor: "#06C168",
+    backgroundColor: "#1f1f1f",
     borderRadius: 999,
     paddingVertical: 16,
   },
   submitButtonDisabled: {
-    backgroundColor: "#34D399",
+    backgroundColor: "#9ca3af",
   },
   buttonContent: {
     flexDirection: "row",
@@ -657,5 +733,40 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: "#ffffff",
     marginLeft: 8,
+  },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  linkBox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: "#9ca3af",
+    borderRadius: 4,
+    marginRight: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+  },
+  linkBoxActive: {
+    backgroundColor: "#06C168",
+    borderColor: "#06C168",
+  },
+  linkTick: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  linkLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: "#374151",
+  },
+  linkText: {
+    color: "#ffffff",
+    textDecorationLine: "underline",
+    fontWeight: "600",
   },
 });
