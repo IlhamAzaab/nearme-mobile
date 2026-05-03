@@ -7,6 +7,7 @@ import {
   Dimensions,
   KeyboardAvoidingView,
   Platform,
+  BackHandler,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -56,6 +57,53 @@ export default function VerifyOtpScreen({ navigation, route }) {
   const shakeX = useRef(new Animated.Value(0)).current;
   const otpInputRefs = useRef([]);
 
+  useEffect(() => {
+    if (!normalizedPhone) {
+      AsyncStorage.setItem(
+        SIGNUP_FLOW_STATE_KEY,
+        JSON.stringify(buildSignupFlowState("Signup")),
+      ).catch(() => {});
+      navigation.replace("Signup");
+    }
+  }, [navigation, normalizedPhone]);
+
+  useEffect(() => {
+    if (!normalizedPhone) return;
+
+    AsyncStorage.setItem(
+      SIGNUP_FLOW_STATE_KEY,
+      JSON.stringify(
+        buildSignupFlowState("VerifyOtp", {
+          userId,
+          phone: normalizedPhone,
+          prefillPhone: normalizedPhone,
+          accessToken,
+          nextScreen: nextScreen || "CompleteProfile",
+        }),
+      ),
+    ).catch(() => {});
+  }, [accessToken, nextScreen, normalizedPhone, userId]);
+
+  useEffect(() => {
+    const backSubscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => true,
+    );
+
+    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
+      const backActionTypes = new Set(["GO_BACK", "POP", "POP_TO_TOP"]);
+
+      if (backActionTypes.has(event.data?.action?.type)) {
+        event.preventDefault();
+      }
+    });
+
+    return () => {
+      backSubscription.remove();
+      unsubscribe();
+    };
+  }, [navigation]);
+
   const triggerShake = () => {
     shakeX.setValue(0);
     Animated.sequence([
@@ -94,33 +142,6 @@ export default function VerifyOtpScreen({ navigation, route }) {
     }, 1000);
     return () => clearInterval(interval);
   }, [resendTimer]);
-
-  useEffect(() => {
-    if (!normalizedPhone) {
-      AsyncStorage.setItem(
-        SIGNUP_FLOW_STATE_KEY,
-        JSON.stringify(buildSignupFlowState("Signup")),
-      ).catch(() => {});
-      navigation.navigate("Signup");
-    }
-  }, [navigation, normalizedPhone]);
-
-  useEffect(() => {
-    if (!normalizedPhone) return;
-
-    AsyncStorage.setItem(
-      SIGNUP_FLOW_STATE_KEY,
-      JSON.stringify(
-        buildSignupFlowState("VerifyOtp", {
-          userId,
-          phone: normalizedPhone,
-          prefillPhone: normalizedPhone,
-          accessToken,
-          nextScreen: nextScreen || "CompleteProfile",
-        }),
-      ),
-    ).catch(() => {});
-  }, [accessToken, nextScreen, normalizedPhone, userId]);
 
   const handleOtpDigitChange = (index, value) => {
     const onlyDigits = String(value || "").replace(/\D/g, "");

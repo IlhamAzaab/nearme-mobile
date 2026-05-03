@@ -7,6 +7,7 @@ import {
   Dimensions,
   KeyboardAvoidingView,
   Platform,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -32,6 +33,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
 const WEB_CARD_MAX_WIDTH = 560;
 const TERMS_AND_CONDITIONS_URL = "https://cosmic-pika-2ec173.netlify.app";
+const PRIVACY_POLICY_URL = "https://mellow-daifuku-051f2e.netlify.app/";
 
 const UserIcon = ({ size = 20, color = "#9CA3AF" }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -108,6 +110,18 @@ export default function CompleteProfileScreen({ navigation, route }) {
   const shakeX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
+      const backActionTypes = new Set(["GO_BACK", "POP", "POP_TO_TOP"]);
+
+      if (backActionTypes.has(event.data?.action?.type)) {
+        event.preventDefault();
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
+  useEffect(() => {
     AsyncStorage.setItem(
       SIGNUP_FLOW_STATE_KEY,
       JSON.stringify(
@@ -115,10 +129,18 @@ export default function CompleteProfileScreen({ navigation, route }) {
           userId,
           accessToken,
           prefillPhone,
-        })
-      )
+        }),
+      ),
     ).catch(() => {});
   }, [accessToken, prefillPhone, userId]);
+
+  const openExternalPolicy = async (url) => {
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      console.error("Failed to open policy link:", error);
+    }
+  };
 
   const triggerShake = () => {
     shakeX.setValue(0);
@@ -254,7 +276,7 @@ export default function CompleteProfileScreen({ navigation, route }) {
         {
           userEmail: normalizedEmail,
           profileCompleted: true,
-        }
+        },
       );
 
       await markProfileCompleted();
@@ -441,16 +463,21 @@ export default function CompleteProfileScreen({ navigation, route }) {
                     <Text style={styles.termsText}>I accept</Text>
                   </Pressable>
 
-                  <Pressable
-                    onPress={() =>
-                      navigation.navigate("WebView", {
-                        title: "Terms of Service",
-                        url: TERMS_AND_CONDITIONS_URL,
-                      })
-                    }
-                  >
-                    <Text style={styles.termsLink}>Terms & Conditions</Text>
-                  </Pressable>
+                  <View style={styles.policyLinksRow}>
+                    <Pressable
+                      onPress={() =>
+                        openExternalPolicy(TERMS_AND_CONDITIONS_URL)
+                      }
+                    >
+                      <Text style={styles.termsLink}>Terms & Conditions</Text>
+                    </Pressable>
+                    <Text style={styles.termsText}>and</Text>
+                    <Pressable
+                      onPress={() => openExternalPolicy(PRIVACY_POLICY_URL)}
+                    >
+                      <Text style={styles.termsLink}>Privacy Policy</Text>
+                    </Pressable>
+                  </View>
                 </View>
 
                 <Pressable
@@ -608,8 +635,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-start",
+    flexWrap: "wrap",
     gap: 2,
     marginTop: 8,
+  },
+  policyLinksRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 4,
   },
   termsToggle: {
     flexDirection: "row",

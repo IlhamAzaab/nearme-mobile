@@ -6,6 +6,7 @@ import {
   Animated,
   Dimensions,
   Alert,
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -53,6 +54,26 @@ export default function SignupScreen({ navigation }) {
       JSON.stringify(buildSignupFlowState("Signup")),
     ).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const backSubscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => true,
+    );
+
+    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
+      const backActionTypes = new Set(["GO_BACK", "POP", "POP_TO_TOP"]);
+
+      if (backActionTypes.has(event.data?.action?.type)) {
+        event.preventDefault();
+      }
+    });
+
+    return () => {
+      backSubscription.remove();
+      unsubscribe();
+    };
+  }, [navigation]);
 
   const triggerShake = () => {
     shakeX.setValue(0);
@@ -137,7 +158,7 @@ export default function SignupScreen({ navigation }) {
         JSON.stringify(buildSignupFlowState("VerifyOtp", verifyOtpParams)),
       );
 
-      navigation.navigate("VerifyOtp", verifyOtpParams);
+      navigation.replace("VerifyOtp", verifyOtpParams);
     } catch (error) {
       console.error("Signup error:", error);
       Alert.alert("Network error", "Please try again.");

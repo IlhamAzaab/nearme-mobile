@@ -24,17 +24,23 @@ export default function AuthNavigator({
       screenOptions={{ headerShown: false }}
     >
       <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="Signup" component={SignupScreen} />
+      <Stack.Screen
+        name="Signup"
+        component={SignupScreen}
+        options={{ gestureEnabled: false, fullScreenGestureEnabled: false }}
+      />
       <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
       <Stack.Screen
         name="CompleteProfile"
         component={CompleteProfileScreen}
         initialParams={completeProfileInitialParams}
+        options={{ gestureEnabled: false, fullScreenGestureEnabled: false }}
       />
       <Stack.Screen
         name="VerifyOtp"
         component={VerifyOtpScreen}
         initialParams={verifyOtpInitialParams}
+        options={{ gestureEnabled: false, fullScreenGestureEnabled: false }}
       />
       <Stack.Screen name="WebView" component={WebViewScreen} />
     </Stack.Navigator>
