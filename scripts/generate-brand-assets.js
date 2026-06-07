@@ -27,11 +27,11 @@ const assets = [
     output: "android-adaptive-monochrome.png",
     size: 1024,
   },
-  {
-    source: "SvgArtboard 5.svg",
-    output: "splash-logo.png",
-    size: 1024,
-  },
+  // {
+  //   source: "SvgArtboard 5.svg",
+  //   output: "splash-logo.png",
+  //   size: 1024,
+  // },
   {
     source: "SvgArtboard 2.svg",
     output: "favicon.png",

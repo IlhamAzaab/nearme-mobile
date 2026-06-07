@@ -11,9 +11,6 @@
         "buildType": "apk",
         "gradleCommand": ":app:assembleDebug"
       },
-      "ios": {
-        "simulator": false
-      },
       "env": {
         "APP_ENV": "development"
       }
@@ -24,8 +21,7 @@
         "buildType": "apk"
       },
       "env": {
-        "APP_ENV": "preview",
-        "EAS_BUILD_DISABLE_MAVEN_CACHE": "1"
+        "APP_ENV": "preview"
       }
     },
     "production": {
@@ -34,14 +30,6 @@
       },
       "env": {
         "APP_ENV": "production"
-      }
-    }
-  },
-  "submit": {
-    "production": {
-      "android": {
-        "serviceAccountKeyPath": "./google-services.json",
-        "track": "internal"
       }
     }
   }
