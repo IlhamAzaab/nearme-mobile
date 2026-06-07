@@ -68,8 +68,10 @@ export default {
       [
         "expo-splash-screen",
         {
+          image: BRAND_ASSETS.splashLogo,
           backgroundColor: "#06C168",
           dark: {
+            image: BRAND_ASSETS.splashLogo,
             backgroundColor: "#06C168",
           },
         },
