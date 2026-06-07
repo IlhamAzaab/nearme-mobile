@@ -5,7 +5,7 @@ const BRAND_ASSETS = {
     "./assets/branding/android-adaptive-foreground.jpeg",
   androidAdaptiveMonochrome:
     "./assets/branding/android-adaptive-monochrome.png",
-  // splashLogo: "./assets/branding/splash-logo.png",
+  splashLogo: "./assets/branding/splash-logo.png",
   favicon: "./assets/branding/favicon.png",
 };
 
@@ -19,11 +19,6 @@ export default {
     scheme: "nearmemobile",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
-    splash: {
-      image: BRAND_ASSETS.splashLogo,
-      resizeMode: "contain",
-      backgroundColor: "#06C168",
-    },
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.nearme.mobile",
@@ -76,7 +71,6 @@ export default {
           },
         },
       ],
-      "./plugins/disableSplashLogo.js",
       [
         "expo-notifications",
         {
