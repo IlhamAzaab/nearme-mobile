@@ -60,8 +60,41 @@ const ORDER_TOTAL_CACHE_KEY = "@order_display_totals";
 const DRIVER_INFO_CACHE_KEY = "@order_driver_info";
 const DRIVER_LAST_LOCATION_CACHE_KEY = "@order_driver_last_location";
 
+function isValidDisplayTotal(value) {
+  const total = Number(value);
+  return Number.isFinite(total) && total > 0;
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getOrderItemQuantity(item) {
+  const qty = Number(item?.quantity ?? item?.qty ?? item?.count ?? 1);
+  return Number.isFinite(qty) && qty > 0 ? qty : 1;
+}
+
+function getOrderItemUnitPrice(item) {
+  const price = Number(
+    item?.unit_price ?? item?.price ?? item?.regular_price ?? item?.offer_price ?? 0,
+  );
+  return Number.isFinite(price) && price > 0 ? price : 0;
+}
+
+function getOrderItemsDisplayTotal(orderLike) {
+  const items = Array.isArray(orderLike?.order_items)
+    ? orderLike.order_items
+    : Array.isArray(orderLike?.items)
+      ? orderLike.items
+      : [];
+
+  if (items.length === 0) return 0;
+
+  return items.reduce((sum, item) => {
+    const unitPrice = getOrderItemUnitPrice(item);
+    const quantity = getOrderItemQuantity(item);
+    return sum + unitPrice * quantity;
+  }, 0);
 }
 
 function resolveOrderDisplayTotal(
@@ -69,7 +102,6 @@ function resolveOrderDisplayTotal(
   fallback = 0,
   preferFallback = false,
 ) {
-  const fallbackCandidates = [fallback];
   const orderCandidates = [
     orderLike?.grand_total,
     orderLike?.final_total,
@@ -77,13 +109,27 @@ function resolveOrderDisplayTotal(
     orderLike?.total_amount,
     orderLike?.total,
   ];
-  const candidates = preferFallback
-    ? [...fallbackCandidates, ...orderCandidates]
-    : [...orderCandidates, ...fallbackCandidates];
+  const itemsTotal = getOrderItemsDisplayTotal(orderLike);
+
+  const candidates = [];
+
+  if (preferFallback && isValidDisplayTotal(fallback)) {
+    candidates.push(fallback);
+  }
+
+  if (isValidDisplayTotal(itemsTotal)) {
+    candidates.push(itemsTotal);
+  }
+
+  candidates.push(...orderCandidates);
+
+  if (!preferFallback && isValidDisplayTotal(fallback)) {
+    candidates.push(fallback);
+  }
 
   for (let i = 0; i < candidates.length; i += 1) {
     const n = Number(candidates[i]);
-    if (Number.isFinite(n)) return n;
+    if (isValidDisplayTotal(n)) return n;
   }
 
   return 0;
@@ -97,7 +143,7 @@ async function getCachedOrderDisplayTotal(orderId) {
     if (!raw) return NaN;
     const map = JSON.parse(raw);
     const n = Number(map?.[String(orderId)]);
-    return Number.isFinite(n) ? n : NaN;
+    return isValidDisplayTotal(n) ? n : NaN;
   } catch {
     return NaN;
   }
@@ -1050,9 +1096,19 @@ const OrderSummaryCard = React.memo(({ data, expanded, onToggle }) => {
       {/* ── Always visible: Total row ── */}
       <View style={st.summaryTotalSection}>
         <Text style={st.summaryTotalLabel}>TOTAL</Text>
-        <Text style={st.summaryTotalVal}>
-          LKR {parseFloat(data.totalAmount || 0).toFixed(2)}
-        </Text>
+        {(() => {
+          const summaryTotal = resolveOrderDisplayTotal(
+            data.order,
+            data.totalAmount,
+            true,
+          );
+
+          return (
+            <Text style={st.summaryTotalVal}>
+              LKR {summaryTotal.toFixed(2)}
+            </Text>
+          );
+        })()}
       </View>
 
       <View style={st.summaryDivider} />
@@ -1715,11 +1771,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
     address: params.address || params.order?.delivery_address || "",
     items:
       params.items || params.order?.order_items || params.order?.items || [],
-    totalAmount: resolveOrderDisplayTotal(
-      params.order,
-      params.totalAmount ?? 0,
-      true,
-    ),
+    totalAmount: resolveOrderDisplayTotal(params.order, params.totalAmount, true),
     order: params.order || null,
     restaurantLogoUrl:
       params.restaurantLogoUrl ||
@@ -2355,7 +2407,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
       driverInfo: driverInfo || params.driverInfo || null,
       totalAmount: resolveOrderDisplayTotal(
         orderData.order,
-        orderData.totalAmount ?? params.totalAmount ?? 0,
+        orderData.totalAmount ?? params.totalAmount,
         true,
       ),
       restaurantName: orderData.restaurantName || params.restaurantName,
@@ -2456,7 +2508,7 @@ export default function OrderStatusFlowScreen({ route, navigation }) {
             items: o.order_items || o.items || [],
             totalAmount: resolveOrderDisplayTotal(
               o,
-              params.totalAmount ?? orderData.totalAmount ?? 0,
+              params.totalAmount ?? orderData.totalAmount,
               true,
             ),
             order: o,

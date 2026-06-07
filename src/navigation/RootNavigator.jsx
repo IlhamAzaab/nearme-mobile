@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, View, Text, Pressable, Platform, Linking, StatusBar } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import AuthNavigator from "./AuthNavigator";
 import CustomerStack from "./CustomerStack";
 import DriverNavigator from "./DriverNavigator";
@@ -19,6 +21,24 @@ import {
 const RESTAURANTS_CACHE_KEY = "public:restaurants";
 const FOODS_CACHE_KEY = "public:foods";
 
+const APP_VERSION = Constants.expoConfig?.version || "1.0.0";
+
+// Helper to compare semantic versions
+function isVersionStale(current, minimum) {
+  const parse = (v) => String(v || "").split(".").map(Number);
+  const cParts = parse(current);
+  const mParts = parse(minimum);
+
+  const maxLength = Math.max(cParts.length, mParts.length);
+  for (let i = 0; i < maxLength; i++) {
+    const cPart = cParts[i] || 0;
+    const mPart = mParts[i] || 0;
+    if (cPart < mPart) return true;
+    if (cPart > mPart) return false;
+  }
+  return false;
+}
+
 export default function RootNavigator() {
   const {
     isAuthenticated,
@@ -37,6 +57,11 @@ export default function RootNavigator() {
 
   const [isSplashVisible, setIsSplashVisible] = useState(!skipSplashOnAuth);
   const [splashCycle, setSplashCycle] = useState(0);
+  
+  // Force update version state
+  const [isVersionChecking, setIsVersionChecking] = useState(true);
+  const [isUpdateRequired, setIsUpdateRequired] = useState(false);
+
   const normalizedRole = String(userRole || "")
     .trim()
     .toLowerCase();
@@ -46,6 +71,39 @@ export default function RootNavigator() {
       : normalizedRole === "restaurant_admin"
         ? "admin"
         : normalizedRole;
+
+  // Run version check on startup
+  useEffect(() => {
+    let active = true;
+
+    const checkAppVersion = async () => {
+      try {
+        setIsVersionChecking(true);
+        const res = await fetch(`${API_BASE_URL}/public/app-config`);
+        if (!res.ok) throw new Error("Failed to fetch app config");
+
+        const data = await res.json();
+        const minVersion = data?.minimum_app_version || "1.0.0";
+
+        if (active) {
+          setIsUpdateRequired(isVersionStale(APP_VERSION, minVersion));
+          setIsVersionChecking(false);
+        }
+      } catch (err) {
+        console.warn("[RootNavigator] Version check failed:", err);
+        // Fail-open on network/server error to not block users
+        if (active) {
+          setIsVersionChecking(false);
+        }
+      }
+    };
+
+    checkAppVersion();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!skipSplashOnAuth) return;
@@ -147,7 +205,7 @@ export default function RootNavigator() {
     };
   }, []);
 
-  const shouldShowStartupSplash = !skipSplashOnAuth && isSplashVisible;
+  const shouldShowStartupSplash = (!skipSplashOnAuth && isSplashVisible) || isVersionChecking;
 
   const handleSplashComplete = useCallback(() => {
     lastSplashCompletedAtRef.current = Date.now();
@@ -157,7 +215,43 @@ export default function RootNavigator() {
     }
   }, [authTransitionMode, clearAuthTransitionMode]);
 
+  const handleOpenPlayStore = () => {
+    const url = Platform.OS === "android"
+      ? "market://details?id=com.nearme.mobile"
+      : "https://apps.apple.com/app/id-placeholder"; // Fallback URL
+
+    Linking.canOpenURL(url)
+      .then((supported) => {
+        if (supported) {
+          Linking.openURL(url);
+        } else {
+          Linking.openURL("https://play.google.com/store/apps/details?id=com.nearme.mobile");
+        }
+      })
+      .catch((err) => console.log("Linking error:", err));
+  };
+
   const renderMainNavigator = () => {
+    if (isUpdateRequired) {
+      return (
+        <View style={styles.blockerContainer}>
+          <StatusBar backgroundColor="#F9FAFB" barStyle="dark-content" />
+          <View style={styles.blockerCard}>
+            <View style={styles.iconCircle}>
+              <Ionicons name="cloud-download-outline" size={44} color="#06C168" />
+            </View>
+            <Text style={styles.blockerTitle}>New Version Available</Text>
+            <Text style={styles.blockerSubtitle}>
+              We have made some exciting updates and fixes to Meezo! To continue using the app, please update to the latest version.
+            </Text>
+            <Pressable onPress={handleOpenPlayStore} style={styles.updateButton}>
+              <Text style={styles.updateButtonText}>Update Now</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
     if (isAuthenticated) {
       switch (effectiveRole) {
         case "customer":
@@ -216,5 +310,61 @@ const styles = StyleSheet.create({
   startupSplashOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 999,
+  },
+  blockerContainer: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  blockerCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 32,
+    alignItems: "center",
+    width: "100%",
+    maxWidth: 340,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  iconCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: "#ECFDF5",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 24,
+  },
+  blockerTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#111827",
+    textAlign: "center",
+    marginBottom: 12,
+  },
+  blockerSubtitle: {
+    fontSize: 14,
+    color: "#6B7280",
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: 32,
+  },
+  updateButton: {
+    backgroundColor: "#06C168",
+    paddingVertical: 14,
+    paddingHorizontal: 36,
+    borderRadius: 14,
+    width: "100%",
+    alignItems: "center",
+  },
+  updateButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
   },
 });

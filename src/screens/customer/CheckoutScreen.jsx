@@ -120,11 +120,16 @@ async function calculateRouteDistance(lat1, lon1, lat2, lon2) {
 
 const ORDER_TOTAL_CACHE_KEY = "@order_display_totals";
 
+function isValidDisplayTotal(value) {
+  const total = Number(value);
+  return Number.isFinite(total) && total > 0;
+}
+
 async function cacheOrderDisplayTotal(orderId, totalAmount) {
   if (!orderId) return;
 
   const total = Number(totalAmount);
-  if (!Number.isFinite(total)) return;
+  if (!isValidDisplayTotal(total)) return;
 
   try {
     const raw = await AsyncStorage.getItem(ORDER_TOTAL_CACHE_KEY);
@@ -143,12 +148,37 @@ function resolveOrderDisplayTotal(orderLike, fallback = 0) {
     orderLike?.payable_amount,
     orderLike?.total_amount,
     orderLike?.total,
-    fallback,
   ];
+
+  const items = Array.isArray(orderLike?.order_items)
+    ? orderLike.order_items
+    : Array.isArray(orderLike?.items)
+      ? orderLike.items
+      : [];
+
+  if (items.length > 0) {
+    const itemsTotal = items.reduce((sum, item) => {
+      const quantity = Number(item?.quantity ?? item?.qty ?? item?.count ?? 1);
+      const unitPrice = Number(
+        item?.unit_price ?? item?.price ?? item?.regular_price ?? item?.offer_price ?? 0,
+      );
+      if (!Number.isFinite(quantity) || quantity <= 0) return sum;
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) return sum;
+      return sum + unitPrice * quantity;
+    }, 0);
+
+    if (Number.isFinite(itemsTotal) && itemsTotal > 0) {
+      candidates.push(itemsTotal);
+    }
+  }
+
+  if (isValidDisplayTotal(fallback)) {
+    candidates.push(fallback);
+  }
 
   for (let i = 0; i < candidates.length; i += 1) {
     const n = Number(candidates[i]);
-    if (Number.isFinite(n)) return n;
+    if (isValidDisplayTotal(n)) return n;
   }
 
   return 0;
@@ -180,6 +210,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const [isMapEditMode, setIsMapEditMode] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
   const [fetchingLocation, setFetchingLocation] = useState(false);
+  const [isProfileSyncing, setIsProfileSyncing] = useState(false);
 
   // Modal edit
   const [showAddressModal, setShowAddressModal] = useState(false);
@@ -297,6 +328,9 @@ export default function CheckoutScreen({ route, navigation }) {
 
       const syncCustomerProfileAddress = async () => {
         try {
+          setIsProfileSyncing(true);
+          setRouteInfo(null);
+
           const token = await getAccessToken();
           if (!token) {
             setPosition(null);
@@ -351,6 +385,8 @@ export default function CheckoutScreen({ route, navigation }) {
           setPosition(null);
           setHasExplicitDeliveryLocation(false);
           setIsProfilePinMissing(true);
+        } finally {
+          setIsProfileSyncing(false);
         }
       };
 
@@ -437,6 +473,9 @@ export default function CheckoutScreen({ route, navigation }) {
   // ✅ route calc when customer position / restaurant changes
   useEffect(() => {
     const run = async () => {
+      // ✅ Immediately clear stale route data so old delivery fee is not shown
+      setRouteInfo(null);
+
       if (
         !hasExplicitDeliveryLocation ||
         !position ||
@@ -461,9 +500,16 @@ export default function CheckoutScreen({ route, navigation }) {
         parseFloat(cart.restaurant.longitude),
       );
 
-      if (result.success)
-        setRouteInfo({ distance: result.distance, duration: result.duration });
-      else setRouteInfo(null);
+      if (result.success) {
+        setRouteInfo({
+          distance: result.distance,
+          duration: result.duration,
+          latitude: position.latitude,
+          longitude: position.longitude,
+        });
+      } else {
+        setRouteInfo(null);
+      }
 
       setRouteLoading(false);
     };
@@ -699,7 +745,7 @@ export default function CheckoutScreen({ route, navigation }) {
     }
 
     const timer = setTimeout(() => {
-      fetchOrderQuote({ silent: true }).catch(() => {});
+      fetchOrderQuote({ silent: true }).catch(() => { });
     }, 250);
 
     return () => clearTimeout(timer);
@@ -954,15 +1000,27 @@ export default function CheckoutScreen({ route, navigation }) {
     return calculateServiceFee(subtotal);
   }, [quoteServiceFee, subtotal, feeConfig]);
 
+  const isRouteStale = useMemo(() => {
+    if (!position) return false;
+    if (!routeInfo) return true; // If position exists but routeInfo is null, it's not ready
+
+    const latDiff = Math.abs(position.latitude - (routeInfo.latitude || 0));
+    const lngDiff = Math.abs(position.longitude - (routeInfo.longitude || 0));
+
+    return latDiff > 0.00001 || lngDiff > 0.00001;
+  }, [position, routeInfo]);
+
   const standardDeliveryFee = useMemo(() => {
     if (Number.isFinite(quoteNormalDeliveryFee)) return quoteNormalDeliveryFee;
+    if (isRouteStale) return null;
     return routeInfo ? calculateStandardDeliveryFee(routeInfo.distance) : null;
-  }, [quoteNormalDeliveryFee, routeInfo, feeConfig]);
+  }, [quoteNormalDeliveryFee, routeInfo, feeConfig, isRouteStale]);
 
   const deliveryFee = useMemo(() => {
     if (Number.isFinite(quoteDeliveryFee)) return quoteDeliveryFee;
+    if (isRouteStale) return null;
     return routeInfo ? calculateDeliveryFee(routeInfo.distance) : null;
-  }, [quoteDeliveryFee, routeInfo, feeConfig, launchPromoStatus]);
+  }, [quoteDeliveryFee, routeInfo, feeConfig, launchPromoStatus, isRouteStale]);
   const launchPromoIsEligible =
     Boolean(launchPromoStatus?.promotion?.enabled) &&
     Boolean(launchPromoStatus?.has_acknowledged) &&
@@ -974,6 +1032,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
     return (
       launchPromoIsEligible &&
+      !isRouteStale &&
       routeInfo !== null &&
       standardDeliveryFee !== null &&
       deliveryFee !== null
@@ -984,6 +1043,7 @@ export default function CheckoutScreen({ route, navigation }) {
     orderQuote?.launch_promo?.applied,
     routeInfo,
     standardDeliveryFee,
+    isRouteStale,
   ]);
 
   const launchPromoSavings = useMemo(() => {
@@ -1009,9 +1069,11 @@ export default function CheckoutScreen({ route, navigation }) {
       return quoteDistanceKm;
     }
 
+    if (isRouteStale) return null;
+
     const routeDistance = Number(routeInfo?.distance);
     return Number.isFinite(routeDistance) ? routeDistance : null;
-  }, [quoteDistanceKm, routeInfo]);
+  }, [quoteDistanceKm, routeInfo, isRouteStale]);
 
   const requiredMinSubtotal = useMemo(
     () =>
@@ -1089,7 +1151,7 @@ export default function CheckoutScreen({ route, navigation }) {
   ]);
 
   const ctaAlertMessage = useMemo(() => {
-    if (checkoutBlockReason && !routeLoading && !placing) {
+    if (checkoutBlockReason && !routeLoading && !isRouteStale && !isProfileSyncing && !placing) {
       // Don't show "Calculating pricing..." as an error — it's a loading state
       if (checkoutBlockReason === "Calculating pricing...") return "";
       return checkoutBlockReason;
@@ -1098,11 +1160,34 @@ export default function CheckoutScreen({ route, navigation }) {
     if (error) return error;
 
     return "";
-  }, [error, checkoutBlockReason, routeLoading, placing]);
+  }, [error, checkoutBlockReason, routeLoading, isRouteStale, isProfileSyncing, placing]);
+
+  const isPricingReady = useMemo(() => {
+    return (
+      !isProfileSyncing &&
+      !routeLoading &&
+      !isRouteStale &&
+      !quoteLoading &&
+      !placing &&
+      routeInfo !== null &&
+      deliveryFee !== null &&
+      orderQuote !== null &&
+      lastSuccessfulQuoteInputRef.current === getQuoteInputSignature()
+    );
+  }, [
+    isProfileSyncing,
+    routeLoading,
+    isRouteStale,
+    quoteLoading,
+    placing,
+    routeInfo,
+    deliveryFee,
+    orderQuote,
+    getQuoteInputSignature,
+  ]);
 
   const isPlaceOrderDisabled =
-    routeLoading ||
-    quoteLoading ||
+    !isPricingReady ||
     placing ||
     !cart ||
     (isLocationDetailsComplete && deliveryFee === null);
@@ -1185,18 +1270,18 @@ export default function CheckoutScreen({ route, navigation }) {
     position?.longitude,
   )
     ? {
-        latitude: position.latitude,
-        longitude: position.longitude,
+      latitude: position.latitude,
+      longitude: position.longitude,
+      latitudeDelta: 0.01,
+      longitudeDelta: 0.01,
+    }
+    : restaurantHasLocation
+      ? {
+        latitude: Number(cart.restaurant.latitude),
+        longitude: Number(cart.restaurant.longitude),
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       }
-    : restaurantHasLocation
-      ? {
-          latitude: Number(cart.restaurant.latitude),
-          longitude: Number(cart.restaurant.longitude),
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        }
       : null;
 
   return (
@@ -1218,18 +1303,18 @@ export default function CheckoutScreen({ route, navigation }) {
               markers={
                 hasExplicitDeliveryLocation && position
                   ? [
-                      {
-                        id: "delivery",
-                        coordinate: position,
-                        type: "customer",
-                        title: "Delivery Location",
-                        emoji: "",
-                        customHtml: CHECKOUT_ADDRESS_PIN_HTML,
-                        iconOnly: true,
-                        iconSize: [44, 44],
-                        iconAnchor: [22, 44],
-                      },
-                    ]
+                    {
+                      id: "delivery",
+                      coordinate: position,
+                      type: "customer",
+                      title: "Delivery Location",
+                      emoji: "",
+                      customHtml: CHECKOUT_ADDRESS_PIN_HTML,
+                      iconOnly: true,
+                      iconSize: [44, 44],
+                      iconAnchor: [22, 44],
+                    },
+                  ]
                   : []
               }
             />
@@ -1243,7 +1328,13 @@ export default function CheckoutScreen({ route, navigation }) {
 
           {/* Edit Pin Button */}
           <Pressable
-            onPress={() => navigation.navigate("AddressPicker")}
+            onPress={() => {
+              setIsProfileSyncing(true);
+              setRouteInfo(null);
+              setOrderQuote(null);
+              lastSuccessfulQuoteInputRef.current = "";
+              navigation.navigate("AddressPicker");
+            }}
             style={styles.mapBtn}
           >
             <Text style={styles.mapBtnText}>Edit Pin</Text>
@@ -1362,7 +1453,7 @@ export default function CheckoutScreen({ route, navigation }) {
                       style={[
                         styles.orderItemRow,
                         idx === (cart?.items || []).length - 1 &&
-                          styles.orderItemLastRow,
+                        styles.orderItemLastRow,
                       ]}
                     >
                       <View style={styles.orderItemInfo}>
@@ -1414,60 +1505,84 @@ export default function CheckoutScreen({ route, navigation }) {
         </View>
 
         {/* ✅ Price summary */}
-        <View style={styles.card}>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginBottom: 12,
-            }}
-          >
-            <MaterialIcons
-              name="receipt-long"
-              size={20}
-              color="#06C168"
-              style={{ marginRight: 8 }}
-            />
-            <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
-          </View>
-
-          {isLaunchPromoApplied && (
-            <View style={styles.launchPromoBadgeWrap}>
-              <View style={styles.launchPromoBadgeHeader}>
-                <View style={styles.launchPromoBadgeTitleWrap}>
-                  <Ionicons name="pricetag" size={14} color="#065F46" />
-                  <Text style={styles.launchPromoBadgeTitle}>
-                    Launch Offer Applied
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.launchPromoBadgeSubText}>
-                delivery fees offer activated for this order.
-              </Text>
+        {!isPricingReady ? (
+          <View style={styles.card}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <MaterialIcons
+                name="receipt-long"
+                size={20}
+                color="#06C168"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
             </View>
-          )}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 24 }}>
+              <ActivityIndicator size="small" color="#06C168" style={{ marginRight: 8 }} />
+              <Text style={[styles.value, { color: "#6b7280" }]}>Calculating delivery charges...</Text>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.card}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <MaterialIcons
+                name="receipt-long"
+                size={20}
+                color="#06C168"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
+            </View>
 
-          <Row
-            label="Subtotal"
-            value={subtotal !== null ? formatPrice(subtotal) : "--"}
-          />
+            {isLaunchPromoApplied && (
+              <View style={styles.launchPromoBadgeWrap}>
+                <View style={styles.launchPromoBadgeHeader}>
+                  <View style={styles.launchPromoBadgeTitleWrap}>
+                    <Ionicons name="pricetag" size={14} color="#065F46" />
+                    <Text style={styles.launchPromoBadgeTitle}>
+                      Launch Offer Applied
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.launchPromoBadgeSubText}>
+                  delivery fees offer activated for this order.
+                </Text>
+              </View>
+            )}
 
-          <Row
-            label="Delivery fee"
-            value={deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
-          />
-          <Row
-            label="Service fee"
-            value={serviceFee !== null ? formatPrice(serviceFee) : "--"}
-          />
+            <Row
+              label="Subtotal"
+              value={subtotal !== null ? formatPrice(subtotal) : "--"}
+            />
 
-          <View style={styles.divider} />
-          <Row
-            label="Total"
-            value={finalTotal !== null ? formatPrice(finalTotal) : "--"}
-            isBold
-          />
-        </View>
+            <Row
+              label="Delivery fee"
+              value={deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
+            />
+            <Row
+              label="Service fee"
+              value={serviceFee !== null ? formatPrice(serviceFee) : "--"}
+            />
+
+            <View style={styles.divider} />
+            <Row
+              label="Total"
+              value={finalTotal !== null ? formatPrice(finalTotal) : "--"}
+              isBold
+            />
+          </View>
+        )}
       </ScrollView>
 
       {/* ✅ Sticky CTA */}
@@ -1483,43 +1598,48 @@ export default function CheckoutScreen({ route, navigation }) {
             <Text style={styles.ctaAlertText}>{ctaAlertMessage}</Text>
           </View>
         )}
-        <Pressable
-          onPress={handlePlaceOrder}
-          disabled={isPlaceOrderDisabled}
-          style={[styles.cta, isPlaceOrderDisabled && styles.ctaDisabled]}
-        >
-          <Text
-            style={[
-              styles.ctaText,
-              isPlaceOrderDisabled && { color: "#6EDE9A" },
-            ]}
+        {!isPricingReady ? (
+          <View style={[styles.cta, styles.ctaDisabled, { justifyContent: "center", flexDirection: "row" }]}>
+            <ActivityIndicator size="small" color="#6EDE9A" />
+            <Text style={[styles.ctaText, { color: "#6EDE9A", marginLeft: 8 }]}>
+              Calculating pricing...
+            </Text>
+          </View>
+        ) : (
+          <Pressable
+            onPress={handlePlaceOrder}
+            disabled={isPlaceOrderDisabled}
+            style={[styles.cta, isPlaceOrderDisabled && styles.ctaDisabled]}
           >
-            {placing
-              ? "Placing..."
-              : quoteLoading
-                ? "Calculating pricing..."
-                : routeLoading && !Number.isFinite(quoteDistanceKm)
-                  ? "Calculating..."
-                  : !hasExplicitDeliveryLocation
-                    ? "Location not provided"
-                    : !String(city || "").trim()
-                      ? "Add city to continue"
-                      : !isDistanceWithinLimit && routeInfo
-                        ? `Not available beyond ${maxOrderDistanceKm} km`
-                        : !isSubtotalValid
-                          ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
-                          : finalTotal !== null
-                            ? `Place Order • ${formatPrice(finalTotal)}`
-                            : "Place Order"}
-          </Text>
-          {(placing || quoteLoading) && (
-            <ActivityIndicator
-              size="small"
-              color={placing ? "#fff" : "#6EDE9A"}
-              style={{ marginLeft: 8 }}
-            />
-          )}
-        </Pressable>
+            <Text
+              style={[
+                styles.ctaText,
+                isPlaceOrderDisabled && { color: "#6EDE9A" },
+              ]}
+            >
+              {placing
+                ? "Placing..."
+                : !hasExplicitDeliveryLocation
+                  ? "Location not provided"
+                  : !String(city || "").trim()
+                    ? "Add city to continue"
+                    : !isDistanceWithinLimit && routeInfo
+                      ? `Not available beyond ${maxOrderDistanceKm} km`
+                      : !isSubtotalValid
+                        ? `Add Rs. ${(requiredMinSubtotal - subtotal).toFixed(0)} more`
+                        : finalTotal !== null
+                          ? `Place Order • ${formatPrice(finalTotal)}`
+                          : "Place Order"}
+            </Text>
+            {placing && (
+              <ActivityIndicator
+                size="small"
+                color="#fff"
+                style={{ marginLeft: 8 }}
+              />
+            )}
+          </Pressable>
+        )}
       </View>
 
       {/* ✅ Address Modal */}

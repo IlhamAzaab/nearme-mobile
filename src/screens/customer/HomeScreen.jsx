@@ -243,6 +243,13 @@ const CATEGORY_LABEL_LOOKUP = new Map(
   CATEGORY_ORDER.map((label) => [label.toLowerCase(), label]),
 );
 
+const CATEGORY_LABEL_ALIASES = {
+  briyani: "biriyani",
+  biryani: "biriyani",
+  friedrice: "fried rice",
+  "fried-rice": "fried rice",
+};
+
 const CATEGORY_IMAGE_BY_KEY = {
   koththu: require("../../assets/category-images/koththu.jpg"),
   "fried rice": require("../../assets/category-images/fried-rice.jpg"),
@@ -306,7 +313,8 @@ function normalizeCategoryLabel(value) {
   const key = String(value || "")
     .trim()
     .toLowerCase();
-  return CATEGORY_LABEL_LOOKUP.get(key) || "others";
+  const normalizedKey = CATEGORY_LABEL_ALIASES[key] || key;
+  return CATEGORY_LABEL_LOOKUP.get(normalizedKey) || "others";
 }
 
 const CategoryIcon = ({ category }) => {

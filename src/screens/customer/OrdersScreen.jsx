@@ -42,6 +42,11 @@ const BORDER = "#F1F5F9";
 const BG = "#FFFFFF";
 const ORDER_TOTAL_CACHE_KEY = "@order_display_totals";
 
+function isValidDisplayTotal(value) {
+  const total = Number(value);
+  return Number.isFinite(total) && total > 0;
+}
+
 const getCachedOrderDisplayTotal = async (orderId) => {
   if (!orderId) return NaN;
 
@@ -50,7 +55,7 @@ const getCachedOrderDisplayTotal = async (orderId) => {
     if (!raw) return NaN;
     const map = JSON.parse(raw);
     const n = Number(map?.[String(orderId)]);
-    return Number.isFinite(n) ? n : NaN;
+    return isValidDisplayTotal(n) ? n : NaN;
   } catch {
     return NaN;
   }
@@ -63,12 +68,37 @@ const resolveOrderDisplayTotal = (orderLike, fallback = 0) => {
     orderLike?.payable_amount,
     orderLike?.total_amount,
     orderLike?.total,
-    fallback,
   ];
+
+  const items = Array.isArray(orderLike?.order_items)
+    ? orderLike.order_items
+    : Array.isArray(orderLike?.items)
+      ? orderLike.items
+      : [];
+
+  if (items.length > 0) {
+    const itemsTotal = items.reduce((sum, item) => {
+      const quantity = Number(item?.quantity ?? item?.qty ?? item?.count ?? 1);
+      const unitPrice = Number(
+        item?.unit_price ?? item?.price ?? item?.regular_price ?? item?.offer_price ?? 0,
+      );
+      if (!Number.isFinite(quantity) || quantity <= 0) return sum;
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) return sum;
+      return sum + unitPrice * quantity;
+    }, 0);
+
+    if (Number.isFinite(itemsTotal) && itemsTotal > 0) {
+      candidates.push(itemsTotal);
+    }
+  }
+
+  if (isValidDisplayTotal(fallback)) {
+    candidates.push(fallback);
+  }
 
   for (let i = 0; i < candidates.length; i += 1) {
     const n = Number(candidates[i]);
-    if (Number.isFinite(n)) return n;
+    if (isValidDisplayTotal(n)) return n;
   }
 
   return 0;

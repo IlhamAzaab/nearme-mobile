@@ -769,7 +769,8 @@ export default function AddressPickerScreen({ navigation, route }) {
             paddingBottom: 12 + Math.max(0, insets.bottom),
           },
         ]}
-      > <Text style={styles.pinInstructionText1}>Live location may be inaccurate. please verify your actual location</Text>
+      >
+        <Text style={styles.pinInstructionText1}>Live location may be inaccurate. please verify your actual location</Text>
         <Text style={styles.pinInstructionText}>
           Pin your delivery location on the map, then confirm.
         </Text>

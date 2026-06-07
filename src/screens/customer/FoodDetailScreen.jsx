@@ -21,19 +21,23 @@ import { fetchJsonWithCache, getCachedJson } from "../../lib/publicDataCache";
 
 function FoodDetailSkeleton({ onClose, insets }) {
   return (
-    <View style={styles.container}>
-      {/* header */}
-      <View style={[styles.header, { paddingTop: insets.top + 4 }]}>
-        <Pressable onPress={onClose} style={styles.closeBtn}>
-          <Ionicons name="close" size={22} color="#0F172A" />
-        </Pressable>
-        <SkeletonBlock width={100} height={16} borderRadius={8} />
-        <View style={{ width: 40 }} />
-      </View>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Floating Close Button */}
+      <Pressable
+        onPress={onClose}
+        style={[styles.floatingCloseBtn, { top: insets.top + 12 }]}
+      >
+        <Ionicons name="close" size={22} color="#0F172A" />
+      </Pressable>
       <ScrollView style={styles.page} showsVerticalScrollIndicator={false}>
         {/* hero */}
         <View style={styles.heroWrap}>
-          <SkeletonBlock width="100%" height={260} borderRadius={16} />
+          <SkeletonBlock
+            width="100%"
+            height={260}
+            borderRadius={0}
+            style={{ borderBottomLeftRadius: 24, borderBottomRightRadius: 24 }}
+          />
         </View>
         {/* title + price */}
         <View style={{ paddingHorizontal: 20, paddingTop: 24, gap: 10 }}>
@@ -301,17 +305,14 @@ export default function FoodDetailScreen({ route, navigation }) {
   if (!food) return null;
 
   return (
-    <View style={styles.container}>
-      {/* Blur Header - overlapping the image */}
-      <View style={[styles.header, { paddingTop: insets.top + 4 }]}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.closeBtn}>
-          <Ionicons name="close" size={22} color="#0F172A" />
-        </Pressable>
-        <Text style={styles.headerTitle}>Item Details</Text>
-        <Pressable style={styles.headerBtn}>
-          <Ionicons name="share-social" size={18} color="#0F172A" />
-        </Pressable>
-      </View>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Floating Close Button */}
+      <Pressable
+        onPress={() => navigation.goBack()}
+        style={[styles.floatingCloseBtn, { top: insets.top + 12 }]}
+      >
+        <Ionicons name="close" size={22} color="#0F172A" />
+      </Pressable>
 
       <ScrollView
         style={styles.page}
@@ -523,6 +524,24 @@ const { width } = Dimensions.get("window");
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#ffffff" },
+  floatingCloseBtn: {
+    position: "absolute",
+    left: 16,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "rgba(226, 232, 240, 0.8)",
+  },
   page: { flex: 1, backgroundColor: "#fff" },
 
   // Header

@@ -186,7 +186,7 @@ const saveDashboardAsyncCache = async (payload) => {
 // Main Dashboard Component
 // ============================================================================
 
-export default function DashboardScreen({ navigation }) {
+export default function DashboardScreen({ navigation, route }) {
   const isFocused = useIsFocused();
   const queryClient = useQueryClient();
   const { on, off, isConnected } = useSocket();
@@ -1297,11 +1297,17 @@ export default function DashboardScreen({ navigation }) {
     return () => subscription?.remove();
   }, []); // ✅ Empty deps: effect is stable now
 
+  const forceRefreshParam = route?.params?.forceRefresh;
+
   useEffect(() => {
     if (!isFocused) return;
 
-    const shouldForce = pendingDashboardRefreshRef.current;
+    const shouldForce = pendingDashboardRefreshRef.current || forceRefreshParam;
     pendingDashboardRefreshRef.current = false;
+
+    if (forceRefreshParam) {
+      navigation.setParams({ forceRefresh: undefined });
+    }
 
     if (hasInitialRefreshRef.current && !shouldForce) {
       return;
@@ -1313,7 +1319,7 @@ export default function DashboardScreen({ navigation }) {
     setTimeout(() => {
       refreshDashboardOnDemandRef.current?.({ force: shouldForce });
     }, 0);
-  }, [isFocused]); // ✅ Only depends on isFocused
+  }, [isFocused, forceRefreshParam, navigation]);
 
   useEffect(() => {
     let mounted = true;
@@ -1361,17 +1367,17 @@ export default function DashboardScreen({ navigation }) {
           return;
         }
 
-        if (action !== "accepted") return;
+        if (action === "accepted" || action === "delivered" || action === "picked_up") {
+          // Defer refresh to avoid cross-render updates.
+          if (!isFocusedRef.current) {
+            pendingDashboardRefreshRef.current = true;
+            return;
+          }
 
-        // Defer refresh to avoid cross-render updates.
-        if (!isFocusedRef.current) {
-          pendingDashboardRefreshRef.current = true;
-          return;
+          setTimeout(() => {
+            refreshDashboardOnDemandRef.current?.({ force: true });
+          }, 0);
         }
-
-        setTimeout(() => {
-          refreshDashboardOnDemandRef.current?.({ force: true });
-        }, 0);
       },
     );
 

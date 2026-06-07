@@ -89,9 +89,8 @@ const OperationsConfigScreen = ({ navigation }) => {
 
   // Section 7: Order Distance Constraints
   const [orderDistanceConstraints, setOrderDistanceConstraints] = useState([
-    { min_km: 0, max_km: 5, min_subtotal: 300 },
-    { min_km: 5, max_km: 10, min_subtotal: 1000 },
-    { min_km: 10, max_km: 15, min_subtotal: 2000 },
+    { min_km: 0, max_km: 10, min_subtotal: 300 },
+    { min_km: 10, max_km: 15, min_subtotal: 1000 },
     { min_km: 15, max_km: 25, min_subtotal: 3000 },
   ]);
   const [maxOrderDistanceKm, setMaxOrderDistanceKm] = useState("25");

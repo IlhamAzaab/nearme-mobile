@@ -1479,7 +1479,10 @@ export default function DriverMapScreen({ route, navigation }) {
   useEffect(() => {
     if (loading || currentTarget) return;
     if (overlayVisible || updating || statusActionInProgressRef.current) return;
-    navigation.replace("DriverTabs", { screen: "Dashboard" });
+    navigation.replace("DriverTabs", {
+      screen: "Dashboard",
+      params: { forceRefresh: true },
+    });
   }, [loading, currentTarget, navigation, overlayVisible, updating]);
 
   if (loading) {
@@ -1491,7 +1494,15 @@ export default function DriverMapScreen({ route, navigation }) {
       <View style={styles.loadingContainer}>
         <Text style={styles.emptyEmoji}>📭</Text>
         <Text style={styles.emptyText}>No active deliveries found</Text>
-        <Pressable style={styles.goBackBtn} onPress={() => navigation.goBack()}>
+        <Pressable
+          style={styles.goBackBtn}
+          onPress={() =>
+            navigation.navigate("DriverTabs", {
+              screen: "Dashboard",
+              params: { forceRefresh: true },
+            })
+          }
+        >
           <Text style={styles.goBackBtnText}>Go Back</Text>
         </Pressable>
       </View>

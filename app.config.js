@@ -63,9 +63,6 @@ export default {
       [
         "expo-splash-screen",
         {
-          image: BRAND_ASSETS.splashLogo,
-          imageWidth: 200,
-          resizeMode: "contain",
           backgroundColor: "#06C168",
           dark: {
             backgroundColor: "#06C168",
