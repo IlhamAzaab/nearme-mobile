@@ -2,8 +2,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
-import { useCallback, useEffect, useRef } from "react";
-import { AppState } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, Modal, View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
 import {
@@ -150,6 +151,10 @@ export default function DriverLiveLocationSync() {
   const lastEmitLocationRef = useRef(null);
   const isLocationWatcherRunningRef = useRef(false);
   const startTrackingInFlightRef = useRef(false);
+  const [showDisclosure, setShowDisclosure] = useState(false);
+  const [isRequesting, setIsRequesting] = useState(false);
+  const hasDeclinedPermissionRef = useRef(false);
+  const isPermissionModalActiveRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -221,16 +226,70 @@ export default function DriverLiveLocationSync() {
 
   const setBackgroundTrackingEnabled = useCallback(async (enabled) => {
     if (enabled && !backgroundTrackingEnabledRef.current) {
-      const result = await startDriverBackgroundLocationTracking();
-      backgroundTrackingEnabledRef.current = Boolean(result?.ok);
+      if (hasDeclinedPermissionRef.current || isPermissionModalActiveRef.current) {
+        return;
+      }
+
+      const fg = await Location.getForegroundPermissionsAsync();
+      const bg = await Location.getBackgroundPermissionsAsync();
+
+      if (fg.status === "granted" && bg.status === "granted") {
+        const result = await startDriverBackgroundLocationTracking();
+        backgroundTrackingEnabledRef.current = Boolean(result?.ok);
+      } else {
+        isPermissionModalActiveRef.current = true;
+        setShowDisclosure(true);
+      }
       return;
     }
 
     if (!enabled && backgroundTrackingEnabledRef.current) {
       await stopDriverBackgroundLocationTracking();
       backgroundTrackingEnabledRef.current = false;
+      hasDeclinedPermissionRef.current = false;
     }
   }, []);
+
+  const handleAccept = async () => {
+    if (isRequesting) return;
+    setIsRequesting(true);
+    try {
+      const fg = await Location.requestForegroundPermissionsAsync();
+      if (fg.status === "granted") {
+        const bg = await Location.requestBackgroundPermissionsAsync();
+        if (bg.status === "granted") {
+          const result = await startDriverBackgroundLocationTracking();
+          backgroundTrackingEnabledRef.current = Boolean(result?.ok);
+        } else {
+          Alert.alert(
+            "Permission Required",
+            "Meezo needs background location permission ('Allow all the time') to track your deliveries when the app is closed or minimized."
+          );
+        }
+      } else {
+        Alert.alert(
+          "Permission Required",
+          "Foreground location permission is required to track your delivery routes."
+        );
+      }
+    } catch (e) {
+      console.error("Failed to request permissions:", e);
+    } finally {
+      setIsRequesting(false);
+      setShowDisclosure(false);
+      isPermissionModalActiveRef.current = false;
+    }
+  };
+
+  const handleDecline = () => {
+    hasDeclinedPermissionRef.current = true;
+    setShowDisclosure(false);
+    isPermissionModalActiveRef.current = false;
+    Alert.alert(
+      "Location Tracking Disabled",
+      "Background location tracking is disabled. Active deliveries won't track when you leave the app."
+    );
+  };
 
   const syncTrackingLifecycle = useCallback(async () => {
     const token = await getAccessToken();
@@ -489,5 +548,156 @@ export default function DriverLiveLocationSync() {
     syncTrackingLifecycle,
   ]);
 
-  return null;
+  return (
+    <Modal
+      visible={showDisclosure}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={handleDecline}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <View style={styles.iconContainer}>
+            <Ionicons name="location" size={40} color="#06C168" />
+          </View>
+
+          <Text style={styles.modalTitle}>Enable Live Location</Text>
+
+          <Text style={styles.modalText}>
+            Meezo collects location data to track active deliveries and share them with customers in real-time,{" "}
+            <Text style={styles.boldText}>
+              even when the app is closed, in the background, or not in use.
+            </Text>
+          </Text>
+
+          <View style={styles.bulletList}>
+            <View style={styles.bulletItem}>
+              <Ionicons name="checkmark-circle" size={20} color="#06C168" style={styles.bulletIcon} />
+              <Text style={styles.bulletText}>Real-time delivery progress updates</Text>
+            </View>
+            <View style={styles.bulletItem}>
+              <Ionicons name="checkmark-circle" size={20} color="#06C168" style={styles.bulletIcon} />
+              <Text style={styles.bulletText}>Distance and route calculations</Text>
+            </View>
+            <View style={styles.bulletItem}>
+              <Ionicons name="checkmark-circle" size={20} color="#06C168" style={styles.bulletIcon} />
+              <Text style={styles.bulletText}>Only tracked during active orders</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.acceptButton, isRequesting && styles.disabledButton]}
+            onPress={handleAccept}
+            disabled={isRequesting}
+          >
+            <Text style={styles.acceptButtonText}>
+              {isRequesting ? "Requesting..." : "Accept & Continue"}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.declineButton}
+            onPress={handleDecline}
+            disabled={isRequesting}
+          >
+            <Text style={styles.declineButtonText}>Not Now</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 }
+
+const styles = StyleSheet.create({
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 20,
+    padding: 24,
+    width: "100%",
+    maxWidth: 340,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  iconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#ECFDF5",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  modalText: {
+    fontSize: 14,
+    color: "#4B5563",
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  boldText: {
+    fontWeight: "700",
+    color: "#111827",
+  },
+  bulletList: {
+    width: "100%",
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  bulletItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  bulletIcon: {
+    marginRight: 10,
+  },
+  bulletText: {
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: "500",
+  },
+  acceptButton: {
+    backgroundColor: "#06C168",
+    paddingVertical: 14,
+    borderRadius: 12,
+    width: "100%",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  disabledButton: {
+    opacity: 0.7,
+  },
+  acceptButtonText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  declineButton: {
+    paddingVertical: 8,
+    width: "100%",
+    alignItems: "center",
+  },
+  declineButtonText: {
+    color: "#6B7280",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+});
