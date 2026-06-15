@@ -3,7 +3,7 @@ import NetInfo from "@react-native-community/netinfo";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, Modal, View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { AppState, Modal, View, Text, TouchableOpacity, StyleSheet, Alert, DeviceEventEmitter } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
@@ -168,6 +168,37 @@ export default function DriverLiveLocationSync() {
 
     return () => {
       mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener("show_location_disclosure", () => {
+      setShowDisclosure(true);
+    });
+    return () => {
+      sub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const checkPermissionsOnMount = async () => {
+      const token = await getAccessToken();
+      if (!token) return;
+
+      const fg = await Location.getForegroundPermissionsAsync();
+      const bg = await Location.getBackgroundPermissionsAsync();
+
+      if (fg.status !== "granted" || bg.status !== "granted") {
+        setShowDisclosure(true);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      checkPermissionsOnMount();
+    }, 1000);
+
+    return () => {
+      clearTimeout(timer);
     };
   }, []);
 

@@ -658,21 +658,36 @@ export default function App() {
         return;
       }
 
-      // Check if this order has already been displayed
+      // Check if this order has already been displayed or handled
       if (notification.data?.orderId) {
+        const orderId = String(notification.data.orderId);
         const trackingKey =
           notification.data?.type === "order_reminder"
-            ? `order_reminder:${notification.data.orderId}`
-            : String(notification.data.orderId);
+            ? `order_reminder:${orderId}`
+            : orderId;
+
+        const alreadyHandled = await orderTrackingService.hasBeenHandled(orderId);
+        if (alreadyHandled) {
+          console.log(
+            `[App] Urgent notification already handled for order ${orderId}, ignoring`,
+          );
+          return;
+        }
 
         const alreadyDisplayed =
           await orderTrackingService.hasBeenDisplayed(trackingKey);
         if (alreadyDisplayed) {
-          console.log(
-            `[App] Urgent notification already displayed for key ${trackingKey}, skipping`,
-          );
-          // Prevent orphan alarm loops when duplicate urgent notifications are ignored.
-          await pushNotificationService.stopAlarm();
+          const currentActiveOrderId = urgentNotificationRef.current?.data?.orderId;
+          if (currentActiveOrderId === orderId) {
+            console.log(
+              `[App] Order ${orderId} is currently active in the modal, ignoring duplicate push without stopping alarm`,
+            );
+          } else {
+            console.log(
+              `[App] Urgent notification already displayed for key ${trackingKey} but modal not active, stopping orphan alarm`,
+            );
+            await pushNotificationService.stopAlarm();
+          }
           return;
         }
         // Mark as displayed

@@ -195,13 +195,15 @@ export default function UrgentNotificationModal({
           },
         ]}
       >
-        <TouchableOpacity
-          style={styles.dismissButton}
-          onPress={handleDismiss}
-          activeOpacity={0.75}
-        >
-          <Text style={styles.dismissText}>x</Text>
-        </TouchableOpacity>
+        {!isNewOrder && (
+          <TouchableOpacity
+            style={styles.dismissButton}
+            onPress={handleDismiss}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.dismissText}>x</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>

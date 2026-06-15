@@ -1499,6 +1499,15 @@ export default function DashboardScreen({ navigation, route }) {
   const handleToggleOnline = async (manualOverride = false) => {
     const newStatus = !isOnline;
 
+    if (newStatus) {
+      const fg = await Location.getForegroundPermissionsAsync();
+      const bg = await Location.getBackgroundPermissionsAsync();
+      if (fg.status !== "granted" || bg.status !== "granted") {
+        DeviceEventEmitter.emit("show_location_disclosure");
+        return;
+      }
+    }
+
     // Check if toggle is allowed using status info
     if (statusInfo) {
       const canToggle = isFullTimeDriver
@@ -1575,6 +1584,14 @@ export default function DashboardScreen({ navigation, route }) {
       // Block accepts while delivery requests are being recalculated
       return;
     }
+
+    const fg = await Location.getForegroundPermissionsAsync();
+    const bg = await Location.getBackgroundPermissionsAsync();
+    if (fg.status !== "granted" || bg.status !== "granted") {
+      DeviceEventEmitter.emit("show_location_disclosure");
+      return;
+    }
+
     setAcceptingOrder(deliveryId);
     try {
       const token = await getAccessToken();

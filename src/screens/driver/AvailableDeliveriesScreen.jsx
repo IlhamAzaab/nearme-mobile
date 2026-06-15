@@ -1298,6 +1298,13 @@ export default function AvailableDeliveriesScreen({ navigation, route }) {
   const handleAcceptDelivery = async (deliveryId, deliverySnapshot = null) => {
     const normalizedDeliveryId = normalizeDeliveryId(deliveryId);
 
+    const fg = await Location.getForegroundPermissionsAsync();
+    const bg = await Location.getBackgroundPermissionsAsync();
+    if (fg.status !== "granted" || bg.status !== "granted") {
+      DeviceEventEmitter.emit("show_location_disclosure");
+      return;
+    }
+
     if (
       isLoadingAfterAccept ||
       (normalizeDeliveryId(accepting) === normalizedDeliveryId && accepting) ||
