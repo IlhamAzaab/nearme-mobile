@@ -13,7 +13,7 @@ export default {
   expo: {
     name: "Meezo",
     slug: "nearme-mobile",
-    version: "1.0.2",
+    version: "1.0.3",
     orientation: "portrait",
     icon: BRAND_ASSETS.appIcon,
     scheme: "nearmemobile",
@@ -33,7 +33,7 @@ export default {
     },
     android: {
       package: "com.nearme.mobile",
-      versionCode: 2,
+      versionCode: 3,
       // In EAS Build, the file-type env var contains the path to the temp file.
       // Locally, fall back to ./google-services.json for development.
       googleServicesFile:
