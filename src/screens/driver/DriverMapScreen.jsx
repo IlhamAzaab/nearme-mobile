@@ -1724,31 +1724,34 @@ export default function DriverMapScreen({ route, navigation }) {
           {mode === "pickup" && pickups.length > 1 && (
             <View style={styles.upcomingSection}>
               <Text style={styles.upcomingTitle}>
-                {"Upcoming Pickups (" + (pickups.length - 1) + ")"}
+                {"Upcoming Pickups (" + Math.max(0, pickups.length - 1) + ")"}
               </Text>
-              {pickups.slice(1).map(function (p, i) {
-                return (
-                  <Pressable
-                    key={p.delivery_id}
-                    style={styles.upcomingCard}
-                    onPress={() => setCurrentTarget(p)}
-                  >
-                    <View style={styles.upcomingIndex}>
-                      <Text style={styles.upcomingIndexText}>{i + 2}</Text>
-                    </View>
-                    <View style={styles.upcomingInfo}>
-                      <Text style={styles.upcomingName}>
-                        {(p.restaurant && p.restaurant.name) ||
-                          p.restaurantname ||
-                          "Restaurant"}
-                      </Text>
-                      <Text style={styles.upcomingMeta}>
-                        {"#" + (p.order_number || p.delivery_id)}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
+              {pickups
+                .map((p, i) => ({ p, i }))
+                .filter(({ p }) => p.delivery_id !== currentTarget?.delivery_id)
+                .map(function ({ p, i }) {
+                  return (
+                    <Pressable
+                      key={p.delivery_id}
+                      style={styles.upcomingCard}
+                      onPress={() => setCurrentTarget(p)}
+                    >
+                      <View style={styles.upcomingIndex}>
+                        <Text style={styles.upcomingIndexText}>{i + 1}</Text>
+                      </View>
+                      <View style={styles.upcomingInfo}>
+                        <Text style={styles.upcomingName}>
+                          {(p.restaurant && p.restaurant.name) ||
+                            p.restaurantname ||
+                            "Restaurant"}
+                        </Text>
+                        <Text style={styles.upcomingMeta}>
+                          {"#" + (p.order_number || p.delivery_id)}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
             </View>
           )}
 
@@ -1756,31 +1759,34 @@ export default function DriverMapScreen({ route, navigation }) {
           {mode === "deliver" && deliveriesList.length > 1 && (
             <View style={styles.upcomingSection}>
               <Text style={styles.upcomingTitle}>
-                {"Upcoming Deliveries (" + (deliveriesList.length - 1) + ")"}
+                {"Upcoming Deliveries (" + Math.max(0, deliveriesList.length - 1) + ")"}
               </Text>
-              {deliveriesList.slice(1).map(function (d, i) {
-                return (
-                  <Pressable
-                    key={d.delivery_id}
-                    style={styles.upcomingCard}
-                    onPress={() => setCurrentTarget(d)}
-                  >
-                    <View style={styles.upcomingIndex}>
-                      <Text style={styles.upcomingIndexText}>{i + 2}</Text>
-                    </View>
-                    <View style={styles.upcomingInfo}>
-                      <Text style={styles.upcomingName}>
-                        {(d.customer && d.customer.name) ||
-                          d.name ||
-                          "Customer"}
-                      </Text>
-                      <Text style={styles.upcomingMeta}>
-                        {"#" + (d.order_number || d.delivery_id)}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
+              {deliveriesList
+                .map((d, i) => ({ d, i }))
+                .filter(({ d }) => d.delivery_id !== currentTarget?.delivery_id)
+                .map(function ({ d, i }) {
+                  return (
+                    <Pressable
+                      key={d.delivery_id}
+                      style={styles.upcomingCard}
+                      onPress={() => setCurrentTarget(d)}
+                    >
+                      <View style={styles.upcomingIndex}>
+                        <Text style={styles.upcomingIndexText}>{i + 1}</Text>
+                      </View>
+                      <View style={styles.upcomingInfo}>
+                        <Text style={styles.upcomingName}>
+                          {(d.customer && d.customer.name) ||
+                            d.name ||
+                            "Customer"}
+                        </Text>
+                        <Text style={styles.upcomingMeta}>
+                          {"#" + (d.order_number || d.delivery_id)}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
             </View>
           )}
 
