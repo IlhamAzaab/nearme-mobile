@@ -1125,6 +1125,18 @@ export default function Orders() {
                           <Text style={styles.customerName}>
                             {order.customer_name || "Customer"}
                           </Text>
+                          {order.customer_phone ? (
+                            <TouchableOpacity
+                              onPress={() => Linking.openURL(`tel:${order.customer_phone}`)}
+                              style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 3 }}
+                              activeOpacity={0.7}
+                            >
+                              <Feather name="phone" size={12} color="#06C168" />
+                              <Text style={{ color: "#15803d", fontSize: 12, fontWeight: "700" }}>
+                                {order.customer_phone}
+                              </Text>
+                            </TouchableOpacity>
+                          ) : null}
                           {fullDeliveryAddress ? (
                             <Text style={styles.customerAddress}>
                               {fullDeliveryAddress}
@@ -1248,19 +1260,30 @@ export default function Orders() {
                       </View>
                     ) : (
                       <View style={styles.statusFooterRow}>
-                        <Text style={styles.statusFooterText}>
-                          {deliveryStatus === "pending" ||
-                          deliveryStatus === "accepted"
-                            ? "Waiting for driver"
-                            : deliveryStatus === "delivered"
-                              ? "Order completed"
-                              : deliveryStatus === "failed" ||
-                                  deliveryStatus === "rejected"
-                                ? `Rejected: ${normalizeDeliveries(order.deliveries)[0]?.rejection_reason || "No reason provided"}`
-                                : deliveryStatus === "cancelled"
-                                  ? "Order cancelled"
-                                  : "In progress"}
-                        </Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.statusFooterText}>
+                            {deliveryStatus === "pending" ||
+                            deliveryStatus === "accepted"
+                              ? "Waiting for driver"
+                              : deliveryStatus === "delivered"
+                                ? "Order completed"
+                                : deliveryStatus === "failed" ||
+                                    deliveryStatus === "rejected"
+                                  ? `Rejected: ${normalizeDeliveries(order.deliveries)[0]?.rejection_reason || "No reason provided"}`
+                                  : deliveryStatus === "cancelled"
+                                    ? "Order cancelled"
+                                    : "In progress"}
+                          </Text>
+                          {(deliveryStatus === "pending" || deliveryStatus === "accepted") && (
+                            <TouchableOpacity
+                              style={{ marginTop: 6, alignSelf: "flex-start", paddingVertical: 4, paddingHorizontal: 8, borderWidth: 1, borderColor: "#fecaca", borderRadius: 6, backgroundColor: "#fef2f2" }}
+                              disabled={processingOrderId === order.id}
+                              onPress={() => handleRejectOrder(order.id)}
+                            >
+                              <Text style={{ color: "#dc2626", fontSize: 10, fontWeight: "700" }}>Reject</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
 
                         <TouchableOpacity
                           style={styles.viewDetailsButton}
@@ -1321,6 +1344,19 @@ export default function Orders() {
 
               <View style={styles.rejectModalBody}>
                 <Text style={styles.rejectLabel}>Reason for rejection *</Text>
+                
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+                  {["Food unavailable", "We are busy now. Please order after a few minutes", "Restaurant closing soon"].map(chip => (
+                    <TouchableOpacity
+                      key={chip}
+                      style={{ backgroundColor: "#f3f4f6", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 }}
+                      onPress={() => setRejectReason(chip)}
+                    >
+                      <Text style={{ color: "#4b5563", fontSize: 12 }}>{chip}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
                 <TextInput
                   style={styles.rejectInput}
                   value={rejectReason}
@@ -1483,9 +1519,25 @@ function OrderDetailsModal({
                     <View style={styles.detailAvatarCircle}>
                       <Feather name="user" size={17} color="#9ca3af" />
                     </View>
-                    <Text style={styles.detailCustomerName}>
-                      {order.customer_name || "Customer"}
-                    </Text>
+                    <View>
+                      <Text style={styles.detailCustomerName}>
+                        {order.customer_name || "Customer"}
+                      </Text>
+                      {order.customer_phone ? (
+                        <TouchableOpacity
+                          onPress={() => Linking.openURL(`tel:${order.customer_phone}`)}
+                          style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}
+                          activeOpacity={0.75}
+                        >
+                          <View style={styles.driverCallRound}>
+                            <Feather name="phone" size={14} color="#ffffff" />
+                          </View>
+                          <Text style={{ color: "#15803d", fontSize: 14, fontWeight: "700" }}>
+                            {order.customer_phone}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
                   </View>
                 </View>
 
@@ -2049,12 +2101,12 @@ const styles = StyleSheet.create({
   itemNameText: {
     flex: 1,
     color: "#374151",
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "700",
   },
   itemLineAmount: {
     color: "#374151",
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "800",
   },
   itemSizePill: {
@@ -2062,7 +2114,7 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     backgroundColor: "#ecfdf5",
     color: "#059669",
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "700",
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -2497,7 +2549,7 @@ const styles = StyleSheet.create({
   },
   detailItemName: {
     color: "#1f2937",
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: "800",
   },
   detailItemMetaRow: {

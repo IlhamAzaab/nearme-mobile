@@ -35,7 +35,9 @@ import {
   StyleSheet,
   Text,
   View,
+  Linking,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import FreeMapView from "../../components/maps/FreeMapView";
 import { DriverMapSheetLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
@@ -2330,10 +2332,22 @@ function DeliveryCard({
               <View style={styles.timelineLine} />
             </View>
             <View style={styles.timelineContent}>
-              <Text style={styles.timelineLabel}>
-                Pickup:{" "}
-                <Text style={styles.timelineName}>{restaurant?.name}</Text>
-              </Text>
+              {/* Restaurant name + phone inline */}
+              <View style={styles.inlineNamePhoneRow}>
+                <Text style={styles.timelineLabel} numberOfLines={1}>
+                  Pickup:{" "}
+                  <Text style={styles.timelineName}>{restaurant?.name}</Text>
+                </Text>
+                {restaurant?.phone ? (
+                  <Pressable
+                    style={styles.inlineCallBtn}
+                    onPress={() => Linking.openURL(`tel:${restaurant.phone}`)}
+                  >
+                    <Ionicons name="call-outline" size={12} color="#ffffff" />
+                    <Text style={styles.inlineCallText}>{restaurant.phone}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               <Text style={styles.timelineAddress} numberOfLines={1}>
                 {pickupAddress}
               </Text>
@@ -2348,18 +2362,45 @@ function DeliveryCard({
               </View>
             </View>
             <View style={styles.timelineContent}>
-              <Text style={styles.timelineLabel}>
-                Drop-off:{" "}
-                <Text style={styles.timelineName}>
-                  {customer?.name || "Customer"}
+              {/* Customer name + phone inline */}
+              <View style={styles.inlineNamePhoneRow}>
+                <Text style={styles.timelineLabel} numberOfLines={1}>
+                  Drop-off:{" "}
+                  <Text style={styles.timelineName}>
+                    {customer?.name || "Customer"}
+                  </Text>
                 </Text>
-              </Text>
+                {customer?.phone ? (
+                  <Pressable
+                    style={styles.inlineCallBtn}
+                    onPress={() => Linking.openURL(`tel:${customer.phone}`)}
+                  >
+                    <Ionicons name="call-outline" size={12} color="#ffffff" />
+                    <Text style={styles.inlineCallText}>{customer.phone}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               <Text style={styles.timelineAddress} numberOfLines={1}>
                 {dropoffAddress}
               </Text>
             </View>
           </View>
         </View>
+
+        {/* Order Items */}
+        {order_items && order_items.length > 0 && (
+          <View style={styles.orderItemsContainer}>
+            <Text style={styles.orderItemsTitle}>Order Items:</Text>
+            {order_items.map((item, idx) => (
+              <View key={idx} style={styles.orderItemRow}>
+                <Text style={styles.orderItemQty}>{item.quantity}x</Text>
+                <Text style={styles.orderItemName} numberOfLines={1}>
+                  {item.food_name} {item.size ? `(${item.size})` : ""}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Accept/Live Row (Website Parity) */}
         <View style={styles.acceptRow}>
@@ -3142,8 +3183,86 @@ const styles = StyleSheet.create({
   timelineAddress: {
     fontSize: 14,
     color: "#6B7280",
-    marginTop: 2,
+    marginTop: 4,
     lineHeight: 20,
+  },
+  contactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    gap: 12,
+  },
+  contactText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
+  },
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDF4",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+    gap: 4,
+  },
+  actionBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#06C168",
+  },
+  // Inline name + phone row (pickup / dropoff)
+  inlineNamePhoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 2,
+  },
+  inlineCallBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#06C168",
+    borderRadius: 99,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 4,
+  },
+  inlineCallText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#ffffff",
+  },
+
+  orderItemsContainer: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  orderItemsTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#4B5563",
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
+  orderItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  orderItemQty: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#111827",
+    width: 24,
+  },
+  orderItemName: {
+    flex: 1,
+    fontSize: 14,
+    color: "#374151",
   },
 
   // Badges Row

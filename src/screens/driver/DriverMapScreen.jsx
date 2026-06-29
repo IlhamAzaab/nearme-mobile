@@ -1967,6 +1967,33 @@ function PickupDetails({
         </View>
       )}
 
+      {/* Block 4: Customer Details before pickup */}
+      <View style={styles.customerPreviewSection}>
+        <Text style={styles.itemsSectionTitle}>CUSTOMER TO DELIVER</Text>
+        <View style={styles.infoCard}>
+          <Text style={[styles.infoCardName, { fontSize: 18, marginBottom: 2 }]}>
+            {target.customer?.name || target.name || "Customer"}
+          </Text>
+          <Text style={styles.infoCardAddress}>
+            {target.customer?.address || target.delivery_location || "No address"}
+          </Text>
+          {target.customer?.phone || target.phone ? (
+            <Pressable
+              onPress={() => {
+                const ph = target.customer?.phone || target.phone;
+                Linking.openURL(`tel:${ph}`).catch(() => {});
+              }}
+              style={{ flexDirection: "row", alignItems: "center", marginTop: 4, gap: 6 }}
+            >
+              <Ionicons name="call-outline" size={14} color="#06C168" />
+              <Text style={[styles.infoCardPhoneText, { color: "#15803d" }]}>
+                {target.customer?.phone || target.phone}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+
       <SwipeToDeliver
         onSwipeComplete={onPickedUp}
         disabled={updating}
@@ -2110,7 +2137,7 @@ function DeliveryDetails({ target, onDelivered, onCall, updating }) {
         disabled={updating}
         text="SWIPE TO DELIVER"
         textStyle={styles.pickupSwipeText}
-        color="#06C168"
+        color="#EF4444"
       />
 
       <DeliveryProofUpload
@@ -2380,7 +2407,12 @@ var styles = StyleSheet.create({
     color: "#92400E",
     marginBottom: 6,
   },
-  instructionsText: { fontSize: 14, color: "#78350F", lineHeight: 20 },
+  instructionsText: { fontSize: 14, color: "#92400E", lineHeight: 20 },
+
+  customerPreviewSection: {
+    marginTop: 16,
+    marginBottom: 8,
+  },
 
   // Items
   itemsSection: { marginBottom: 14 },

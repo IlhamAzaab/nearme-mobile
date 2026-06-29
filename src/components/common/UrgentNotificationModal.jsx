@@ -6,7 +6,9 @@ import {
   Animated,
   Dimensions,
   KeyboardAvoidingView,
+  Linking,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,6 +20,11 @@ import {
 import alarmService from "../../services/alarmService";
 
 const { width } = Dimensions.get("window");
+
+const QUICK_REASONS = [
+  "Food unavailable",
+  "We are busy now. Please order in few minutes",
+];
 
 const parseAmount = (value) => {
   const num = Number.parseFloat(value);
@@ -72,7 +79,9 @@ export default function UrgentNotificationModal({
   const pulseRef = useRef(null);
 
   const [showRejectInput, setShowRejectInput] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
+  // Default to first quick reason pre-selected
+  const [selectedQuickReason, setSelectedQuickReason] = useState(QUICK_REASONS[0]);
+  const [customReason, setCustomReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const isNewOrder =
@@ -102,7 +111,8 @@ export default function UrgentNotificationModal({
   useEffect(() => {
     if (visible) {
       setShowRejectInput(false);
-      setRejectReason("");
+      setSelectedQuickReason(QUICK_REASONS[0]);
+      setCustomReason("");
       setSubmitting(false);
 
       alarmService.start();
@@ -152,6 +162,7 @@ export default function UrgentNotificationModal({
     alarmService.stop();
   };
 
+  // Dismiss: stop alarm + close (backdrop or X button)
   const handleDismiss = () => {
     silenceAlarmNow();
     onDismiss?.();
@@ -166,11 +177,13 @@ export default function UrgentNotificationModal({
     onReject?.(data, null);
   };
 
+  // The final reason used when submitting: custom text takes priority, else selected quick reason
+  const finalRejectReason = customReason.trim() || selectedQuickReason || "";
+
   const handleSubmitReject = async () => {
-    if (!rejectReason.trim() || submitting) return;
-    silenceAlarmNow();
+    if (!finalRejectReason || submitting) return;
     setSubmitting(true);
-    await onReject?.(data, rejectReason.trim());
+    await onReject?.(data, finalRejectReason);
     setSubmitting(false);
   };
 
@@ -182,144 +195,209 @@ export default function UrgentNotificationModal({
     Number.isFinite(waitingMinutes) &&
     waitingMinutes > 0;
 
+  const customerPhone = data?.customerPhone || data?.customer_phone || null;
+
   return (
-    <KeyboardAvoidingView
-      style={styles.overlay}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <Animated.View
-        style={[
-          styles.card,
-          {
-            transform: [{ translateY: slideAnim }, { scale: pulseAnim }],
-          },
-        ]}
+    // Backdrop: full-screen pressable that dismisses the modal
+    <Pressable style={styles.overlay} onPress={handleDismiss}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ width: "100%" }}
+        // Stop backdrop tap from propagating through the card
       >
-        {!isNewOrder && (
-          <TouchableOpacity
-            style={styles.dismissButton}
-            onPress={handleDismiss}
-            activeOpacity={0.75}
+        <Pressable onPress={() => {}} style={styles.cardPressBlock}>
+          <Animated.View
+            style={[
+              styles.card,
+              {
+                transform: [{ translateY: slideAnim }, { scale: pulseAnim }],
+              },
+            ]}
           >
-            <Text style={styles.dismissText}>x</Text>
-          </TouchableOpacity>
-        )}
+            {/* X dismiss button — always visible */}
+            <TouchableOpacity
+              style={styles.dismissButton}
+              onPress={handleDismiss}
+              activeOpacity={0.75}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <View style={styles.dismissCircle}>
+                <Text style={styles.dismissText}>✕</Text>
+              </View>
+            </TouchableOpacity>
 
-        <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.titleText}>{orderTitle}</Text>
-            {data?.orderNumber ? (
-              <Text style={styles.orderNoText}>#{data.orderNumber}</Text>
-            ) : null}
-          </View>
+            <View style={styles.headerRow}>
+              <View style={styles.headerLeft}>
+                {/* Smaller title */}
+                <Text style={styles.titleText}>{orderTitle}</Text>
+                {data?.orderNumber ? (
+                  <Text style={styles.orderNoText}>#{data.orderNumber}</Text>
+                ) : null}
+              </View>
 
-          <View style={styles.headerPriceWrap}>
-            <Text style={styles.priceLabel}>PRICE</Text>
-            <Text style={styles.priceValue}>Rs.{totalPrice.toFixed(2)}</Text>
-          </View>
-        </View>
-
-        <ScrollView
-          style={styles.itemsArea}
-          contentContainerStyle={styles.itemsAreaContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {items.length > 0 ? (
-            items.map((item, index) => {
-              const qty = Number(item.quantity || 1);
-              const sizeText =
-                item.size && item.size !== "regular" ? ` (${item.size})` : "";
-              return (
-                <View key={`${item.foodName}-${index}`} style={styles.itemRow}>
-                  <Text style={styles.itemText} numberOfLines={2}>
-                    {qty}x {item.foodName}
-                    {sizeText}
-                  </Text>
-                  {item.lineTotal > 0 ? (
-                    <Text style={styles.itemAmount}>
-                      Rs.{item.lineTotal.toFixed(2)}
-                    </Text>
-                  ) : null}
-                </View>
-              );
-            })
-          ) : (
-            <Text style={styles.bodyText}>
-              {body || "You have a new order."}
-            </Text>
-          )}
-
-          {shouldShowWaitingTime ? (
-            <Text style={styles.waitingText}>Waiting {waitingMinutes} min</Text>
-          ) : null}
-        </ScrollView>
-
-        {showRejectInput ? (
-          <View style={styles.reasonWrap}>
-            <Text style={styles.reasonLabel}>Reason for rejection *</Text>
-            <TextInput
-              style={styles.reasonInput}
-              value={rejectReason}
-              onChangeText={setRejectReason}
-              placeholder="Out of stock, item unavailable..."
-              placeholderTextColor="#9ca3af"
-              multiline
-              numberOfLines={3}
-              autoFocus
-              textAlignVertical="top"
-            />
-
-            <View style={styles.actionsRow}>
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() => {
-                  setShowRejectInput(false);
-                  setRejectReason("");
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.secondaryButtonText}>Back</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.primaryButton,
-                  (!rejectReason.trim() || submitting) && styles.disabledButton,
-                ]}
-                onPress={handleSubmitReject}
-                activeOpacity={0.8}
-                disabled={!rejectReason.trim() || submitting}
-              >
-                <Text style={styles.primaryButtonText}>
-                  {submitting ? "Rejecting..." : "Confirm Reject"}
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.headerPriceWrap}>
+                <Text style={styles.priceLabel}>PRICE</Text>
+                <Text style={styles.priceValue}>Rs.{totalPrice.toFixed(2)}</Text>
+              </View>
             </View>
-          </View>
-        ) : (
-          <View style={styles.actionsRow}>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() => {
-                silenceAlarmNow();
-                onAccept?.(data);
-              }}
-              activeOpacity={0.82}
-            >
-              <Text style={styles.primaryButtonText}>Accept Order</Text>
-            </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleRejectPress}
-              activeOpacity={0.82}
+            {/* Bigger food items */}
+            <ScrollView
+              style={styles.itemsArea}
+              contentContainerStyle={styles.itemsAreaContent}
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.secondaryButtonText}>Reject</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </Animated.View>
-    </KeyboardAvoidingView>
+              {items.length > 0 ? (
+                items.map((item, index) => {
+                  const qty = Number(item.quantity || 1);
+                  const sizeText =
+                    item.size && item.size !== "regular"
+                      ? ` (${item.size})`
+                      : "";
+                  return (
+                    <View key={`${item.foodName}-${index}`} style={styles.itemRow}>
+                      <Text style={styles.itemText} numberOfLines={2}>
+                        {qty}x {item.foodName}
+                        {sizeText}
+                      </Text>
+                      {item.lineTotal > 0 ? (
+                        <Text style={styles.itemAmount}>
+                          Rs.{item.lineTotal.toFixed(2)}
+                        </Text>
+                      ) : null}
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={styles.bodyText}>
+                  {body || "You have a new order."}
+                </Text>
+              )}
+
+              {shouldShowWaitingTime ? (
+                <Text style={styles.waitingText}>Waiting {waitingMinutes} min</Text>
+              ) : null}
+            </ScrollView>
+
+            {/* Customer phone row — only when phone is available */}
+            {customerPhone ? (
+              <TouchableOpacity
+                style={styles.phoneRow}
+                onPress={() => Linking.openURL(`tel:${customerPhone}`)}
+                activeOpacity={0.75}
+              >
+                <View style={styles.phoneIconWrap}>
+                  <Text style={styles.phoneIcon}>📞</Text>
+                </View>
+                <Text style={styles.phoneNumber}>{customerPhone}</Text>
+                <Text style={styles.phoneCallLabel}>Call</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {showRejectInput ? (
+              <View style={styles.reasonWrap}>
+                <Text style={styles.reasonLabel}>Reason for rejection *</Text>
+
+                {/* Quick-select chips — pre-selected first by default */}
+                <View style={styles.chipsRow}>
+                  {QUICK_REASONS.map((reason) => (
+                    <TouchableOpacity
+                      key={reason}
+                      style={[
+                        styles.chip,
+                        selectedQuickReason === reason &&
+                          !customReason.trim() &&
+                          styles.chipSelected,
+                      ]}
+                      onPress={() => {
+                        setSelectedQuickReason(reason);
+                        setCustomReason(""); // clear manual text when chip selected
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          selectedQuickReason === reason &&
+                            !customReason.trim() &&
+                            styles.chipTextSelected,
+                        ]}
+                      >
+                        {reason}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Manual text input (optional) */}
+                <TextInput
+                  style={styles.reasonInput}
+                  value={customReason}
+                  onChangeText={(text) => {
+                    setCustomReason(text);
+                    if (text.trim()) setSelectedQuickReason(null); // deselect chip when typing
+                  }}
+                  placeholder="Or type a custom reason..."
+                  placeholderTextColor="#9ca3af"
+                  multiline
+                  numberOfLines={2}
+                  textAlignVertical="top"
+                />
+
+                <View style={styles.actionsRow}>
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={() => {
+                      setShowRejectInput(false);
+                      setSelectedQuickReason(QUICK_REASONS[0]);
+                      setCustomReason("");
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.secondaryButtonText}>Back</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.rejectConfirmButton,
+                      (!finalRejectReason || submitting) && styles.disabledButton,
+                    ]}
+                    onPress={handleSubmitReject}
+                    activeOpacity={0.8}
+                    disabled={!finalRejectReason || submitting}
+                  >
+                    <Text style={styles.rejectConfirmButtonText}>
+                      {submitting ? "Rejecting..." : "Confirm Reject"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.actionsRow}>
+                <TouchableOpacity
+                  style={styles.primaryButton}
+                  onPress={() => {
+                    silenceAlarmNow();
+                    onAccept?.(data);
+                  }}
+                  activeOpacity={0.82}
+                >
+                  <Text style={styles.primaryButtonText}>Accept Order</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={handleRejectPress}
+                  activeOpacity={0.82}
+                >
+                  <Text style={styles.secondaryButtonText}>Reject</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </Animated.View>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Pressable>
   );
 }
 
@@ -330,9 +408,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingTop: 52,
     paddingHorizontal: 14,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    backgroundColor: "rgba(0,0,0,0.45)",
     zIndex: 9999,
     elevation: 9999,
+  },
+  cardPressBlock: {
+    width: "100%",
+    alignItems: "center",
   },
   card: {
     width: Math.min(width - 20, 420),
@@ -341,7 +423,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.8,
     borderColor: "#06C168",
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingTop: 38, // extra top space for X button
+    paddingBottom: 12,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.18,
@@ -350,39 +433,45 @@ const styles = StyleSheet.create({
   },
   dismissButton: {
     position: "absolute",
-    top: 6,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    top: 8,
+    right: 10,
+    zIndex: 10,
+  },
+  dismissCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#f3f4f6",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 5,
   },
   dismissText: {
-    fontSize: 15,
+    fontSize: 13,
     color: "#6b7280",
     fontWeight: "700",
+    lineHeight: 16,
   },
   headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "flex-start",
     gap: 10,
-    paddingRight: 22,
+    paddingRight: 4,
   },
   headerLeft: {
     flex: 1,
   },
+  // Smaller title (was 22)
   titleText: {
-    fontSize: 22,
-    lineHeight: 25,
+    fontSize: 20,
+    lineHeight: 20,
     color: "#111827",
     fontWeight: "800",
   },
   orderNoText: {
     marginTop: 3,
     color: "#06C168",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "700",
   },
   headerPriceWrap: {
@@ -396,14 +485,14 @@ const styles = StyleSheet.create({
   },
   priceValue: {
     marginTop: 2,
-    fontSize: 33,
-    lineHeight: 34,
+    fontSize: 28,
+    lineHeight: 30,
     fontWeight: "800",
     color: "#06C168",
   },
   itemsArea: {
-    marginTop: 8,
-    maxHeight: 150,
+    marginTop: 10,
+    maxHeight: 160,
   },
   itemsAreaContent: {
     paddingRight: 3,
@@ -415,21 +504,22 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 8,
   },
+  // Bigger food text (was 13)
   itemText: {
     flex: 1,
-    fontSize: 13,
-    lineHeight: 18,
-    color: "#4b5563",
-    fontWeight: "500",
+    fontSize: 22,
+    lineHeight: 22,
+    color: "#111827",
+    fontWeight: "700",
   },
   itemAmount: {
-    fontSize: 13,
+    fontSize: 15,
     color: "#06C168",
     fontWeight: "700",
   },
   bodyText: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 14,
+    lineHeight: 20,
     color: "#4b5563",
   },
   waitingText: {
@@ -438,20 +528,80 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#b45309",
   },
+  // Phone row — icon + number side by side, full row tappable
+  phoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 10,
+    backgroundColor: "#E6F9F1",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  phoneIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#06C168",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  phoneIcon: {
+    fontSize: 14,
+  },
+  phoneNumber: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#15803d",
+  },
+  phoneCallLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#06C168",
+  },
   reasonWrap: {
     marginTop: 10,
   },
   reasonLabel: {
     fontSize: 12,
     color: "#4b5563",
-    marginBottom: 6,
+    marginBottom: 8,
+    fontWeight: "700",
+  },
+  chipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+  },
+  chipSelected: {
+    backgroundColor: "#ecfdf5",
+    borderColor: "#06C168",
+  },
+  chipText: {
+    fontSize: 12,
+    color: "#4b5563",
     fontWeight: "600",
+  },
+  chipTextSelected: {
+    color: "#15803d",
+    fontWeight: "700",
   },
   reasonInput: {
     borderWidth: 1,
     borderColor: "#d1d5db",
     borderRadius: 10,
-    minHeight: 72,
+    minHeight: 60,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 13,
@@ -467,18 +617,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#06C168",
     borderRadius: 11,
-    minHeight: 40,
+    minHeight: 44,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 10,
   },
   primaryButtonText: {
     color: "#ffffff",
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "800",
   },
   secondaryButton: {
-    minWidth: 92,
+    minWidth: 80,
     borderRadius: 11,
     borderWidth: 1.4,
     borderColor: "#06C168",
@@ -486,14 +636,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 14,
-    minHeight: 40,
+    minHeight: 44,
   },
   secondaryButtonText: {
     color: "#06C168",
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  rejectConfirmButton: {
+    flex: 1,
+    backgroundColor: "#dc2626",
+    borderRadius: 11,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  rejectConfirmButtonText: {
+    color: "#ffffff",
+    fontSize: 15,
     fontWeight: "700",
   },
   disabledButton: {
-    opacity: 0.45,
+    opacity: 0.4,
   },
 });
