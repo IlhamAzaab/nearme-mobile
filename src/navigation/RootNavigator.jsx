@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { StyleSheet, View, Text, Pressable, Platform, Linking, StatusBar } from "react-native";
+import { StyleSheet, View, Text, Pressable, Platform, Linking, StatusBar, AppState } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import AuthNavigator from "./AuthNavigator";
@@ -17,6 +17,11 @@ import {
   getCachedRestaurants,
   preloadAllAppImages,
 } from "../services/ImagePreloader";
+
+// Module-level flag: true only on cold starts (first JS process boot).
+// Stays false once set — survives background/foreground cycles.
+// Only resets when the OS fully kills the app process.
+let _isColdStart = true;
 
 const RESTAURANTS_CACHE_KEY = "public:restaurants";
 const FOODS_CACHE_KEY = "public:foods";
@@ -54,9 +59,22 @@ export default function RootNavigator() {
   const cacheRefreshCleanupRef = useRef(null);
   const lastAuthTransitionModeRef = useRef(authTransitionMode);
   const lastSplashCompletedAtRef = useRef(0);
+  // Track if app went to background so we can skip splash on foreground resume
+  const wasInBackgroundRef = useRef(false);
 
-  const [isSplashVisible, setIsSplashVisible] = useState(!skipSplashOnAuth);
+  // Only show splash on true cold start; skip if coming back from background
+  const [isSplashVisible, setIsSplashVisible] = useState(_isColdStart && !skipSplashOnAuth);
   const [splashCycle, setSplashCycle] = useState(0);
+
+  // Listen for app state changes: mark when app goes to background
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        wasInBackgroundRef.current = true;
+      }
+    });
+    return () => sub?.remove();
+  }, []);
   
   // Force update version state
   const [isVersionChecking, setIsVersionChecking] = useState(true);
@@ -118,11 +136,15 @@ export default function RootNavigator() {
       const wasRecentlyCompleted =
         now - lastSplashCompletedAtRef.current < 4500;
 
-      // Customer flow should never replay the same splash sequence twice back-to-back.
-      if (isSplashVisible || (effectiveRole === "customer" && wasRecentlyCompleted)) {
+      // Never show splash if app came from background (just a foreground resume)
+      if (wasInBackgroundRef.current) {
+        wasInBackgroundRef.current = false; // reset for next time
+        clearAuthTransitionMode();
+      } else if (isSplashVisible || (effectiveRole === "customer" && wasRecentlyCompleted)) {
+        // Customer flow should never replay the same splash sequence twice back-to-back.
         clearAuthTransitionMode();
       } else {
-      // Re-arm splash exactly once per successful auth transition.
+        // Re-arm splash exactly once per successful auth transition (cold start / fresh login).
         setIsSplashVisible(true);
         setSplashCycle((prev) => prev + 1);
       }
@@ -209,6 +231,8 @@ export default function RootNavigator() {
 
   const handleSplashComplete = useCallback(() => {
     lastSplashCompletedAtRef.current = Date.now();
+    // Mark that cold start is done — never show splash again in this JS process
+    _isColdStart = false;
     setIsSplashVisible(false);
     if (authTransitionMode === "post-login") {
       clearAuthTransitionMode();

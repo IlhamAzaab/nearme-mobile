@@ -435,8 +435,13 @@ export default function CustomerTabs() {
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
+        lazy: true,
+        freezeOnBlur: true,
         animation: "fade",
         tabBarHideOnKeyboard: true,
+        sceneStyle: {
+          backgroundColor: "#ffffff",
+        },
       }}
       tabBar={(props) => <UberEatsTabBar {...props} insets={insets} />}
     >
@@ -488,7 +493,7 @@ export default function CustomerTabs() {
           tabBarIcon: ({ focused }) => (
             <TabIcon
               iconName="person-outline"
-              label="Account"
+              label="Profile"
               focused={focused}
             />
           ),

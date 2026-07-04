@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const BRAND_ASSETS = {
   appIcon: "./assets/branding/app-icon.jpeg",
   iosIcon: "./assets/branding/ios-icon.jpeg",
@@ -103,6 +105,19 @@ export default {
       "@react-native-community/datetimepicker",
       "expo-document-picker",
       "./plugins/copyAdiRegistration.js",
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": process.env.EXPO_PUBLIC_FACEBOOK_APP_ID,
+          "clientToken": process.env.EXPO_PUBLIC_FACEBOOK_CLIENT_TOKEN,
+          "displayName": process.env.EXPO_PUBLIC_FACEBOOK_DISPLAY_NAME,
+          "scheme": "fb" + (process.env.EXPO_PUBLIC_FACEBOOK_APP_ID),
+          "advertiserIDCollectionEnabled": true,
+          "autoLogAppEventsEnabled": true,
+          "isAutoInitEnabled": true,
+          "iosUserTrackingPermission": "This identifier will be used to deliver personalized ads to you."
+        }
+      ]
     ],
     experiments: {
       reactCompiler: false,

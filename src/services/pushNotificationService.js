@@ -40,6 +40,10 @@ const NOTIFICATION_ROLE_MAP = {
   admin_approval: "admin",
   driver_approval: "driver",
   order_update: "customer",
+  manager_order_placed: "manager",
+  manager_restaurant_accepted: "manager",
+  manager_driver_accepted: "manager",
+  manager_driver_delivered: "manager",
 };
 
 const PUSH_REGISTER_RETRY_AT_KEY = "pushRegisterRetryAt";

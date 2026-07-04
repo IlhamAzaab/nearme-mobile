@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ManagerHeader from "../../components/manager/ManagerHeader";
 import { API_URL } from "../../config/env";
@@ -31,7 +32,10 @@ export default function ManagerEarningsScreen() {
   const [summary, setSummary] = useState(null);
   const [orders, setOrders] = useState([]);
   const [period, setPeriod] = useState("daily");
+  const [filter, setFilter] = useState("success");
   const [expandedOrder, setExpandedOrder] = useState(null);
+  const [summaryOpen, setSummaryOpen] = useState(false); // collapsed by default
+  const navigation = useNavigation();
 
   const getPeriodRange = useCallback(() => {
     const now = new Date();
@@ -64,9 +68,9 @@ export default function ManagerEarningsScreen() {
 
   const getOrderParams = useCallback(() => {
     const range = getPeriodRange();
-    if (!range) return "limit=100";
-    return `from=${range.from.toISOString()}&to=${range.to.toISOString()}`;
-  }, [getPeriodRange]);
+    if (!range) return `limit=100&filter=${filter}`;
+    return `from=${range.from.toISOString()}&to=${range.to.toISOString()}&filter=${filter}`;
+  }, [getPeriodRange, filter]);
 
   const getSummaryParams = useCallback(() => {
     const range = getPeriodRange();
@@ -139,7 +143,7 @@ export default function ManagerEarningsScreen() {
 
   useEffect(() => {
     fetchEarnings();
-  }, [fetchEarnings]);
+  }, [fetchEarnings, filter]);
 
   const formatTime = (value) => {
     if (!value) return "-";
@@ -220,142 +224,8 @@ export default function ManagerEarningsScreen() {
                 </TouchableOpacity>
               </View>
             ) : null}
-            {/* Earnings Hero */}
-            <View style={styles.heroCard}>
-              <Text style={styles.heroLabel}>
-                {periodLabels[period]} Earnings
-              </Text>
-              <Text style={styles.heroAmount}>
-                {fmt(summary?.total_earning)}
-              </Text>
-              <View style={styles.heroStatsRow}>
-                <View
-                  style={[
-                    styles.heroStat,
-                    { backgroundColor: "#E6F9EE", borderColor: "#B8F0D0" },
-                  ]}
-                >
-                  <Text style={[styles.heroStatLabel, { color: "#06C168" }]}>
-                    TOTAL DELIVERIES
-                  </Text>
-                  <Text style={[styles.heroStatValue, { color: "#046B4D" }]}>
-                    {summary?.total_orders || 0}
-                  </Text>
-                </View>
-                <View
-                  style={[
-                    styles.heroStat,
-                    { backgroundColor: "#EFF6FF", borderColor: "#DBEAFE" },
-                  ]}
-                >
-                  <Text style={[styles.heroStatLabel, { color: "#2563EB" }]}>
-                    DELIVERED
-                  </Text>
-                  <Text style={[styles.heroStatValue, { color: "#1D4ED8" }]}>
-                    {summary?.delivered_orders || 0}
-                  </Text>
-                </View>
-              </View>
-            </View>
 
-            {/* Breakdown Cards */}
-            <View style={styles.breakdownGrid}>
-              {[
-                {
-                  label: "COLLECTED",
-                  value: summary?.total_collected,
-                  icon: "wallet-outline",
-                  bg: "#F3E8FF",
-                  color: "#7C3AED",
-                },
-                {
-                  label: "RESTAURANTS",
-                  value: summary?.admin_total,
-                  icon: "restaurant-outline",
-                  bg: "#FEF3C7",
-                  color: "#D97706",
-                },
-                {
-                  label: "DRIVERS",
-                  value: summary?.total_driver_earnings,
-                  icon: "car-outline",
-                  bg: "#E0F2FE",
-                  color: "#0284C7",
-                },
-                {
-                  label: "COMMISSION",
-                  value: summary?.food_commission,
-                  icon: "cash-outline",
-                  bg: "#E6F9EE",
-                  color: "#06C168",
-                },
-              ].map((item, i) => (
-                <View key={i} style={styles.breakdownCard}>
-                  <View style={styles.breakdownHeader}>
-                    <View
-                      style={[
-                        styles.breakdownIcon,
-                        { backgroundColor: item.bg },
-                      ]}
-                    >
-                      <Ionicons name={item.icon} size={16} color={item.color} />
-                    </View>
-                    <Text style={styles.breakdownLabel}>{item.label}</Text>
-                  </View>
-                  <Text style={styles.breakdownValue}>
-                    Rs.{(item.value || 0).toFixed(0)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-
-            {/* Formula Card */}
-            <View style={styles.formulaCard}>
-              <Text style={styles.formulaTitle}>EARNINGS BREAKDOWN</Text>
-              <View style={styles.formulaRow}>
-                <Text style={styles.formulaKey}>Total Collected</Text>
-                <Text style={styles.formulaVal}>
-                  Rs.{(summary?.total_collected || 0).toFixed(0)}
-                </Text>
-              </View>
-              <View style={styles.formulaRow}>
-                <Text style={[styles.formulaKey, { color: "#FCA5A5" }]}>
-                  − Restaurant Payments
-                </Text>
-                <Text style={[styles.formulaVal, { color: "#FCA5A5" }]}>
-                  Rs.{(summary?.admin_total || 0).toFixed(0)}
-                </Text>
-              </View>
-              <View style={styles.formulaRow}>
-                <Text style={[styles.formulaKey, { color: "#FCA5A5" }]}>
-                  − Driver Earnings
-                </Text>
-                <Text style={[styles.formulaVal, { color: "#FCA5A5" }]}>
-                  Rs.{(summary?.total_driver_earnings || 0).toFixed(0)}
-                </Text>
-              </View>
-              <View style={styles.formulaDivider} />
-              <View style={styles.formulaRow}>
-                <Text
-                  style={[
-                    styles.formulaKey,
-                    { color: "#13EC80", fontWeight: "700" },
-                  ]}
-                >
-                  = Your Earnings
-                </Text>
-                <Text
-                  style={[
-                    styles.formulaVal,
-                    { color: "#13EC80", fontSize: 18, fontWeight: "800" },
-                  ]}
-                >
-                  {fmt(summary?.total_earning)}
-                </Text>
-              </View>
-            </View>
-
-            {/* Delivery Earnings List */}
+            {/* ─── Delivery Earnings List (shown FIRST) ─── */}
             <View style={styles.listHeader}>
               <Text style={styles.listTitle}>Delivery Earnings</Text>
               <View style={styles.orderCountBadge}>
@@ -363,6 +233,25 @@ export default function ManagerEarningsScreen() {
                   {orders.length} orders
                 </Text>
               </View>
+            </View>
+
+            <View style={styles.filterToggleRow}>
+              <TouchableOpacity
+                style={[styles.filterToggleBtn, filter === "success" && styles.filterToggleBtnActive]}
+                onPress={() => setFilter("success")}
+              >
+                <Text style={[styles.filterToggleText, filter === "success" && styles.filterToggleTextActive]}>
+                  Success
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.filterToggleBtn, filter === "failure" && styles.filterToggleBtnActive]}
+                onPress={() => setFilter("failure")}
+              >
+                <Text style={[styles.filterToggleText, filter === "failure" && styles.filterToggleTextActive]}>
+                  Failure
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {orders.length === 0 ? (
@@ -412,8 +301,8 @@ export default function ManagerEarningsScreen() {
                         </View>
                         <View style={{ flex: 1 }}>
                           <View style={styles.orderNumRow}>
-                            <Text style={styles.orderNum}>
-                              #{order.order_number}
+                            <Text style={[styles.orderNum, { fontSize: 12 }]}>
+                              {order.restaurant_name}
                             </Text>
                             <View
                               style={[
@@ -448,8 +337,7 @@ export default function ManagerEarningsScreen() {
                             </View>
                           </View>
                           <Text style={styles.orderMeta} numberOfLines={1}>
-                            {order.restaurant_name} •{" "}
-                            {formatTime(order.placed_at)}
+                            #{order.order_number} • {formatTime(order.placed_at)}
                           </Text>
                         </View>
                       </View>
@@ -486,7 +374,12 @@ export default function ManagerEarningsScreen() {
                           <View style={{ flex: 1 }}>
                             <Text style={styles.detailLabel}>CUSTOMER</Text>
                             <Text style={styles.detailValue}>
-                              {order.customer_name || "—"}
+                              {order.customer_name || "—"}{" "}
+                              {order.customer_total_orders > 0 && (
+                                <Text style={{ color: "#6B7280", fontSize: 11 }}>
+                                  ({order.customer_total_orders} Orders)
+                                </Text>
+                              )}
                             </Text>
                           </View>
                           <View style={{ flex: 1 }}>
@@ -530,11 +423,17 @@ export default function ManagerEarningsScreen() {
                         <View style={styles.financialCard}>
                           {[
                             { k: "Food Subtotal", v: order.subtotal },
-                            { k: "Delivery Fee", v: order.delivery_fee },
+                            {
+                              k: "Delivery Fee",
+                              v: order.delivery_fee,
+                              suffix: order.distance_km
+                                ? ` (${parseFloat(order.distance_km).toFixed(1)} km)`
+                                : null,
+                            },
                             { k: "Service Fee", v: order.service_fee },
                           ].map((r, i) => (
                             <View key={i} style={styles.finRow}>
-                              <Text style={styles.finKey}>{r.k}</Text>
+                              <Text style={styles.finKey}>{r.k}{r.suffix ? <Text style={{ color: "#9CA3AF", fontSize: 10 }}>{r.suffix}</Text> : null}</Text>
                               <Text style={styles.finVal}>
                                 Rs.{parseFloat(r.v || 0).toFixed(0)}
                               </Text>
@@ -588,6 +487,12 @@ export default function ManagerEarningsScreen() {
                             </Text>
                           </View>
                         </View>
+                        <TouchableOpacity
+                          style={styles.viewDetailsBtn}
+                          onPress={() => navigation.navigate("ManagerOrderDetails", { orderId: order.id })}
+                        >
+                          <Text style={styles.viewDetailsText}>View Details</Text>
+                        </TouchableOpacity>
                       </View>
                     )}
                   </View>
@@ -604,6 +509,167 @@ export default function ManagerEarningsScreen() {
                 />
                 <Text style={styles.endText}>End of list</Text>
               </View>
+            )}
+
+            {/* ─── Collapsible Earnings Summary (below delivery list) ─── */}
+            <TouchableOpacity
+              style={styles.summaryToggleBtn}
+              onPress={() => setSummaryOpen((v) => !v)}
+              activeOpacity={0.75}
+            >
+              <View style={styles.summaryToggleLeft}>
+                <Ionicons name="stats-chart" size={16} color="#06C168" />
+                <Text style={styles.summaryToggleText}>Earnings Summary</Text>
+                <View style={styles.summaryToggleBadge}>
+                  <Text style={styles.summaryToggleBadgeText}>
+                    {fmt(summary?.total_earning)}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons
+                name={summaryOpen ? "chevron-up" : "chevron-down"}
+                size={18}
+                color="#6B7280"
+              />
+            </TouchableOpacity>
+
+            {summaryOpen && (
+              <>
+                {/* Earnings Hero */}
+                <View style={styles.heroCard}>
+                  <Text style={styles.heroLabel}>
+                    {periodLabels[period]} Earnings
+                  </Text>
+                  <Text style={styles.heroAmount}>
+                    {fmt(summary?.total_earning)}
+                  </Text>
+                  <View style={styles.heroStatsRow}>
+                    <View
+                      style={[
+                        styles.heroStat,
+                        { backgroundColor: "#E6F9EE", borderColor: "#B8F0D0" },
+                      ]}
+                    >
+                      <Text style={[styles.heroStatLabel, { color: "#06C168" }]}>
+                        TOTAL DELIVERIES
+                      </Text>
+                      <Text style={[styles.heroStatValue, { color: "#046B4D" }]}>
+                        {summary?.total_orders || 0}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.heroStat,
+                        { backgroundColor: "#EFF6FF", borderColor: "#DBEAFE" },
+                      ]}
+                    >
+                      <Text style={[styles.heroStatLabel, { color: "#2563EB" }]}>
+                        DELIVERED
+                      </Text>
+                      <Text style={[styles.heroStatValue, { color: "#1D4ED8" }]}>
+                        {summary?.delivered_orders || 0}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Breakdown Cards */}
+                <View style={styles.breakdownGrid}>
+                  {[
+                    {
+                      label: "COLLECTED",
+                      value: summary?.total_collected,
+                      icon: "wallet-outline",
+                      bg: "#F3E8FF",
+                      color: "#7C3AED",
+                    },
+                    {
+                      label: "RESTAURANTS",
+                      value: summary?.admin_total,
+                      icon: "restaurant-outline",
+                      bg: "#FEF3C7",
+                      color: "#D97706",
+                    },
+                    {
+                      label: "DRIVERS",
+                      value: summary?.total_driver_earnings,
+                      icon: "car-outline",
+                      bg: "#E0F2FE",
+                      color: "#0284C7",
+                    },
+                    {
+                      label: "COMMISSION",
+                      value: summary?.food_commission,
+                      icon: "cash-outline",
+                      bg: "#E6F9EE",
+                      color: "#06C168",
+                    },
+                  ].map((item, i) => (
+                    <View key={i} style={styles.breakdownCard}>
+                      <View style={styles.breakdownHeader}>
+                        <View
+                          style={[
+                            styles.breakdownIcon,
+                            { backgroundColor: item.bg },
+                          ]}
+                        >
+                          <Ionicons name={item.icon} size={16} color={item.color} />
+                        </View>
+                        <Text style={styles.breakdownLabel}>{item.label}</Text>
+                      </View>
+                      <Text style={styles.breakdownValue}>
+                        Rs.{(item.value || 0).toFixed(0)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                {/* Formula Card */}
+                <View style={styles.formulaCard}>
+                  <Text style={styles.formulaTitle}>EARNINGS BREAKDOWN</Text>
+                  <View style={styles.formulaRow}>
+                    <Text style={styles.formulaKey}>Total Collected</Text>
+                    <Text style={styles.formulaVal}>
+                      Rs.{(summary?.total_collected || 0).toFixed(0)}
+                    </Text>
+                  </View>
+                  <View style={styles.formulaRow}>
+                    <Text style={[styles.formulaKey, { color: "#FCA5A5" }]}>
+                      − Restaurant Payments
+                    </Text>
+                    <Text style={[styles.formulaVal, { color: "#FCA5A5" }]}>
+                      Rs.{(summary?.admin_total || 0).toFixed(0)}
+                    </Text>
+                  </View>
+                  <View style={styles.formulaRow}>
+                    <Text style={[styles.formulaKey, { color: "#FCA5A5" }]}>
+                      − Driver Earnings
+                    </Text>
+                    <Text style={[styles.formulaVal, { color: "#FCA5A5" }]}>
+                      Rs.{(summary?.total_driver_earnings || 0).toFixed(0)}
+                    </Text>
+                  </View>
+                  <View style={styles.formulaDivider} />
+                  <View style={styles.formulaRow}>
+                    <Text
+                      style={[
+                        styles.formulaKey,
+                        { color: "#13EC80", fontWeight: "700" },
+                      ]}
+                    >
+                      = Your Earnings
+                    </Text>
+                    <Text
+                      style={[
+                        styles.formulaVal,
+                        { color: "#13EC80", fontSize: 18, fontWeight: "800" },
+                      ]}
+                    >
+                      {fmt(summary?.total_earning)}
+                    </Text>
+                  </View>
+                </View>
+              </>
             )}
           </>
         )}
@@ -630,7 +696,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   errorTitle: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: "700",
     color: "#9A3412",
     marginBottom: 6,
@@ -763,6 +829,48 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "rgba(255,255,255,0.2)",
     marginVertical: 4,
+  },
+
+  // Summary toggle button
+  summaryToggleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  summaryToggleLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  summaryToggleText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  summaryToggleBadge: {
+    backgroundColor: "#E6F9EE",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    marginLeft: 4,
+  },
+  summaryToggleBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#046B4D",
   },
 
   // List
@@ -937,4 +1045,46 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: 14, color: "#6B7280" },
   summaryValue: { fontSize: 14, fontWeight: "700", color: "#1a1a1a" },
   loadingText: { textAlign: "center", color: "#6B7280", marginTop: 40 },
+
+  filterToggleRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 16,
+  },
+  filterToggleBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    alignItems: "center",
+  },
+  filterToggleBtnActive: {
+    backgroundColor: "#06C168",
+    borderColor: "#06C168",
+  },
+  filterToggleText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6B7280",
+  },
+  filterToggleTextActive: {
+    color: "#fff",
+  },
+
+  viewDetailsBtn: {
+    backgroundColor: "#F3F4F6",
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  viewDetailsText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#374151",
+  },
 });

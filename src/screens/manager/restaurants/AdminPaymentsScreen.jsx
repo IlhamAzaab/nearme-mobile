@@ -1,10 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Linking,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import OptimizedImage from "../../../components/common/OptimizedImage";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
+import { getAccessToken } from "../../../lib/authStorage";
 import { API_URL } from "../../../config/env";
 
 const ADMIN_DRAWER_ITEMS = [
@@ -56,7 +57,7 @@ const AdminPaymentsScreen = () => {
 
   const fetchData = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const headers = { Authorization: `Bearer ${token}` };
       const [summaryRes, restaurantsRes] = await Promise.all([
         fetch(`${API_URL}/manager/admin-payments/summary`, { headers }),
@@ -131,23 +132,41 @@ const AdminPaymentsScreen = () => {
           </Text>
           <View style={styles.statsRow}>
             <Text style={styles.statText}>{item.order_count || 0} orders</Text>
-            <Text style={styles.statText}>
-              Earned: Rs.{item.total_earnings?.toFixed(2)}
-            </Text>
+            {item.today_orders > 0 && (
+              <View style={styles.todayBadge}>
+                <Text style={styles.todayBadgeText}>
+                  +{item.today_orders} today
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
-        {/* Amount */}
-        <View style={styles.amountCol}>
-          <Text
-            style={[
-              styles.amount,
-              { color: item.withdrawal_balance > 0 ? "#DC2626" : "#06C168" },
-            ]}
-          >
-            Rs.{item.withdrawal_balance?.toFixed(2)}
-          </Text>
-          <Text style={styles.balanceLabel}>Balance</Text>
+        {/* Amount + Call */}
+        <View style={styles.rightCol}>
+          <View style={styles.amountCol}>
+            <Text
+              style={[
+                styles.amount,
+                { color: item.withdrawal_balance > 0 ? "#DC2626" : "#06C168" },
+              ]}
+            >
+              Rs.{item.withdrawal_balance?.toFixed(2)}
+            </Text>
+            <Text style={styles.balanceLabel}>Balance</Text>
+          </View>
+          {item.admin_phone ? (
+            <TouchableOpacity
+              style={styles.callBtn}
+              onPress={(e) => {
+                e.stopPropagation();
+                Linking.openURL(`tel:${item.admin_phone}`);
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="call" size={14} color="#fff" />
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
@@ -332,9 +351,25 @@ const styles = StyleSheet.create({
   meta: { fontSize: 11, color: "#6B7280", marginTop: 1 },
   statsRow: { flexDirection: "row", gap: 10, marginTop: 3 },
   statText: { fontSize: 10, color: "#9CA3AF" },
-  amountCol: { alignItems: "flex-end", marginRight: 6 },
+  rightCol: { alignItems: "flex-end", gap: 6, marginRight: 6 },
+  amountCol: { alignItems: "flex-end" },
   amount: { fontSize: 14, fontWeight: "700" },
   balanceLabel: { fontSize: 9, color: "#9CA3AF" },
+  callBtn: {
+    backgroundColor: "#06C168",
+    borderRadius: 12,
+    width: 28,
+    height: 28,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  todayBadge: {
+    backgroundColor: "#DBEAFE",
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  todayBadgeText: { fontSize: 9, fontWeight: "700", color: "#1D4ED8" },
 
   emptyWrap: { alignItems: "center", paddingTop: 60 },
   emptyText: { color: "#9CA3AF", marginTop: 8, fontSize: 13 },

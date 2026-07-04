@@ -171,14 +171,14 @@ function buildDeliveredOrderRanking(orders) {
   };
 }
 
-// Format 24h time string → "11.00a.m" style
+// Format 24h time string → "11:30 AM" style
 const formatTime = (t) => {
   if (!t) return "";
   const [h, m] = t.split(":");
   const hour = parseInt(h, 10);
-  const ampm = hour >= 12 ? "p.m" : "a.m";
+  const ampm = hour >= 12 ? "PM" : "AM";
   const h12 = hour % 12 || 12;
-  return `${h12}.${m}${ampm}`;
+  return `${h12}:${m} ${ampm}`;
 };
 
 const formatPrice = (price) => {
@@ -1491,14 +1491,11 @@ export default function HomeScreen({ navigation }) {
             maxToRenderPerBatch={6}
             updateCellsBatchingPeriod={40}
             windowSize={5}
-            removeClippedSubviews
             getItemLayout={(_, index) => ({
               length: RESTAURANT_CARD_ESTIMATED_HEIGHT,
               offset: RESTAURANT_CARD_ESTIMATED_HEIGHT * index,
               index,
             })}
-            decelerationRate="fast"
-            disableIntervalMomentum
             ListFooterComponent={<View style={{ height: 90 }} />}
           />
         ) : (
@@ -1519,9 +1516,6 @@ export default function HomeScreen({ navigation }) {
             maxToRenderPerBatch={12}
             updateCellsBatchingPeriod={24}
             windowSize={6}
-            removeClippedSubviews
-            decelerationRate="fast"
-            disableIntervalMomentum
             ListFooterComponent={<View style={{ height: 90 }} />}
           />
         )}

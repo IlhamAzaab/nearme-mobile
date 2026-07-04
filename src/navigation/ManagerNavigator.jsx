@@ -10,8 +10,11 @@ import ManagerDashboardScreen from "../screens/manager/ManagerDashboardScreen";
 import ManagerDepositsScreen from "../screens/manager/ManagerDepositsScreen";
 import ManagerEarningsScreen from "../screens/manager/ManagerEarningsScreen";
 import ManagerReportsScreen from "../screens/manager/ManagerReportsScreen";
+import CustomerDetailsScreen from "../screens/manager/reports/CustomerDetailsScreen";
+
 import SendNotificationFormScreen from "../screens/manager/SendNotificationFormScreen";
 import SendNotificationScreen from "../screens/manager/SendNotificationScreen";
+import ManagerOrderDetailsScreen from "../screens/manager/ManagerOrderDetailsScreen";
 
 // Sub Screens
 import OperationsConfigScreen from "../screens/manager/OperationsConfigScreen";
@@ -35,6 +38,7 @@ import ProcessAdminPaymentScreen from "../screens/manager/restaurants/ProcessAdm
 import RestaurantManagementScreen from "../screens/manager/restaurants/RestaurantManagementScreen";
 
 // Report Screens
+import ActiveCartsScreen from "../screens/manager/reports/ActiveCartsScreen";
 import CustomerReportsScreen from "../screens/manager/reports/CustomerReportsScreen";
 import DeliveryReportsScreen from "../screens/manager/reports/DeliveryReportsScreen";
 import FinancialReportsScreen from "../screens/manager/reports/FinancialReportsScreen";
@@ -156,6 +160,10 @@ function EarningsStack() {
         component={ManagerEarningsScreen}
       />
       <EarningsStackNav.Screen
+        name="ManagerOrderDetails"
+        component={ManagerOrderDetailsScreen}
+      />
+      <EarningsStackNav.Screen
         name="ManagerAccount"
         component={ManagerAccountScreen}
       />
@@ -189,6 +197,14 @@ function ReportsStack() {
       <ReportsStackNav.Screen
         name="CustomerReports"
         component={CustomerReportsScreen}
+      />
+      <ReportsStackNav.Screen
+        name="CustomerDetails"
+        component={CustomerDetailsScreen}
+      />
+      <ReportsStackNav.Screen
+        name="ActiveCarts"
+        component={ActiveCartsScreen}
       />
       <ReportsStackNav.Screen
         name="TimeAnalytics"

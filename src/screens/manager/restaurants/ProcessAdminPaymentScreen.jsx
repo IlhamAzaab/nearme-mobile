@@ -150,21 +150,19 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
       );
       return;
     }
-    if (!file) {
-      Alert.alert("Error", "Please upload a payment receipt");
-      return;
-    }
 
     setSubmitting(true);
     try {
       const token = await AsyncStorage.getItem("token");
       const formData = new FormData();
       formData.append("amount", payAmount.toString());
-      formData.append("proof", {
-        uri: file.uri,
-        type: file.mimeType || "application/octet-stream",
-        name: file.name || "receipt",
-      });
+      if (file) {
+        formData.append("proof", {
+          uri: file.uri,
+          type: file.mimeType || "application/octet-stream",
+          name: file.name || "receipt",
+        });
+      }
       if (note) formData.append("note", note);
 
       const res = await fetch(
@@ -371,7 +369,7 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
             textAlignVertical="top"
           />
 
-          <Text style={styles.fieldLabel}>Payment Receipt (Required)</Text>
+          <Text style={styles.fieldLabel}>Payment Receipt (Optional)</Text>
           <TouchableOpacity style={styles.uploadBtn} onPress={handleFilePick}>
             <Ionicons name="cloud-upload-outline" size={20} color="#4F46E5" />
             <Text style={styles.uploadBtnText}>

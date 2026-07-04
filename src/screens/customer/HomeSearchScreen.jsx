@@ -19,6 +19,7 @@ import {
   fuzzySearchFoods,
   fuzzySearchRestaurants,
 } from "../../utils/fuzzySearch";
+import { MetaAnalytics } from "../../services/MetaAnalytics";
 
 const RESTAURANTS_CACHE_KEY = "public:restaurants";
 const FOODS_CACHE_KEY = "public:foods";
@@ -136,6 +137,20 @@ export default function HomeSearchScreen({ navigation, route }) {
     if (!text) return allFoods;
     return fuzzySearchFoods(allFoods, text);
   }, [allFoods, query]);
+
+  // Log search to Meta Analytics after user stops typing for 1.5s
+  useEffect(() => {
+    const text = query.trim();
+    if (text.length > 2) {
+      const timer = setTimeout(() => {
+        MetaAnalytics.logSearch({
+          searchString: text,
+          contentType: activeTab,
+        });
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [query, activeTab]);
 
   const restaurantData = activeTab === "restaurant" ? filteredRestaurants : [];
   const foodData = activeTab === "food" ? filteredFoods : [];

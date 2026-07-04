@@ -1,11 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
+import { getAccessToken } from "../../../lib/authStorage";
 import { API_URL } from "../../../config/env";
 
 const REPORT_DRAWER_ITEMS = [
@@ -36,6 +35,7 @@ const CustomerReportsScreen = () => {
   const route = useRoute();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState("");
   const [search, setSearch] = useState("");
@@ -44,13 +44,24 @@ const CustomerReportsScreen = () => {
   const [sortOrder, setSortOrder] = useState("desc");
   const [page, setPage] = useState(1);
   const [result, setResult] = useState(null);
-  const [detailVisible, setDetailVisible] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailData, setDetailData] = useState(null);
+  const [searchInput, setSearchInput] = useState("");
+  const debounceRef = useRef(null);
 
-  const fetchData = useCallback(async () => {
+  // Instant search: debounce 300ms, show search spinner not full loading
+  const handleSearchChange = (text) => {
+    setSearchInput(text);
+    setSearchLoading(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setSearch(text);
+      setPage(1);
+    }, 300);
+  };
+
+  const fetchData = useCallback(async (isSearch = false) => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      if (!isSearch) setLoading(true);
+      const token = await getAccessToken();
       const params = new URLSearchParams({
         search,
         orderFilter,
@@ -75,13 +86,14 @@ const CustomerReportsScreen = () => {
       Alert.alert("Error", e.message || "Failed to load customers");
     } finally {
       setLoading(false);
+      setSearchLoading(false);
       setRefreshing(false);
     }
   }, [orderFilter, page, search, sortBy, sortOrder]);
 
+  // Single effect: runs when any filter/page/search changes
   useEffect(() => {
-    setLoading(true);
-    fetchData();
+    fetchData(searchLoading);
   }, [fetchData]);
 
   const handleRefresh = () => {
@@ -91,7 +103,7 @@ const CustomerReportsScreen = () => {
 
   const handleSuspendToggle = async (customer) => {
     const nextSuspended = customer.status !== "suspended";
-    const token = await AsyncStorage.getItem("token");
+    const token = await getAccessToken();
     try {
       setActionLoadingId(customer.id);
       const res = await fetch(
@@ -132,7 +144,7 @@ const CustomerReportsScreen = () => {
           text: "Remove",
           style: "destructive",
           onPress: async () => {
-            const token = await AsyncStorage.getItem("token");
+            const token = await getAccessToken();
             try {
               setActionLoadingId(customer.id);
               const res = await fetch(
@@ -158,30 +170,8 @@ const CustomerReportsScreen = () => {
     );
   };
 
-  const handleOpenDetails = async (customer) => {
-    const token = await AsyncStorage.getItem("token");
-    if (!token) return;
-
-    try {
-      setDetailLoading(true);
-      setDetailVisible(true);
-      const res = await fetch(
-        `${API_URL}/manager/reports/customers/${customer.id}/details?limit=10`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
-      const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json?.message || "Failed to load customer details");
-      }
-      setDetailData(json);
-    } catch (err) {
-      Alert.alert("Error", err.message || "Failed to load customer details");
-      setDetailVisible(false);
-    } finally {
-      setDetailLoading(false);
-    }
+  const handleOpenDetails = (customer) => {
+    navigation.navigate("CustomerDetails", { customerId: customer.id });
   };
 
   const summary = result?.summary || {};
@@ -234,14 +224,16 @@ const CustomerReportsScreen = () => {
 
             <View style={styles.filtersCard}>
               <TextInput
-                value={search}
-                onChangeText={(text) => {
-                  setSearch(text);
-                  setPage(1);
-                }}
+                value={searchInput}
+                onChangeText={handleSearchChange}
                 placeholder="Search name, email, phone, city"
                 style={styles.input}
+                returnKeyType="search"
+                clearButtonMode="while-editing"
               />
+              {searchLoading && (
+                <ActivityIndicator size="small" color="#0F766E" style={{ marginVertical: 4 }} />
+              )}
 
               <View style={styles.optionRow}>
                 <Text style={styles.optionLabel}>Order Filter</Text>
@@ -338,26 +330,18 @@ const CustomerReportsScreen = () => {
                         <Text style={styles.customerName}>
                           {customer.username || "Unnamed"}
                         </Text>
-                        <Text style={styles.customerSub}>{customer.email || "No email"}</Text>
-                        <Text style={styles.customerSub}>{customer.phone || "No phone"}</Text>
+                        <Text style={styles.customerSub} selectable={true}>{customer.email || "No email"}</Text>
+                        <Text style={styles.customerSub} selectable={true}>{customer.phone || "No phone"}</Text>
                       </View>
-                      <View
-                        style={[
-                          styles.statusBadge,
-                          customer.status === "suspended"
-                            ? styles.statusSuspended
-                            : styles.statusActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.statusText,
-                            customer.status === "suspended"
-                              ? { color: "#B91C1C" }
-                              : { color: "#065F46" },
-                          ]}
-                        >
-                          {customer.status === "suspended" ? "Suspended" : "Active"}
+                      {/* Replace Active badge with account created date */}
+                      <View style={styles.createdBadge}>
+                        <Text style={styles.createdLabel}>Joined</Text>
+                        <Text style={styles.createdDate}>
+                          {customer.created_at
+                            ? new Date(customer.created_at).toLocaleDateString("en-GB", {
+                                day: "2-digit", month: "short", year: "numeric"
+                              })
+                            : "N/A"}
                         </Text>
                       </View>
                     </View>
@@ -386,22 +370,6 @@ const CustomerReportsScreen = () => {
                         style={styles.actionView}
                       >
                         <Text style={styles.actionViewText}>View</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => handleSuspendToggle(customer)}
-                        disabled={actionLoadingId === customer.id}
-                        style={styles.actionSuspend}
-                      >
-                        <Text style={styles.actionSuspendText}>
-                          {customer.status === "suspended" ? "Unsuspend" : "Suspend"}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => handleDelete(customer)}
-                        disabled={actionLoadingId === customer.id}
-                        style={styles.actionRemove}
-                      >
-                        <Text style={styles.actionRemoveText}>Remove</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -434,103 +402,6 @@ const CustomerReportsScreen = () => {
         )}
         <View style={{ height: 40 }} />
       </ScrollView>
-
-      <Modal
-        visible={detailVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setDetailVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            {detailLoading ? (
-              <View style={styles.center}>
-                <ActivityIndicator size="large" color="#13ECB9" />
-              </View>
-            ) : (
-              <>
-                <Text style={styles.modalTitle}>Customer Details</Text>
-                <Text style={styles.modalSubtitle}>
-                  {detailData?.customer?.username || "N/A"}
-                </Text>
-
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalLabel}>Email</Text>
-                  <Text style={styles.modalValue}>
-                    {detailData?.customer?.email || "N/A"}
-                  </Text>
-                </View>
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalLabel}>Phone</Text>
-                  <Text style={styles.modalValue}>
-                    {detailData?.customer?.phone || "N/A"}
-                  </Text>
-                </View>
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalLabel}>City</Text>
-                  <Text style={styles.modalValue}>
-                    {detailData?.customer?.city || "N/A"}
-                  </Text>
-                </View>
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalLabel}>Joined</Text>
-                  <Text style={styles.modalValue}>
-                    {detailData?.customer?.created_at
-                      ? new Date(detailData.customer.created_at).toLocaleString()
-                      : "N/A"}
-                  </Text>
-                </View>
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalLabel}>Total Orders</Text>
-                  <Text style={styles.modalValue}>
-                    {detailData?.summary?.total_orders || 0}
-                  </Text>
-                </View>
-
-                <Text style={styles.modalSectionTitle}>Recent Orders</Text>
-                <ScrollView style={{ maxHeight: 220 }}>
-                  {(detailData?.orders || []).length === 0 ? (
-                    <Text style={styles.modalEmpty}>No orders yet.</Text>
-                  ) : (
-                    detailData.orders.map((order) => (
-                      <View key={order.id} style={styles.orderRow}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.orderTitle}>
-                            #{order.order_number || order.id?.slice(-6)}
-                          </Text>
-                          <Text style={styles.orderSub}>
-                            {order.restaurant_name || "Restaurant"}
-                          </Text>
-                          <Text style={styles.orderSub}>
-                            {order.placed_at
-                              ? new Date(order.placed_at).toLocaleString()
-                              : ""}
-                          </Text>
-                        </View>
-                        <View style={{ alignItems: "flex-end" }}>
-                          <Text style={styles.orderAmount}>
-                            Rs.{Number(order.total_amount || 0).toFixed(0)}
-                          </Text>
-                          <Text style={styles.orderStatus}>
-                            {order.status || ""}
-                          </Text>
-                        </View>
-                      </View>
-                    ))
-                  )}
-                </ScrollView>
-
-                <TouchableOpacity
-                  style={styles.modalCloseBtn}
-                  onPress={() => setDetailVisible(false)}
-                >
-                  <Text style={styles.modalCloseText}>Close</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 };
@@ -696,6 +567,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   },
+  // Created date badge (replaces status badge)
+  createdBadge: {
+    alignItems: "flex-end",
+    paddingLeft: 8,
+  },
+  createdLabel: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#94A3B8",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  createdDate: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#0F766E",
+    marginTop: 1,
+  },
   detailGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -792,55 +681,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   actionViewText: { fontSize: 12, fontWeight: "700", color: "#0C4A6E" },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  modalCard: {
-    width: "100%",
-    maxHeight: "90%",
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    padding: 20,
-  },
-  modalTitle: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
-  modalSubtitle: { fontSize: 14, color: "#64748B", marginBottom: 12 },
-  modalSectionTitle: {
-    marginTop: 16,
-    marginBottom: 8,
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#0F172A",
-  },
-  modalInfoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 6,
-  },
-  modalLabel: { fontSize: 12, color: "#64748B" },
-  modalValue: { fontSize: 12, color: "#0F172A", fontWeight: "600" },
-  modalEmpty: { fontSize: 12, color: "#94A3B8" },
-  modalCloseBtn: {
-    marginTop: 16,
-    backgroundColor: "#0F172A",
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  modalCloseText: { color: "#fff", fontWeight: "700" },
-  orderRow: {
-    flexDirection: "row",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
-  },
-  orderTitle: { fontSize: 13, fontWeight: "700", color: "#0F172A" },
-  orderSub: { fontSize: 11, color: "#64748B" },
-  orderAmount: { fontSize: 12, fontWeight: "700", color: "#0F766E" },
-  orderStatus: { fontSize: 11, color: "#64748B" },
 });
 
 function Stat({ label, value }) {

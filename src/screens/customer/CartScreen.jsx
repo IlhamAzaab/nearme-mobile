@@ -4,6 +4,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  DeviceEventEmitter,
   FlatList,
   Pressable,
   ScrollView,
@@ -244,6 +245,7 @@ export default function CartScreen({ navigation, route }) {
       if (!res.ok) throw new Error(data.message || "Failed to update quantity");
       // Silent background sync
       await fetchCarts(false);
+      DeviceEventEmitter.emit("cart:changed");
     } catch (e) {
       Alert.alert("Error", e.message || "Update failed");
       // Refetch to revert to server state
@@ -342,6 +344,7 @@ export default function CartScreen({ navigation, route }) {
             if (!res.ok)
               throw new Error(data.message || "Failed to remove item");
             await fetchCarts(false);
+            DeviceEventEmitter.emit("cart:changed");
           } catch (e) {
             setCarts(previousCarts);
             Alert.alert("Error", e.message || "Remove failed");
@@ -373,6 +376,7 @@ export default function CartScreen({ navigation, route }) {
             if (!res.ok)
               throw new Error(data.message || "Failed to clear cart");
             await fetchCarts(false);
+            DeviceEventEmitter.emit("cart:changed");
           } catch (e) {
             setCarts(previousCarts);
             Alert.alert("Error", e.message || "Clear failed");

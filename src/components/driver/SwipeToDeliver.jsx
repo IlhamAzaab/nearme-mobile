@@ -36,7 +36,7 @@ const SwipeToDeliver = ({
   }, [containerWidth]);
 
   const completionThreshold = useMemo(
-    () => Math.max(6, maxTranslate * 0.08),
+    () => maxTranslate * 0.95,
     [maxTranslate],
   );
 
@@ -80,10 +80,7 @@ const SwipeToDeliver = ({
     onPanResponderRelease: (_, gestureState) => {
       const currentValue = Number(pan.__getValue?.() || 0);
       const swipeDistance = Math.max(currentValue, gestureState.dx || 0);
-      const shouldComplete =
-        swipeDistance >= completionThreshold ||
-        (gestureState.vx > 0.2 && swipeDistance >= completionThreshold * 0.5) ||
-        swipeDistance >= 3;
+      const shouldComplete = swipeDistance >= completionThreshold;
 
       if (shouldComplete) {
         finishSwipe();
@@ -93,7 +90,7 @@ const SwipeToDeliver = ({
     },
     onPanResponderTerminate: () => {
       const currentValue = Number(pan.__getValue?.() || 0);
-      if (currentValue >= completionThreshold || currentValue >= 3) {
+      if (currentValue >= completionThreshold) {
         finishSwipe();
       } else {
         resetSwipe();

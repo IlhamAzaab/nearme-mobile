@@ -26,6 +26,7 @@ const REPORT_DRAWER_ITEMS = [
   },
   { route: "FinancialReports", label: "Financial", icon: "calculator-outline" },
   { route: "CustomerReports", label: "Customers", icon: "people-outline" },
+  { route: "ActiveCarts", label: "Active Carts", icon: "cart-outline" },
   { route: "TimeAnalytics", label: "Time Analytics", icon: "time-outline" },
 ];
 
@@ -106,6 +107,14 @@ const ManagerReportsScreen = ({ navigation }) => {
       iconBg: "#FEE2E2",
       iconColor: "#DC2626",
       screen: "CustomerReports",
+    },
+    {
+      icon: "cart-outline",
+      title: "Active Carts",
+      desc: "View customers who have items in cart but haven't ordered yet",
+      iconBg: "#D1FAE5",
+      iconColor: "#059669",
+      screen: "ActiveCarts",
     },
     {
       icon: "time-outline",

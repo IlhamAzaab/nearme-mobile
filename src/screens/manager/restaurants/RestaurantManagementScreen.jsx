@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useEffect, useState } from "react";
 import {
@@ -8,6 +7,7 @@ import {
   FlatList,
   Modal,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import OptimizedImage from "../../../components/common/OptimizedImage";
 import ManagerDrawer from "../../../components/manager/ManagerDrawer";
 import ManagerHeader from "../../../components/manager/ManagerHeader";
+import { getAccessToken } from "../../../lib/authStorage";
 import { API_URL } from "../../../config/env";
 
 const ADMIN_DRAWER_ITEMS = [
@@ -65,6 +66,7 @@ const RestaurantManagementScreen = () => {
   const [actionLoading, setActionLoading] = useState("");
   const [selectedRestaurant, setSelectedRestaurant] = useState(null);
   const [showImageModal, setShowImageModal] = useState(null);
+  const [toggleLoading, setToggleLoading] = useState("");
 
   useEffect(() => {
     const timer = setTimeout(() => fetchRestaurants(), 300);
@@ -74,16 +76,14 @@ const RestaurantManagementScreen = () => {
   const fetchRestaurants = async () => {
     setLoading(true);
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.append("status", statusFilter);
       if (search.trim()) params.append("search", search.trim());
 
       const res = await fetch(
         `${API_URL}/manager/restaurants?${params.toString()}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       const data = await res.json();
       if (res.ok) setRestaurants(data.restaurants || []);
@@ -97,7 +97,7 @@ const RestaurantManagementScreen = () => {
   const updateStatus = async (restaurantId, nextStatus) => {
     setActionLoading(restaurantId);
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token = await getAccessToken();
       const res = await fetch(
         `${API_URL}/manager/restaurants/${restaurantId}/status`,
         {
@@ -132,6 +132,47 @@ const RestaurantManagementScreen = () => {
     }
   };
 
+  const toggleOpen = async (restaurantId, newIsOpen) => {
+    setToggleLoading(restaurantId);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch(
+        `${API_URL}/manager/restaurants/${restaurantId}/toggle-open`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ is_open: newIsOpen }),
+        },
+      );
+      const data = await res.json();
+      if (res.ok) {
+        setRestaurants((prev) =>
+          prev.map((r) =>
+            r.id === restaurantId
+              ? { ...r, is_open: newIsOpen, is_manually_overridden: true }
+              : r,
+          ),
+        );
+        if (selectedRestaurant?.id === restaurantId) {
+          setSelectedRestaurant((prev) => ({
+            ...prev,
+            is_open: newIsOpen,
+            is_manually_overridden: true,
+          }));
+        }
+      } else {
+        Alert.alert("Error", data?.message || "Failed to toggle restaurant");
+      }
+    } catch (err) {
+      Alert.alert("Error", "Network error");
+    } finally {
+      setToggleLoading("");
+    }
+  };
+
   const formatDate = (v) => (v ? new Date(v).toLocaleDateString() : "-");
   const formatTime = (v) => v || "-";
 
@@ -145,6 +186,42 @@ const RestaurantManagementScreen = () => {
       </View>
     );
   };
+
+  const openClosedBadge = (item) => {
+    if (item.restaurant_status !== "active") return null;
+    const isOpen = item.is_open;
+    return (
+      <View
+        style={[
+          styles.openBadge,
+          { backgroundColor: isOpen ? "#DCFCE7" : "#FEE2E2" },
+        ]}
+      >
+        <View
+          style={[
+            styles.openDot,
+            { backgroundColor: isOpen ? "#16A34A" : "#DC2626" },
+          ]}
+        />
+        <Text
+          style={[
+            styles.openBadgeText,
+            { color: isOpen ? "#15803D" : "#B91C1C" },
+          ]}
+        >
+          {isOpen ? "Open" : "Closed"}
+          {item.is_manually_overridden ? " •M" : ""}
+        </Text>
+      </View>
+    );
+  };
+
+  // Counts
+  const activeRestaurants = restaurants.filter(
+    (r) => r.restaurant_status === "active",
+  );
+  const openCount = activeRestaurants.filter((r) => r.is_open).length;
+  const activeCount = activeRestaurants.length;
 
   /* ─── Detail Panel ─── */
   const renderDetailPanel = () => {
@@ -203,6 +280,32 @@ const RestaurantManagementScreen = () => {
             {formatTime(r.opening_time)} - {formatTime(r.close_time)}
           </Text>
         </View>
+
+        {/* Manual Open/Close Toggle */}
+        {r.restaurant_status === "active" && (
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.toggleLabel}>
+                Restaurant {r.is_open ? "Open" : "Closed"}
+              </Text>
+              <Text style={styles.toggleSub}>
+                {r.is_manually_overridden
+                  ? "Manually overridden — auto-resets at next scheduled time"
+                  : "Following schedule automatically"}
+              </Text>
+            </View>
+            {toggleLoading === r.id ? (
+              <ActivityIndicator size="small" color="#06C168" />
+            ) : (
+              <Switch
+                value={r.is_open ?? false}
+                onValueChange={(val) => toggleOpen(r.id, val)}
+                trackColor={{ false: "#F87171", true: "#4ADE80" }}
+                thumbColor={r.is_open ? "#16A34A" : "#DC2626"}
+              />
+            )}
+          </View>
+        )}
 
         <View style={{ marginTop: 12, gap: 8 }}>
           {r.restaurant_status !== "active" && (
@@ -263,7 +366,10 @@ const RestaurantManagementScreen = () => {
             <Text style={styles.cardName} numberOfLines={1}>
               {item.restaurant_name}
             </Text>
-            {badge(item.restaurant_status)}
+            <View style={styles.badgeGroup}>
+              {openClosedBadge(item)}
+              {badge(item.restaurant_status)}
+            </View>
           </View>
           <Text style={styles.cardCity}>
             {item.city || "-"} • {item.address || "-"}
@@ -306,6 +412,20 @@ const RestaurantManagementScreen = () => {
         activeRoute={route.name}
         navigation={navigation}
       />
+
+      {/* Open / Total Counter */}
+      {statusFilter === "all" || statusFilter === "active" ? (
+        <View style={styles.countRow}>
+          <Ionicons name="storefront" size={14} color="#06C168" />
+          <Text style={styles.countText}>
+            <Text style={{ color: "#06C168", fontWeight: "800" }}>
+              {openCount} open
+            </Text>
+            {"  "}out of{" "}
+            <Text style={{ fontWeight: "700" }}>{activeCount} active</Text>
+          </Text>
+        </View>
+      ) : null}
 
       {/* Search */}
       <View style={styles.searchRow}>
@@ -402,9 +522,17 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
-  header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
-  title: { fontSize: 22, fontWeight: "800", color: "#111827" },
-  subtitle: { fontSize: 12, color: "#6B7280", marginTop: 4 },
+  countRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: "#ECFDF5",
+    borderBottomWidth: 1,
+    borderBottomColor: "#D1FAE5",
+  },
+  countText: { fontSize: 13, color: "#374151" },
 
   searchRow: {
     flexDirection: "row",
@@ -412,6 +540,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 10,
     marginHorizontal: 16,
+    marginTop: 10,
     borderWidth: 1,
     borderColor: "#E5E7EB",
     marginBottom: 8,
@@ -466,13 +595,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    flexWrap: "wrap",
+    gap: 4,
   },
+  badgeGroup: { flexDirection: "row", gap: 4, alignItems: "center" },
   cardName: {
     fontSize: 15,
     fontWeight: "700",
     color: "#111827",
     flex: 1,
-    marginRight: 8,
+    marginRight: 4,
   },
   cardCity: { fontSize: 11, color: "#6B7280", marginTop: 3 },
   cardInfoGrid: { marginTop: 6 },
@@ -486,6 +618,17 @@ const styles = StyleSheet.create({
 
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   badgeText: { fontSize: 10, fontWeight: "700", textTransform: "capitalize" },
+
+  openBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 10,
+    gap: 3,
+  },
+  openDot: { width: 6, height: 6, borderRadius: 3 },
+  openBadgeText: { fontSize: 10, fontWeight: "700" },
 
   emptyWrap: { alignItems: "center", paddingTop: 60 },
   emptyText: { color: "#9CA3AF", marginTop: 8, fontSize: 13 },
@@ -521,6 +664,20 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   detailSubValue: { fontSize: 12, color: "#6B7280" },
+
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 14,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    gap: 12,
+  },
+  toggleLabel: { fontSize: 14, fontWeight: "700", color: "#111827" },
+  toggleSub: { fontSize: 10, color: "#9CA3AF", marginTop: 2 },
 
   statusBtn: { paddingVertical: 12, borderRadius: 10, alignItems: "center" },
   statusBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },

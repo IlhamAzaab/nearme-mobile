@@ -27,6 +27,7 @@ import { prefetchImageUrls } from "../../lib/imageCache";
 import { fetchJsonWithCache } from "../../lib/publicDataCache";
 import { formatDistance } from "../../services/restaurantDistanceService";
 import { calculateDistance } from "../../utils/locationUtils";
+import { MetaAnalytics } from "../../services/MetaAnalytics";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_GAP = 12;
@@ -143,6 +144,17 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
     }
   };
 
+  useEffect(() => {
+    if (restaurant) {
+      MetaAnalytics.logViewContent({
+        id: restaurantId,
+        name: restaurant.restaurant_name,
+        category: "restaurant",
+        price: 0,
+      });
+    }
+  }, [restaurant, restaurantId]);
+
   // ─── Fetch foods from API (supports abort) ───
   const fetchFoodsFromApi = useCallback(
     async (search = "", options = {}) => {
@@ -185,6 +197,12 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
           );
           parsedFoods = normalizeFoodsPayload(freshData);
         }
+
+        parsedFoods.sort((a, b) => {
+          const aAvailable = a.is_available !== false ? 1 : 0;
+          const bAvailable = b.is_available !== false ? 1 : 0;
+          return bAvailable - aAvailable;
+        });
 
         return parsedFoods;
       } catch (err) {
@@ -394,6 +412,15 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to add");
+
+      // Log AddToCart event
+      MetaAnalytics.logAddToCart({
+        id: food.id,
+        name: food.name,
+        price: food.offer_price || food.regular_price || food.price,
+        quantity: 1,
+      });
+
       DeviceEventEmitter.emit("cart:changed");
       fetchCartCount();
     } catch (err) {
@@ -468,15 +495,6 @@ export default function RestaurantFoodsScreen({ route, navigation }) {
               <View style={styles.ratingBadge}>
                 <Ionicons name="star" size={11} color="#FBBF24" />
                 <Text style={styles.ratingText}>{item.stars}</Text>
-              </View>
-            )}
-
-            {/* Unavailable overlay */}
-            {!item.is_available && item.is_available !== undefined && (
-              <View style={styles.unavailableOverlay}>
-                <View style={styles.unavailablePill}>
-                  <Text style={styles.unavailableText}>Unavailable</Text>
-                </View>
               </View>
             )}
 

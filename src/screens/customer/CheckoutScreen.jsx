@@ -19,6 +19,7 @@ import {
   Dimensions,
   KeyboardAvoidingView,
   Platform,
+  DeviceEventEmitter,
 } from "react-native";
 import { Ionicons, Feather, MaterialIcons } from "@expo/vector-icons";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
@@ -38,6 +39,7 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
+import { MetaAnalytics } from "../../services/MetaAnalytics";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const CHECKOUT_ADDRESS_PIN_HTML =
@@ -240,6 +242,15 @@ export default function CheckoutScreen({ route, navigation }) {
       .then((data) => setFeeConfig(data || null))
       .catch((err) => console.error("Failed to load fee config:", err));
   }, []);
+
+  useEffect(() => {
+    if (cart && cart.cart_total) {
+      MetaAnalytics.logInitiateCheckout({
+        totalValue: cart.cart_total,
+        numItems: cart.items?.length || 1,
+      });
+    }
+  }, [cart]);
 
   const calculateServiceFee = (subtotal) => {
     return calculateServiceFeeFromConfig(subtotal, feeConfig || undefined);
@@ -940,6 +951,14 @@ export default function CheckoutScreen({ route, navigation }) {
       // Navigate to Order Tracking — reset stack so user can't go back to checkout
       const order = data.order;
       if (order?.id) {
+        DeviceEventEmitter.emit("cart:changed");
+        // Log Purchase event
+        MetaAnalytics.logPurchase({
+          orderId: order.id,
+          totalValue: finalTotal,
+          numItems: cart?.items?.length || 1,
+        });
+
         const displayTotal = resolveOrderDisplayTotal(order, finalTotal);
         await cacheOrderDisplayTotal(order.id, displayTotal);
 

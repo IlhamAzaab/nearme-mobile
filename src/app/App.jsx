@@ -45,6 +45,7 @@ import {
 import { AuthProvider, useAuth } from "./providers/AuthProvider";
 import { NotificationProvider } from "./providers/NotificationProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
+import { MetaAnalytics } from "../services/MetaAnalytics";
 
 initializeAuthStorage();
 initializeApiAuthFetch();
@@ -427,6 +428,11 @@ export default function App() {
           "Rebuild native app/dev-client after adding expo-secure-store plugin.",
       },
     );
+  }, []);
+
+  // Initialize Meta Analytics
+  useEffect(() => {
+    MetaAnalytics.initialize();
   }, []);
 
   // Force Android system navigation bar to black with white icons

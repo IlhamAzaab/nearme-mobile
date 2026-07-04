@@ -18,6 +18,7 @@ import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
 import { prefetchImageUrls } from "../../lib/imageCache";
 import { fetchJsonWithCache, getCachedJson } from "../../lib/publicDataCache";
+import { MetaAnalytics } from "../../services/MetaAnalytics";
 
 function FoodDetailSkeleton({ onClose, insets }) {
   return (
@@ -169,6 +170,17 @@ export default function FoodDetailScreen({ route, navigation }) {
     }
   };
 
+  useEffect(() => {
+    if (food) {
+      MetaAnalytics.logViewContent({
+        id: food.id,
+        name: food.name,
+        category: food.category_name || "food",
+        price: food.offer_price || food.regular_price,
+      });
+    }
+  }, [food]);
+
   const formatPrice = (price) => {
     if (price === null || price === undefined) return "N/A";
     const n = Number(price);
@@ -249,6 +261,14 @@ export default function FoodDetailScreen({ route, navigation }) {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to add to cart");
+
+      // Log AddToCart event
+      MetaAnalytics.logAddToCart({
+        id: foodId,
+        name: food?.name,
+        price: unitPrice,
+        quantity,
+      });
 
       DeviceEventEmitter.emit("cart:changed");
 

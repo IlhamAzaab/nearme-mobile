@@ -93,21 +93,20 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
       );
       return;
     }
-    if (!file) {
-      Alert.alert("Error", "Please upload a payment receipt");
-      return;
-    }
+    // File is optional — proceed without it
 
     setSubmitting(true);
     try {
       const token = await AsyncStorage.getItem("token");
       const formData = new FormData();
       formData.append("amount", payAmount.toString());
-      formData.append("proof", {
-        uri: file.uri,
-        type: file.mimeType || "image/jpeg",
-        name: file.name || "receipt.jpg",
-      });
+      if (file) {
+        formData.append("proof", {
+          uri: file.uri,
+          type: file.mimeType || "image/jpeg",
+          name: file.name || "receipt.jpg",
+        });
+      }
       if (note) formData.append("note", note);
 
       const res = await fetch(
@@ -309,7 +308,7 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
 
           {/* Upload Receipt */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>UPLOAD PAYMENT RECEIPT</Text>
+            <Text style={styles.fieldLabel}>UPLOAD PAYMENT RECEIPT (OPTIONAL)</Text>
             {!file ? (
               <TouchableOpacity
                 style={styles.uploadArea}
@@ -383,10 +382,10 @@ const ProcessDriverPaymentScreen = ({ navigation, route }) => {
           <TouchableOpacity
             style={[
               styles.submitBtn,
-              (submitting || !amount || !file) && styles.submitBtnDisabled,
+              (submitting || !amount) && styles.submitBtnDisabled,
             ]}
             onPress={handleSubmit}
-            disabled={submitting || !amount || !file}
+            disabled={submitting || !amount}
             activeOpacity={0.8}
           >
             {submitting ? (
