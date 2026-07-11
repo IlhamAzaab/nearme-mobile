@@ -45,6 +45,8 @@ import FinancialReportsScreen from "../screens/manager/reports/FinancialReportsS
 import RestaurantReportsScreen from "../screens/manager/reports/RestaurantReportsScreen";
 import SalesReportsScreen from "../screens/manager/reports/SalesReportsScreen";
 import TimeAnalyticsScreen from "../screens/manager/reports/TimeAnalyticsScreen";
+import OfferManagementScreen from "../screens/manager/offers/OfferManagementScreen";
+import CreateOfferScreen from "../screens/manager/offers/CreateOfferScreen";
 
 const Tab = createBottomTabNavigator();
 const HomeStackNav = createNativeStackNavigator();
@@ -209,6 +211,14 @@ function ReportsStack() {
       <ReportsStackNav.Screen
         name="TimeAnalytics"
         component={TimeAnalyticsScreen}
+      />
+      <ReportsStackNav.Screen
+        name="OfferManagement"
+        component={OfferManagementScreen}
+      />
+      <ReportsStackNav.Screen
+        name="CreateOffer"
+        component={CreateOfferScreen}
       />
       <ReportsStackNav.Screen
         name="OperationsConfig"

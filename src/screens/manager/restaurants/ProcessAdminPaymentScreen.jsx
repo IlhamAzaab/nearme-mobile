@@ -42,14 +42,17 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
   const [note, setNote] = useState("");
   const [file, setFile] = useState(null);
   const [history, setHistory] = useState([]);
+  const [dailyEarnings, setDailyEarnings] = useState([]);
+  const [legacyPool, setLegacyPool] = useState(0);
   const [showHistory, setShowHistory] = useState(false);
+  const [settlementDate, setSettlementDate] = useState(null);
 
   const fetchRestaurant = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem("token");
       const headers = { Authorization: `Bearer ${token}` };
 
-      const [restaurantRes, historyRes] = await Promise.all([
+      const [restaurantRes, historyRes, dailyRes] = await Promise.all([
         fetch(`${API_URL}/manager/admin-payments/restaurant/${restaurantId}`, {
           headers,
         }),
@@ -57,13 +60,22 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
           `${API_URL}/manager/admin-payments/restaurant/${restaurantId}/history`,
           { headers },
         ),
+        fetch(
+          `${API_URL}/manager/admin-payments/restaurant/${restaurantId}/daily`,
+          { headers },
+        ),
       ]);
 
       const restaurantData = await restaurantRes.json();
       const historyData = await historyRes.json();
+      const dailyData = await dailyRes.json();
 
       if (restaurantData.success) setRestaurant(restaurantData.restaurant);
       if (historyData.success) setHistory(historyData.payments || []);
+      if (dailyData.success) {
+        setDailyEarnings(dailyData.daily_earnings || []);
+        setLegacyPool(dailyData.remaining_legacy_pool || 0);
+      }
     } catch (err) {
       console.error("Failed to fetch restaurant:", err);
     } finally {
@@ -164,6 +176,7 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
         });
       }
       if (note) formData.append("note", note);
+      if (settlementDate) formData.append("settlement_date", settlementDate);
 
       const res = await fetch(
         `${API_URL}/manager/admin-payments/pay/${restaurantId}`,
@@ -185,6 +198,7 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
         setAmount("");
         setNote("");
         setFile(null);
+        setSettlementDate(null);
         fetchRestaurant();
       } else {
         Alert.alert("Error", data.message || "Payment failed");
@@ -318,29 +332,71 @@ const ProcessAdminPaymentScreen = ({ navigation, route }) => {
           </Text>
         </View>
 
-        {/* Stats */}
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Total Earnings</Text>
-            <Text style={styles.statValue}>
-              Rs.{restaurant.total_earnings?.toFixed(2)}
-            </Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Total Paid</Text>
-            <Text style={styles.statValue}>
-              Rs.{restaurant.total_paid?.toFixed(2)}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.statCardFull}>
-          <Text style={styles.statLabel}>Total Orders</Text>
-          <Text style={styles.statValue}>{restaurant.order_count || 0}</Text>
+        {/* Daily Earnings Breakdown */}
+        <View style={styles.dailyCard}>
+          <Text style={styles.dailyCardTitle}>Daily Settlement</Text>
+          <Text style={styles.dailyCardSub}>Pay specific day's invoice</Text>
+          
+          {legacyPool > 0 && (
+            <View style={styles.legacyBox}>
+              <Text style={styles.legacyLabel}>Previous Unallocated Balance:</Text>
+              <Text style={styles.legacyValue}>- Rs.{legacyPool.toFixed(2)}</Text>
+              <Text style={styles.legacyHint}>This previous overpayment will automatically cover future days.</Text>
+            </View>
+          )}
+
+          {dailyEarnings.length === 0 ? (
+            <Text style={styles.noHistory}>No active orders found</Text>
+          ) : (
+            dailyEarnings.map((day, idx) => {
+              const remaining = day.earnings - day.paid_amount;
+              const isPaid = day.status === 'paid';
+              const dateObj = new Date(day.date);
+              const dateLabel = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+              
+              return (
+                <View key={idx} style={styles.dailyItem}>
+                  <View style={styles.dailyInfo}>
+                    <Text style={styles.dailyDate}>{dateLabel}</Text>
+                    <Text style={styles.dailyMeta}>{day.order_count} Orders • Total: Rs.{day.earnings.toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.dailyAction}>
+                    {isPaid ? (
+                      <View style={styles.paidBadge}>
+                        <Ionicons name="checkmark-circle" size={14} color="#059669" />
+                        <Text style={styles.paidBadgeText}>PAID</Text>
+                      </View>
+                    ) : (
+                      <TouchableOpacity 
+                        style={styles.payNowBtn}
+                        onPress={() => {
+                          setSettlementDate(day.date);
+                          setAmount(remaining.toFixed(2));
+                          Alert.alert("Date Selected", `Paying for ${dateLabel}. Upload receipt below.`);
+                        }}
+                      >
+                        <Text style={styles.payNowText}>PAY RS.{remaining.toFixed(2)}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              );
+            })
+          )}
         </View>
 
         {/* Payment Form */}
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Payment Details</Text>
+
+          {settlementDate && (
+             <View style={styles.settlementDateBadge}>
+               <Text style={styles.settlementDateText}>Settling Invoice for: {new Date(settlementDate).toLocaleDateString("en-US", { month: "long", day: "numeric" })}</Text>
+               <TouchableOpacity onPress={() => setSettlementDate(null)}>
+                 <Ionicons name="close-circle" size={20} color="#EF4444" />
+               </TouchableOpacity>
+             </View>
+          )}
 
           <Text style={styles.fieldLabel}>Payment Amount (Rs.)</Text>
           <View style={styles.amountRow}>
@@ -632,6 +688,71 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     marginTop: 10,
   },
+  
+  dailyCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 12,
+  },
+  dailyCardTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
+  dailyCardSub: { fontSize: 12, color: "#6B7280", marginBottom: 14 },
+  dailyItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  dailyInfo: { flex: 1 },
+  dailyDate: { fontSize: 14, fontWeight: "700", color: "#111827" },
+  dailyMeta: { fontSize: 11, color: "#6B7280", marginTop: 2 },
+  dailyAction: { alignItems: "flex-end" },
+  paidBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#D1FAE5",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 4,
+  },
+  paidBadgeText: { fontSize: 10, fontWeight: "700", color: "#065F46" },
+  payNowBtn: {
+    backgroundColor: "#13ECB9",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  payNowText: { fontSize: 11, fontWeight: "700", color: "#111816" },
+  
+  legacyBox: {
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  legacyLabel: { fontSize: 11, fontWeight: "600", color: "#1E3A8A" },
+  legacyValue: { fontSize: 16, fontWeight: "800", color: "#1D4ED8", marginVertical: 2 },
+  legacyHint: { fontSize: 10, color: "#3B82F6" },
+
+  settlementDateBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FEF2F2",
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    marginBottom: 10,
+  },
+  settlementDateText: { fontSize: 12, fontWeight: "700", color: "#DC2626" },
 
   amountRow: { flexDirection: "row", gap: 8 },
   amountInput: {

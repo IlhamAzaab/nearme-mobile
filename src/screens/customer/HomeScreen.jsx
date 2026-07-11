@@ -14,6 +14,7 @@ import {
   Image,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -25,6 +26,7 @@ import Svg, { G, Path } from "react-native-svg";
 import { useNotifications } from "../../app/providers/NotificationProvider";
 import OptimizedImage from "../../components/common/OptimizedImage";
 import SkeletonBlock from "../../components/common/SkeletonBlock";
+import OfferBanners from "../../components/customer/OfferBanners";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
 import { prefetchImageUrls } from "../../lib/imageCache";
@@ -333,6 +335,7 @@ const CategoryIcon = ({ category }) => {
           uri={remoteUri}
           style={styles.catImage}
           transition={80}
+          cloudinaryPreset="thumbnail"
           fallback={
             <Image
               source={fallbackSource}
@@ -412,6 +415,96 @@ const CategorySection = React.memo(function CategorySection({
   );
 });
 
+const PopularDishesSection = React.memo(function PopularDishesSection({
+  popularFoods,
+  isLoading,
+  navigation,
+}) {
+  if (!isLoading && popularFoods.length === 0) return null;
+
+  return (
+    <View style={styles.popularSectionContainer}>
+      <View style={styles.sectionRow}>
+        <Text style={styles.sectionTitle}>Popular Dishes</Text>
+      </View>
+      
+      {isLoading ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: 12, paddingHorizontal: 4 }}
+        >
+          {[1, 2, 3].map((i) => (
+            <View key={i} style={styles.popularCardSkeleton}>
+              <SkeletonBlock width="100%" height={100} borderRadius={12} />
+              <View style={{ padding: 8, gap: 6 }}>
+                <SkeletonBlock width="80%" height={14} borderRadius={4} />
+                <SkeletonBlock width="50%" height={12} borderRadius={4} />
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={120 + 12} // card width (120) + gap (12)
+          decelerationRate="fast"
+          contentContainerStyle={{ gap: 12, paddingHorizontal: 4 }}
+        >
+          {popularFoods.map((food) => (
+            <Pressable
+              key={food.id}
+              onPress={() => 
+                navigation.navigate("FoodDetail", { 
+                  restaurantId: food.restaurant_id, 
+                  foodId: food.id 
+                })
+              }
+              style={({ pressed }) => [
+                styles.popularCard,
+                pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] }
+              ]}
+            >
+              <View style={styles.popularImageContainer}>
+                {food.image_url ? (
+                  <OptimizedImage
+                    uri={food.image_url}
+                    style={styles.popularImage}
+                    transition={150}
+                    cloudinaryPreset="card"
+                  />
+                ) : (
+                  <LinearGradient
+                    colors={["#06C168", "#059B56"]}
+                    style={[styles.popularImage, { justifyContent: "center", alignItems: "center" }]}
+                  >
+                    <Ionicons name="restaurant-outline" size={24} color="rgba(255,255,255,0.6)" />
+                  </LinearGradient>
+                )}
+                {food.ordered_count_label ? (
+                  <View style={styles.popularBadge}>
+                    <Text style={styles.popularBadgeText}>{food.ordered_count_label}</Text>
+                  </View>
+                ) : null}
+              </View>
+              <View style={styles.popularCardInfo}>
+                <Text style={styles.popularFoodName} numberOfLines={1}>{food.name}</Text>
+                <Text style={styles.popularRestaurantName} numberOfLines={1}>
+                  {food.restaurants?.restaurant_name || "Restaurant"}
+                </Text>
+                <Text style={styles.popularPrice}>{formatPrice(food.price)}</Text>
+              </View>
+            </Pressable>
+          ))}
+          {/* Invisible padding element for 'next' spacing */}
+          <View style={{ width: 10 }} />
+        </ScrollView>
+      )}
+    </View>
+  );
+});
+
 export default function HomeScreen({ navigation }) {
   const randomSortSeed = useMemo(() => `${Date.now()}-${Math.random()}`, []);
 
@@ -444,6 +537,10 @@ export default function HomeScreen({ navigation }) {
   const [hasLoadedFoods, setHasLoadedFoods] = useState(
     () => INITIAL_CACHED_FOODS.length > 0,
   );
+  
+  const [popularFoods, setPopularFoods] = useState([]);
+  const [isPopularFoodsLoading, setIsPopularFoodsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("restaurant"); // restaurant | food
@@ -455,6 +552,7 @@ export default function HomeScreen({ navigation }) {
   const [launchPromo, setLaunchPromo] = useState(null);
   const [showLaunchPromoModal, setShowLaunchPromoModal] = useState(false);
   const [acknowledgingPromo, setAcknowledgingPromo] = useState(false);
+  const [serviceUnavailableConfig, setServiceUnavailableConfig] = useState(null);
 
   const categories = useMemo(() => FIXED_CATEGORIES, []);
   const launchPromoHeroUri = useMemo(
@@ -752,11 +850,23 @@ export default function HomeScreen({ navigation }) {
       const data = await fetchJsonWithCache(
         RESTAURANTS_CACHE_KEY,
         async () => {
-          const res = await fetch(url);
+          const token = await getAccessToken();
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const res = await fetch(url, { headers });
           return res.json().catch(() => ({}));
         },
         { ttlMs: 120000 },
       );
+      
+      if (data?.service_unavailable) {
+        setServiceUnavailableConfig({
+          reason: data.reason,
+          reopenTime: data.reopen_time
+        });
+      } else {
+        setServiceUnavailableConfig(null);
+      }
+      
       const fetchedRestaurants = data.restaurants || [];
       const orderedRestaurants = sortRestaurantsForHome(fetchedRestaurants);
       setAllRestaurants(orderedRestaurants);
@@ -787,11 +897,21 @@ export default function HomeScreen({ navigation }) {
       const data = await fetchJsonWithCache(
         FOODS_CACHE_KEY,
         async () => {
-          const res = await fetch(url);
+          const token = await getAccessToken();
+          const headers = token ? { Authorization: `Bearer ${token}` } : {};
+          const res = await fetch(url, { headers });
           return res.json().catch(() => ({}));
         },
         { ttlMs: 120000 },
       );
+
+      if (data?.service_unavailable) {
+        setServiceUnavailableConfig({
+          reason: data.reason,
+          reopenTime: data.reopen_time
+        });
+      }
+      
       const fetchedFoods = data.foods || [];
       const orderedFoods = sortFoodsForHome(fetchedFoods);
       setAllFoodsData(orderedFoods);
@@ -807,10 +927,41 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
+  const fetchPopularFoods = async () => {
+    try {
+      setIsPopularFoodsLoading(true);
+      const url = `${API_BASE_URL}/public/foods/popular`;
+      const token = await getAccessToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(url, { headers });
+      const data = await res.json().catch(() => ({}));
+      setPopularFoods(data.foods || []);
+    } catch (err) {
+      console.log("popular foods error:", err?.message);
+      setPopularFoods([]);
+    } finally {
+      setIsPopularFoodsLoading(false);
+    }
+  };
+
   // 🔍 Initial data fetch on mount and tab switch
   useEffect(() => {
     fetchDeliveredOrderRanking();
+    fetchPopularFoods();
   }, [fetchDeliveredOrderRanking]);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await Promise.all([
+      fetchRestaurants(),
+      fetchAllFoods(),
+      fetchPopularFoods(),
+      fetchDeliveredOrderRanking(),
+      fetchLaunchPromotionStatus(),
+      fetchCartCount()
+    ]);
+    setIsRefreshing(false);
+  }, [fetchDeliveredOrderRanking, fetchLaunchPromotionStatus]);
 
   useEffect(() => {
     if (activeTab === "food") {
@@ -1077,15 +1228,25 @@ export default function HomeScreen({ navigation }) {
             return (
               <>
                 <View style={styles.foodImgWrap}>
-                  <OptimizedImage
-                    uri={
-                      item.image_url ||
-                      "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400"
-                    }
-                    style={styles.foodImg}
-                    transition={120}
-                    cloudinaryPreset="card"
-                  />
+                  {item.image_url ? (
+                    <OptimizedImage
+                      uri={item.image_url}
+                      style={styles.foodImg}
+                      transition={120}
+                      cloudinaryPreset="card"
+                    />
+                  ) : (
+                    <LinearGradient
+                      colors={["#06C168", "#059B56"]}
+                      style={[styles.foodImg, { justifyContent: "center", alignItems: "center" }]}
+                    >
+                      <Ionicons
+                        name="restaurant-outline"
+                        size={32}
+                        color="rgba(255,255,255,0.6)"
+                      />
+                    </LinearGradient>
+                  )}
                   {Number(item.stars || 0) > 0 && (
                     <View style={styles.foodRatingBadge}>
                       <Ionicons name="star" size={11} color="#FBBF24" />
@@ -1139,8 +1300,15 @@ export default function HomeScreen({ navigation }) {
         <CategorySection
           categories={categories}
           selectedCategory={selectedCategory}
-          onSelectCategory={onSelectCategory}
+          onSelectCategory={(cat) => {
+            if (activeTab !== "restaurant") {
+              setActiveTab("restaurant");
+            }
+            setSelectedCategory(cat);
+          }}
         />
+        {/* Promotional Offers Banner (Below Categories) */}
+        {!searchQuery && <OfferBanners />}
 
         {/* Toggle */}
         <View style={styles.toggleRow}>
@@ -1189,12 +1357,18 @@ export default function HomeScreen({ navigation }) {
           </Pressable>
         </View>
 
+        <PopularDishesSection
+          popularFoods={popularFoods}
+          isLoading={isPopularFoodsLoading}
+          navigation={navigation}
+        />
+
         <Text style={[styles.sectionTitle, { marginTop: 6, marginBottom: 10 }]}>
-          {activeTab === "restaurant" ? "Restaurants" : "Popular Dishes"}
+          {activeTab === "restaurant" ? "Restaurants" : "All Food Items"}
         </Text>
       </>
     ),
-    [activeTab, categories, selectedCategory, onSelectCategory],
+    [activeTab, categories, selectedCategory, onSelectCategory, popularFoods, isPopularFoodsLoading, navigation],
   );
 
   const isRestaurantDataReady =
@@ -1297,7 +1471,7 @@ export default function HomeScreen({ navigation }) {
             {/* Logo & Delivery Info */}
             <View style={styles.logoSection}>
               <View style={styles.logoBox}>
-                <Svg width={40} height={40} viewBox="1650 1600 2750 2050">
+                <Svg width={32} height={32} viewBox="1650 1600 2750 2050">
                   <G transform="translate(0,6000) scale(1,-1)" stroke="none">
                     <Path
                       fill="#000000"
@@ -1355,6 +1529,14 @@ export default function HomeScreen({ navigation }) {
           <ScrollView
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={handleRefresh}
+                colors={["#06C168"]}
+                tintColor="#06C168"
+              />
+            }
             decelerationRate="fast"
             disableIntervalMomentum
           >
@@ -1481,7 +1663,7 @@ export default function HomeScreen({ navigation }) {
             }
             ListHeaderComponent={renderDiscoveryHeader}
             ListEmptyComponent={
-              <EmptyState activeTab="restaurant" searchQuery={searchQuery} />
+              <EmptyState activeTab="restaurant" searchQuery={searchQuery} serviceUnavailableConfig={serviceUnavailableConfig} />
             }
             ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
             renderItem={renderRestaurantItem}
@@ -1506,7 +1688,7 @@ export default function HomeScreen({ navigation }) {
             numColumns={2}
             ListHeaderComponent={renderDiscoveryHeader}
             ListEmptyComponent={
-              <EmptyState activeTab="food" searchQuery={searchQuery} />
+              <EmptyState activeTab="food" searchQuery={searchQuery} serviceUnavailableConfig={serviceUnavailableConfig} />
             }
             renderItem={renderFoodItem}
             columnWrapperStyle={{ gap: 12 }}
@@ -1547,21 +1729,40 @@ export default function HomeScreen({ navigation }) {
   );
 }
 
-function EmptyState({ activeTab, searchQuery }) {
+function EmptyState({ activeTab, searchQuery, serviceUnavailableConfig }) {
+  if (serviceUnavailableConfig) {
+    return (
+      <View style={[styles.emptyBox, { borderColor: "#FECACA", backgroundColor: "#FEF2F2", paddingVertical: 40 }]}>
+        <View style={[styles.emptyIconWrap, { backgroundColor: "#FEE2E2", borderColor: "#FCA5A5", width: 80, height: 80, borderRadius: 40 }]}>
+          <Ionicons name="cafe-outline" size={40} color="#EF4444" />
+        </View>
+        <Text style={[styles.emptyTitle, { fontSize: 20 }]}>We'll Be Right Back</Text>
+        <Text style={[styles.emptySub, { paddingHorizontal: 10 }]}>
+          {serviceUnavailableConfig.reason || "We're currently taking a short break or performing maintenance."}
+        </Text>
+        {serviceUnavailableConfig.reopenTime && (
+          <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#fff", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12, marginTop: 12, borderWidth: 1, borderColor: "#FECACA", gap: 8 }}>
+            <Ionicons name="time-outline" size={20} color="#B91C1C" />
+            <Text style={{ color: "#B91C1C", fontSize: 15, fontWeight: "600" }}>Reopening at {serviceUnavailableConfig.reopenTime}</Text>
+          </View>
+        )}
+      </View>
+    );
+  }
+
   const hasSearch = String(searchQuery || "").trim().length > 0;
   const title = hasSearch
     ? "No matches yet"
-    : activeTab === "restaurant"
-      ? "No restaurants available"
-      : "No food items available";
+    : "Coming soon to your region!";
   const subTitle = hasSearch
     ? "Try another keyword, item name, or category."
-    : "Please check back shortly while we refresh this section.";
+    : "We will be offering our services in your area very soon. Stay tuned!";
+  const iconName = hasSearch ? "search-outline" : "rocket-outline";
 
   return (
     <View style={styles.emptyBox}>
       <View style={styles.emptyIconWrap}>
-        <Ionicons name="file-tray-outline" size={34} color="#0B8A49" />
+        <Ionicons name={iconName} size={34} color="#0B8A49" />
       </View>
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptySub}>{subTitle}</Text>
@@ -1733,12 +1934,12 @@ const styles = StyleSheet.create({
   logoSection: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
     flexShrink: 0,
   },
   logoBox: {
-    width: 48,
-    height: 48,
+    width: 38,
+    height: 38,
     borderRadius: 100,
     backgroundColor: "#06C168",
     alignItems: "center",
@@ -1800,7 +2001,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 6,
   },
   sectionTitle: {
     fontSize: 19,
@@ -1810,7 +2011,7 @@ const styles = StyleSheet.create({
   },
   sectionLink: { color: "#06C168", fontWeight: "800", fontSize: 13 },
 
-  catRow: { gap: 16, paddingVertical: 8, marginBottom: 8 },
+  catRow: { gap: 12, paddingVertical: 4, marginBottom: 2 },
   catCard: {
     alignItems: "center",
     justifyContent: "center",
@@ -1822,9 +2023,9 @@ const styles = StyleSheet.create({
   },
   catCardIdle: {},
   catIconBox: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#fff",
@@ -1847,30 +2048,30 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   catIconImageWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     overflow: "hidden",
     backgroundColor: "#F8FAFC",
   },
   catImage: {
-    width: 72,
-    height: 72,
+    width: 56,
+    height: 56,
   },
   catFallback: {
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F1F5F9",
-    borderRadius: 36,
+    borderRadius: 28,
   },
-  catText: { fontSize: 13, fontWeight: "700", color: "#64748B" },
+  catText: { fontSize: 12, fontWeight: "700", color: "#64748B" },
   catTextActive: { color: "#06C168" },
 
   toggleRow: {
     flexDirection: "row",
     gap: 0,
-    marginTop: 8,
-    marginBottom: 16,
+    marginTop: 2,
+    marginBottom: 6,
     backgroundColor: "#F8FAFC",
     borderRadius: 999,
     padding: 6,
@@ -2264,5 +2465,74 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     fontSize: 16,
     letterSpacing: 0.3,
+  },
+  popularSectionContainer: {
+    marginBottom: 8,
+  },
+  popularCardSkeleton: {
+    width: 120,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    overflow: "hidden",
+  },
+  popularCard: {
+    width: 120,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  popularImageContainer: {
+    width: "100%",
+    height: 80,
+    backgroundColor: "#F8FAFC",
+    position: "relative",
+  },
+  popularImage: {
+    width: "100%",
+    height: "100%",
+  },
+  popularBadge: {
+    position: "absolute",
+    bottom: 6,
+    left: 6,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  popularBadgeText: {
+    color: "#FFD700",
+    fontWeight: "800",
+    fontSize: 11,
+  },
+  popularCardInfo: {
+    padding: 8,
+    gap: 2,
+  },
+  popularFoodName: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.2,
+  },
+  popularRestaurantName: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  popularPrice: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#06C168",
+    marginTop: 2,
   },
 });

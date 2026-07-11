@@ -275,14 +275,16 @@ export default function CompleteProfileScreen({ navigation, route }) {
         },
         {
           userEmail: normalizedEmail,
-          profileCompleted: true,
+          profileCompleted: false,
         },
       );
 
-      await markProfileCompleted();
-      await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
-      preparePostLoginTransition();
-      await refreshAuthState();
+      await AsyncStorage.setItem(
+        SIGNUP_FLOW_STATE_KEY,
+        JSON.stringify(buildSignupFlowState("AddressPicker", { isAuthFlow: true })),
+      );
+
+      navigation.replace("AddressPicker", { isAuthFlow: true });
     } catch (err) {
       console.error("Profile completion error:", err);
       setError("Network error. Please try again.");

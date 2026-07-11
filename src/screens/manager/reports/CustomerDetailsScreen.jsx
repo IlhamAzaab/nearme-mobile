@@ -175,7 +175,18 @@ const CustomerDetailsScreen = () => {
           <View style={styles.infoRow}>
             <Text style={styles.label}>Account Created</Text>
             <Text style={styles.value}>
-              {customer?.created_at ? new Date(customer.created_at).toLocaleString() : "N/A"}
+              {customer?.created_at 
+                ? new Date(customer.created_at).toLocaleString("en-LK", { 
+                    timeZone: "Asia/Colombo",
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: true
+                  }) 
+                : "N/A"}
             </Text>
           </View>
 

@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   RefreshControl,
   ScrollView,
@@ -140,6 +141,27 @@ export default function ManagerEarningsScreen() {
     },
     [period, getOrderParams, getSummaryParams],
   );
+
+  const acceptOrder = async (orderId) => {
+    try {
+      const token = await getAccessToken() || await AsyncStorage.getItem("token");
+      const res = await fetch(`${API_URL}/manager/orders/${orderId}/accept`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        Alert.alert("Success", "Order accepted successfully");
+        fetchEarnings(); // Refresh list to get updated statuses
+      } else {
+        Alert.alert("Error", data?.message || "Failed to accept order");
+      }
+    } catch (err) {
+      console.error("Accept order error:", err);
+      Alert.alert("Error", "Network error while accepting order");
+    }
+  };
 
   useEffect(() => {
     fetchEarnings();
@@ -487,6 +509,23 @@ export default function ManagerEarningsScreen() {
                             </Text>
                           </View>
                         </View>
+                        {order.status === "placed" && (
+                          <TouchableOpacity
+                            style={[styles.viewDetailsBtn, { backgroundColor: "#06C168", marginBottom: 10 }]}
+                            onPress={() => {
+                              Alert.alert(
+                                "Accept Order",
+                                "Are you sure you want to accept this order on behalf of the restaurant?",
+                                [
+                                  { text: "Cancel", style: "cancel" },
+                                  { text: "Accept", onPress: () => acceptOrder(order.id) }
+                                ]
+                              );
+                            }}
+                          >
+                            <Text style={styles.viewDetailsText}>Accept Order (for Restaurant)</Text>
+                          </TouchableOpacity>
+                        )}
                         <TouchableOpacity
                           style={styles.viewDetailsBtn}
                           onPress={() => navigation.navigate("ManagerOrderDetails", { orderId: order.id })}

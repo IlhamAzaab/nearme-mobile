@@ -1,6 +1,6 @@
 export const SIGNUP_FLOW_STATE_KEY = "@auth:signupFlowState";
 
-const SIGNUP_FLOW_ROUTES = new Set(["Signup", "VerifyOtp", "CompleteProfile"]);
+const SIGNUP_FLOW_ROUTES = new Set(["Signup", "VerifyOtp", "CompleteProfile", "AddressPicker"]);
 
 export function isSignupFlowRoute(routeName) {
   return SIGNUP_FLOW_ROUTES.has(String(routeName || ""));
@@ -54,6 +54,13 @@ export function sanitizeSignupFlowState(rawState) {
         ...incomingParams,
         prefillPhone: phone,
       },
+    };
+  }
+
+  if (routeName === "AddressPicker") {
+    return {
+      routeName,
+      params: { ...incomingParams },
     };
   }
 

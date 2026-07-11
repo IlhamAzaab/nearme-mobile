@@ -35,7 +35,7 @@ export default function FavouritesScreen({ navigation }) {
       <View style={st.card}>
         <View style={st.imgWrap}>
           {item.image_url ? (
-            <OptimizedImage uri={item.image_url} style={st.img} transition={100} />
+            <OptimizedImage uri={item.image_url} style={st.img} transition={100} cloudinaryPreset="card" />
           ) : (
             <View style={st.imgFallback}>
               <Ionicons name="fast-food" size={24} color="#06C168" />

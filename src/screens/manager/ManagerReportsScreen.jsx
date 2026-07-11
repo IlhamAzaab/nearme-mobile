@@ -65,6 +65,14 @@ const ManagerReportsScreen = ({ navigation }) => {
       iconColor: "#E11D48",
       screen: "CustomerReports",
     },
+    {
+      icon: "pricetag-outline",
+      title: "Offers Management",
+      desc: "Create and manage food-specific banner offers",
+      iconBg: "#FEF3C7",
+      iconColor: "#D97706",
+      screen: "OfferManagement",
+    },
   ];
 
   const reportCards = [

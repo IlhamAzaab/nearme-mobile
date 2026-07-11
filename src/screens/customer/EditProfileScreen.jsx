@@ -156,7 +156,7 @@ export default function EditProfileScreen({ navigation, route }) {
           <View style={st.avatarSection}>
             <Pressable onPress={pickImage} style={st.avatarPress}>
               {profilePic ? (
-                <OptimizedImage uri={profilePic} style={st.avatarImg} />
+                <OptimizedImage uri={profilePic} style={st.avatarImg} cloudinaryOptions={{ width: 200, height: 200, crop: "fill" }} />
               ) : (
                 <View style={st.avatarFallback}>
                   <Text style={st.avatarInitial}>{initial}</Text>

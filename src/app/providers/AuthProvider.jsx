@@ -47,6 +47,7 @@ export function AuthProvider({ children }) {
   const resetToLoggedOutState = useCallback(async () => {
     try {
       await clearAuthSession();
+      await AsyncStorage.setItem("hasLoggedOut", "true");
     } catch (error) {
       console.error("Auth clear session failed:", error);
     }
@@ -100,6 +101,7 @@ export function AuthProvider({ children }) {
       const userEmail = await AsyncStorage.getItem("userEmail");
       const userId = await AsyncStorage.getItem("userId");
       const profileDone = await AsyncStorage.getItem("profileCompleted");
+      const hasLoggedOut = await AsyncStorage.getItem("hasLoggedOut");
       const isCustomerProfileComplete = profileDone === "true";
 
       if (token && role) {
@@ -110,12 +112,8 @@ export function AuthProvider({ children }) {
           String(role).toLowerCase() === "customer" &&
           !isCustomerProfileComplete
         ) {
-          setAuthInitialRoute("CompleteProfile");
-          setAuthInitialParams(
-            pendingSignupFlow?.routeName === "CompleteProfile"
-              ? pendingSignupFlow.params
-              : null,
-          );
+          setAuthInitialRoute(pendingSignupFlow?.routeName || "CompleteProfile");
+          setAuthInitialParams(pendingSignupFlow?.params || null);
         } else {
           setAuthInitialRoute("Login");
           setAuthInitialParams(null);
@@ -131,8 +129,11 @@ export function AuthProvider({ children }) {
         if (pendingSignupFlow) {
           setAuthInitialRoute(pendingSignupFlow.routeName);
           setAuthInitialParams(pendingSignupFlow.params || null);
-        } else {
+        } else if (hasLoggedOut === "true") {
           setAuthInitialRoute("Login");
+          setAuthInitialParams(null);
+        } else {
+          setAuthInitialRoute("Signup");
           setAuthInitialParams(null);
         }
       }

@@ -1610,7 +1610,7 @@ const DriverCard = React.memo(({ driver }) => {
     <View style={st.driverCard}>
       <View style={st.driverAvatarWrap}>
         {photoUri ? (
-          <OptimizedImage uri={photoUri} style={st.driverAvatar} />
+          <OptimizedImage uri={photoUri} style={st.driverAvatar} cloudinaryOptions={{ width: 100, height: 100, crop: "fill" }} />
         ) : (
           <View style={st.driverAvatarFallback}>
             <Ionicons name="person" size={20} color="#06C168" />

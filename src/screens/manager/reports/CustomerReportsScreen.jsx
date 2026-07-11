@@ -213,11 +213,14 @@ const CustomerReportsScreen = () => {
                 { label: "Total", value: summary.total_customers || 0 },
                 { label: "With Orders", value: summary.with_orders || 0 },
                 { label: "No Orders", value: summary.without_orders || 0 },
-                { label: "Suspended", value: summary.suspended_customers || 0 },
+                { label: "Today", value: summary.today_created || 0, subtext: `+${summary.today_ordered || 0} Ordered` },
               ].map((m, i) => (
                 <View key={i} style={styles.metricCard}>
                   <Text style={styles.metricLabel}>{m.label}</Text>
                   <Text style={styles.metricValue}>{m.value}</Text>
+                  {m.subtext && (
+                    <Text style={styles.metricSubtext}>{m.subtext}</Text>
+                  )}
                 </View>
               ))}
             </View>
@@ -457,6 +460,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#04553C",
     marginTop: 4,
+  },
+  metricSubtext: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#0F766E",
+    marginTop: 2,
   },
   filtersCard: {
     backgroundColor: "#fff",

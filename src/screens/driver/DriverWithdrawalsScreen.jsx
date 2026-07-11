@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Modal,
   RefreshControl,
   ScrollView,
@@ -22,6 +21,7 @@ import DriverScreenHeader from "../../components/driver/DriverScreenHeader";
 import { DriverDashboardLoadingSkeleton } from "../../components/driver/DriverAppLoadingSkeletons";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
+import OptimizedImage from "../../components/common/OptimizedImage";
 
 const SRI_LANKA_TIME_ZONE = "Asia/Colombo";
 
@@ -438,10 +438,11 @@ export default function DriverWithdrawalsScreen({ navigation, route }) {
                               })
                             }
                           >
-                            <Image
-                              source={{ uri: selectedPayment.proof_url }}
+                            <OptimizedImage
+                              uri={selectedPayment.proof_url}
                               style={s.receiptImage}
-                              resizeMode="cover"
+                              contentFit="cover"
+                              cloudinaryOptions={{ width: 400 }}
                             />
                             <View style={s.receiptPreviewFooter}>
                               <Text style={s.receiptPreviewHint}>

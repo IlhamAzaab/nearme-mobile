@@ -22,6 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import FreeMapView from "../../components/maps/FreeMapView";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
+import OptimizedImage from "../../components/common/OptimizedImage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -560,9 +561,10 @@ export default function Settings() {
           <View style={styles.logoContainer}>
             <View style={styles.logoPreview}>
               {restaurantFormData.logo_url ? (
-                <Image
-                  source={{ uri: restaurantFormData.logo_url }}
+                <OptimizedImage
+                  uri={restaurantFormData.logo_url}
                   style={styles.logoImage}
+                  cloudinaryOptions={{ width: 200, height: 200, crop: "fill" }}
                 />
               ) : (
                 <Text style={styles.noImageText}>No logo</Text>
@@ -592,9 +594,10 @@ export default function Settings() {
           <Text style={styles.inputLabel}>Cover Image</Text>
           <View style={styles.coverPreview}>
             {restaurantFormData.cover_image_url ? (
-              <Image
-                source={{ uri: restaurantFormData.cover_image_url }}
+              <OptimizedImage
+                uri={restaurantFormData.cover_image_url}
                 style={styles.coverImage}
+                cloudinaryPreset="hero"
               />
             ) : (
               <Text style={styles.noImageText}>No cover image</Text>

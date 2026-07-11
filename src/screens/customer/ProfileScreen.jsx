@@ -152,7 +152,7 @@ export default function ProfileScreen({ navigation }) {
         <View style={st.profileCard}>
           <View style={st.avatarWrap}>
             {profilePic ? (
-              <OptimizedImage uri={profilePic} style={st.avatarImg} />
+              <OptimizedImage uri={profilePic} style={st.avatarImg} cloudinaryOptions={{ width: 150, height: 150, crop: "fill" }} />
             ) : (
               <View style={st.avatarFallback}>
                 <Text style={st.avatarInitial}>{initial}</Text>

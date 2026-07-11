@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   ActivityIndicator,
   Linking,
@@ -15,6 +16,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
 import OptimizedImage from "../../components/common/OptimizedImage";
+import pushNotificationService from "../../services/pushNotificationService";
 
 export default function PendingDeliveriesScreen() {
   const [loading, setLoading] = useState(true);
@@ -24,6 +26,15 @@ export default function PendingDeliveriesScreen() {
   const [submittingTip, setSubmittingTip] = useState({});
   const [successMap, setSuccessMap] = useState({});
   const [expandedId, setExpandedId] = useState(null);
+
+  // --- STOP ALARM ON FOCUS ---
+  useFocusEffect(
+    useCallback(() => {
+      if (pushNotificationService?.stopAlarm) {
+        pushNotificationService.stopAlarm().catch(() => {});
+      }
+    }, [])
+  );
 
   const fetchDeliveries = useCallback(async () => {
     try {

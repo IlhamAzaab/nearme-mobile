@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -394,41 +395,21 @@ export default function CartScreen({ navigation, route }) {
         return;
       }
 
-      const profileRes = await fetch(`${API_BASE_URL}/cart/customer-profile`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!profileRes.ok) {
-        navigation.navigate("AddressPicker", {
-          cartId,
-          redirectTo: "Checkout",
-        });
-        return;
+      const cart = safeCarts.find(c => String(c.id) === String(cartId));
+      if (cart) {
+        const unavailableItems = asArray(cart.items).filter(item => item.is_available === false);
+        if (unavailableItems.length > 0) {
+          Alert.alert(
+            "Items Unavailable",
+            `Some items in your cart are currently not available (${unavailableItems.map(i => i.food_name).join(", ")}). Please remove them to proceed with checkout.`
+          );
+          return;
+        }
       }
 
-      const profileData = await profileRes.json().catch(() => ({}));
-
-      const customer = profileData?.customer || {};
-      const hasSavedPin = hasValidCoordinates(
-        customer?.latitude,
-        customer?.longitude,
-      );
-
-      if (hasSavedPin) {
-        navigation.navigate("Checkout", { cartId });
-        return;
-      }
-
-      navigation.navigate("AddressPicker", {
-        cartId,
-        redirectTo: "Checkout",
-      });
+      navigation.navigate("Checkout", { cartId });
     } catch (checkoutNavError) {
-      console.error("Checkout pre-check failed, redirecting to map pin:", checkoutNavError);
-      navigation.navigate("AddressPicker", {
-        cartId,
-        redirectTo: "Checkout",
-      });
+      console.error("Checkout navigation failed:", checkoutNavError);
     }
   };
 
@@ -639,27 +620,44 @@ export default function CartScreen({ navigation, route }) {
                     styles.itemRowBorder,
                 ]}
               >
-                <OptimizedImage
-                  uri={
-                    item.food_image_url ||
-                    "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400"
-                  }
-                  style={styles.itemImage}
-                  transition={110}
-                />
+                {item.food_image_url ? (
+                  <OptimizedImage
+                    uri={item.food_image_url}
+                    style={styles.itemImage}
+                    transition={110}
+                  />
+                ) : (
+                  <LinearGradient
+                    colors={[PRIMARY, "#059B56"]}
+                    style={[styles.itemImage, { justifyContent: "center", alignItems: "center" }]}
+                  >
+                    <Ionicons
+                      name="restaurant-outline"
+                      size={24}
+                      color="rgba(255,255,255,0.6)"
+                    />
+                  </LinearGradient>
+                )}
                 <View style={styles.itemDetails}>
                   <View style={styles.itemTopRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.itemName} numberOfLines={1}>
                         {item.food_name}
                       </Text>
-                      <View style={styles.sizeTag}>
-                        <Text style={styles.sizeTagText}>
-                          {String(item.size || "Regular")
-                            .charAt(0)
-                            .toUpperCase() +
-                            String(item.size || "Regular").slice(1)}
-                        </Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <View style={styles.sizeTag}>
+                          <Text style={styles.sizeTagText}>
+                            {String(item.size || "Regular")
+                              .charAt(0)
+                              .toUpperCase() +
+                              String(item.size || "Regular").slice(1)}
+                          </Text>
+                        </View>
+                        {item.is_available === false && (
+                          <View style={[styles.sizeTag, { backgroundColor: "#FEE2E2", borderColor: "#FEE2E2" }]}>
+                            <Text style={[styles.sizeTagText, { color: "#EF4444" }]}>Unavailable</Text>
+                          </View>
+                        )}
                       </View>
                     </View>
                     <Text style={styles.itemPrice}>

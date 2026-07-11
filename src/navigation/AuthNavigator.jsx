@@ -6,6 +6,7 @@ import VerifyEmailScreen from "../screens/auth/VerifyEmailScreen";
 import CompleteProfileScreen from "../screens/auth/CompleteProfileScreen";
 import VerifyOtpScreen from "../screens/auth/VerifyOtpScreen";
 import WebViewScreen from "../screens/common/WebViewScreen";
+import AddressPickerScreen from "../screens/customer/AddressPickerScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -17,6 +18,8 @@ export default function AuthNavigator({
     initialRouteName === "VerifyOtp" ? initialRouteParams : undefined;
   const completeProfileInitialParams =
     initialRouteName === "CompleteProfile" ? initialRouteParams : undefined;
+  const addressPickerInitialParams =
+    initialRouteName === "AddressPicker" ? initialRouteParams : undefined;
 
   return (
     <Stack.Navigator
@@ -40,6 +43,12 @@ export default function AuthNavigator({
         name="VerifyOtp"
         component={VerifyOtpScreen}
         initialParams={verifyOtpInitialParams}
+        options={{ gestureEnabled: false, fullScreenGestureEnabled: false }}
+      />
+      <Stack.Screen 
+        name="AddressPicker" 
+        component={AddressPickerScreen} 
+        initialParams={addressPickerInitialParams}
         options={{ gestureEnabled: false, fullScreenGestureEnabled: false }}
       />
       <Stack.Screen name="WebView" component={WebViewScreen} />

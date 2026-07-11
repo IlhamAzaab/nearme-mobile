@@ -1,14 +1,18 @@
 import { prefetchImageUrls } from "../lib/imageCache";
+import { applyCloudinaryTransformations } from "../lib/cloudinaryImage";
 
 let cachedRestaurants = [];
 let cachedFoodItems = [];
+
+const PRELOADER_TRANSFORM = { width: 720 };
 
 function collectUris(item, keys) {
   if (!item || !Array.isArray(keys)) return [];
 
   return keys
     .map((key) => String(item?.[key] || "").trim())
-    .filter((uri) => /^https?:\/\//i.test(uri));
+    .filter((uri) => /^https?:\/\//i.test(uri))
+    .map((uri) => applyCloudinaryTransformations(uri, PRELOADER_TRANSFORM));
 }
 
 export function setImageCatalog(restaurants = [], foodItems = []) {
@@ -65,8 +69,9 @@ export async function preloadAllAppImages(restaurants = [], foodItems = []) {
   }
 
   console.log(
-    `[ImagePreloader] Preloading ${uniqueUrls.length} Cloudinary images...`,
+    `[ImagePreloader] Preloading ${uniqueUrls.length} optimized Cloudinary images...`,
   );
   await prefetchImageUrls(uniqueUrls);
   console.log("[ImagePreloader] Done. All images cached to disk.");
 }
+

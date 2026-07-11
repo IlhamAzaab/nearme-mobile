@@ -15,6 +15,7 @@ import OptimizedImage from "../../components/common/OptimizedImage";
 import { API_BASE_URL } from "../../constants/api";
 import { prefetchImageUrls } from "../../lib/imageCache";
 import { fetchJsonWithCache, getCachedJson } from "../../lib/publicDataCache";
+import { getAccessToken } from "../../lib/authStorage";
 import {
   fuzzySearchFoods,
   fuzzySearchRestaurants,
@@ -61,6 +62,7 @@ export default function HomeSearchScreen({ navigation, route }) {
   const [loadingFoods, setLoadingFoods] = useState(
     () => getCachedFoodsList().length === 0,
   );
+  const [serviceUnavailableConfig, setServiceUnavailableConfig] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -70,13 +72,23 @@ export default function HomeSearchScreen({ navigation, route }) {
         const data = await fetchJsonWithCache(
           RESTAURANTS_CACHE_KEY,
           async () => {
-            const res = await fetch(`${API_BASE_URL}/public/restaurants`);
+            const token = await getAccessToken();
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            const res = await fetch(`${API_BASE_URL}/public/restaurants`, { headers });
             return res.json().catch(() => ({}));
           },
           { ttlMs: 120000 },
         );
 
         if (!mounted) return;
+        
+        if (data?.service_unavailable) {
+          setServiceUnavailableConfig({
+            reason: data.reason,
+            reopenTime: data.reopen_time
+          });
+        }
+        
         const restaurants = Array.isArray(data?.restaurants)
           ? data.restaurants
           : [];
@@ -100,13 +112,23 @@ export default function HomeSearchScreen({ navigation, route }) {
         const data = await fetchJsonWithCache(
           FOODS_CACHE_KEY,
           async () => {
-            const res = await fetch(`${API_BASE_URL}/public/foods`);
+            const token = await getAccessToken();
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            const res = await fetch(`${API_BASE_URL}/public/foods`, { headers });
             return res.json().catch(() => ({}));
           },
           { ttlMs: 120000 },
         );
 
         if (!mounted) return;
+        
+        if (data?.service_unavailable) {
+          setServiceUnavailableConfig({
+            reason: data.reason,
+            reopenTime: data.reopen_time
+          });
+        }
+
         const foods = Array.isArray(data?.foods) ? data.foods : [];
         setAllFoods(foods);
         prefetchImageUrls(foods.map((item) => item?.image_url)).catch(() => {});
@@ -306,7 +328,23 @@ export default function HomeSearchScreen({ navigation, route }) {
           </Pressable>
         </View>
 
-        {isLoading ? (
+        {serviceUnavailableConfig ? (
+          <View style={[styles.centerBox, { borderColor: "#FECACA", backgroundColor: "#FEF2F2", margin: 16, borderRadius: 16, paddingVertical: 40, flex: 0 }]}>
+            <View style={{ backgroundColor: "#FEE2E2", borderColor: "#FCA5A5", borderWidth: 1, width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="cafe-outline" size={40} color="#EF4444" />
+            </View>
+            <Text style={[styles.centerTitle, { fontSize: 20, color: "#1E293B", marginTop: 8 }]}>We'll Be Right Back</Text>
+            <Text style={[styles.centerText, { paddingHorizontal: 10 }]}>
+              {serviceUnavailableConfig.reason || "We're currently taking a short break or performing maintenance."}
+            </Text>
+            {serviceUnavailableConfig.reopenTime && (
+              <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#fff", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12, marginTop: 12, borderWidth: 1, borderColor: "#FECACA", gap: 8 }}>
+                <Ionicons name="time-outline" size={20} color="#B91C1C" />
+                <Text style={{ color: "#B91C1C", fontSize: 15, fontWeight: "600" }}>Reopening at {serviceUnavailableConfig.reopenTime}</Text>
+              </View>
+            )}
+          </View>
+        ) : isLoading ? (
           <View style={styles.centerBox}>
             <Text style={styles.centerText}>Searching...</Text>
           </View>

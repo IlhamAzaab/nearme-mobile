@@ -11,6 +11,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Switch,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
@@ -36,11 +37,37 @@ function parseTimeToDecimal(timeStr) {
   return h + m / 60;
 }
 
+// Reusable field component
+const Field = ({
+  label,
+  value,
+  onChangeText,
+  hint,
+  keyboardType = "decimal-pad",
+}) => (
+  <View style={styles.field}>
+    <Text style={styles.fieldLabel}>{label}</Text>
+    <TextInput
+      style={styles.input}
+      value={String(value)}
+      onChangeText={onChangeText}
+      keyboardType={keyboardType}
+      placeholderTextColor="#94A3B8"
+    />
+    {hint && <Text style={styles.fieldHint}>{hint}</Text>}
+  </View>
+);
+
 const OperationsConfigScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
+
+  // Section 0: Service Availability
+  const [isServiceAvailable, setIsServiceAvailable] = useState(true);
+  const [serviceReopenTime, setServiceReopenTime] = useState("");
+  const [serviceUnavailableReason, setServiceUnavailableReason] = useState("");
 
   // Section 1: Driver Earnings
   const [ratePerKm, setRatePerKm] = useState("40");
@@ -86,6 +113,14 @@ const OperationsConfigScreen = ({ navigation }) => {
   const [dayEnd, setDayEnd] = useState("7:00 PM");
   const [nightStart, setNightStart] = useState("6:00 PM");
   const [nightEnd, setNightEnd] = useState("6:00 AM");
+
+  // Section 9: Restaurant Menu Hours
+  const [breakfastStart, setBreakfastStart] = useState("5:00 AM");
+  const [breakfastEnd, setBreakfastEnd] = useState("11:59 AM");
+  const [lunchStart, setLunchStart] = useState("12:01 PM");
+  const [lunchEnd, setLunchEnd] = useState("6:00 PM");
+  const [dinnerStart, setDinnerStart] = useState("6:00 PM");
+  const [dinnerEnd, setDinnerEnd] = useState("5:00 AM");
 
   // Section 7: Order Distance Constraints
   const [orderDistanceConstraints, setOrderDistanceConstraints] = useState([
@@ -171,6 +206,13 @@ const OperationsConfigScreen = ({ navigation }) => {
       setNightStart(formatTime(parseFloat(config.night_shift_start)));
       setNightEnd(formatTime(parseFloat(config.night_shift_end)));
 
+      setBreakfastStart(formatTime(parseFloat(config.restaurant_breakfast_start || 5.0)));
+      setBreakfastEnd(formatTime(parseFloat(config.restaurant_breakfast_end || 11.98)));
+      setLunchStart(formatTime(parseFloat(config.restaurant_lunch_start || 12.01)));
+      setLunchEnd(formatTime(parseFloat(config.restaurant_lunch_end || 18.0)));
+      setDinnerStart(formatTime(parseFloat(config.restaurant_dinner_start || 18.0)));
+      setDinnerEnd(formatTime(parseFloat(config.restaurant_dinner_end || 5.0)));
+
       if (config.order_distance_constraints) {
         const odc =
           typeof config.order_distance_constraints === "string"
@@ -190,6 +232,10 @@ const OperationsConfigScreen = ({ navigation }) => {
       setLaunchPromoBeyondKmRate(
         String(config.launch_promo_beyond_km_rate ?? 40),
       );
+
+      setIsServiceAvailable(config.is_service_available !== false);
+      setServiceReopenTime(config.service_reopen_time || "");
+      setServiceUnavailableReason(config.service_unavailable_reason || "");
 
       fetchLaunchPromoCustomers();
     } catch (err) {
@@ -246,6 +292,12 @@ const OperationsConfigScreen = ({ navigation }) => {
         day_shift_end: parseTimeToDecimal(dayEnd),
         night_shift_start: parseTimeToDecimal(nightStart),
         night_shift_end: parseTimeToDecimal(nightEnd),
+        restaurant_breakfast_start: parseTimeToDecimal(breakfastStart),
+        restaurant_breakfast_end: parseTimeToDecimal(breakfastEnd),
+        restaurant_lunch_start: parseTimeToDecimal(lunchStart),
+        restaurant_lunch_end: parseTimeToDecimal(lunchEnd),
+        restaurant_dinner_start: parseTimeToDecimal(dinnerStart),
+        restaurant_dinner_end: parseTimeToDecimal(dinnerEnd),
         order_distance_constraints: orderDistanceConstraints.map((c) => ({
           min_km: parseFloat(c.min_km) || 0,
           max_km: parseFloat(c.max_km) || 0,
@@ -257,13 +309,22 @@ const OperationsConfigScreen = ({ navigation }) => {
         launch_promo_max_km: parseFloat(launchPromoMaxKm) || 5,
         launch_promo_beyond_km_rate:
           parseFloat(launchPromoBeyondKmRate) || 40,
+        is_service_available: isServiceAvailable,
+        service_reopen_time: serviceReopenTime,
+        service_unavailable_reason: serviceUnavailableReason,
       };
 
       if (
         body.day_shift_start === null ||
         body.day_shift_end === null ||
         body.night_shift_start === null ||
-        body.night_shift_end === null
+        body.night_shift_end === null ||
+        body.restaurant_breakfast_start === null ||
+        body.restaurant_breakfast_end === null ||
+        body.restaurant_lunch_start === null ||
+        body.restaurant_lunch_end === null ||
+        body.restaurant_dinner_start === null ||
+        body.restaurant_dinner_end === null
       ) {
         setError("Invalid time format. Use HH:MM AM/PM (e.g. 5:00 AM)");
         setSaving(false);
@@ -412,26 +473,7 @@ const OperationsConfigScreen = ({ navigation }) => {
     );
   }
 
-  // Reusable field component
-  const Field = ({
-    label,
-    value,
-    onChangeText,
-    hint,
-    keyboardType = "decimal-pad",
-  }) => (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        style={styles.input}
-        value={String(value)}
-        onChangeText={onChangeText}
-        keyboardType={keyboardType}
-        placeholderTextColor="#94A3B8"
-      />
-      {hint && <Text style={styles.fieldHint}>{hint}</Text>}
-    </View>
-  );
+
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
@@ -461,6 +503,59 @@ const OperationsConfigScreen = ({ navigation }) => {
               </TouchableOpacity>
             </View>
           )}
+
+          {/* SECTION 0: Service Availability */}
+          <View style={styles.sectionCard}>
+            <View
+              style={[
+                styles.sectionHeader,
+                { backgroundColor: "rgba(255, 100, 100, 0.08)" },
+              ]}
+            >
+              <View style={styles.sectionHeaderRow}>
+                <Ionicons name="power-outline" size={18} color="#FF3B30" />
+                <Text style={styles.sectionTitle}>Global App Availability</Text>
+              </View>
+              <Text style={styles.sectionDesc}>
+                Turn off to block customers from using the app entirely.
+              </Text>
+            </View>
+            <View style={styles.sectionBody}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: "600", color: "#1E293B" }}>Service Available</Text>
+                  <Text style={{ fontSize: 13, color: "#64748B", marginTop: 2 }}>{isServiceAvailable ? "Customers can order" : "Customers are blocked"}</Text>
+                </View>
+                <Switch
+                  value={isServiceAvailable}
+                  onValueChange={setIsServiceAvailable}
+                  trackColor={{ false: "#E2E8F0", true: "#06C168" }}
+                />
+              </View>
+              {!isServiceAvailable && (
+                <>
+                  <View style={styles.fieldRow}>
+                    <Field
+                      label="Reason (Optional)"
+                      value={serviceUnavailableReason}
+                      onChangeText={setServiceUnavailableReason}
+                      hint="E.g. Heavy Rain, Maintenance"
+                      keyboardType="default"
+                    />
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <Field
+                      label="Reopen Time (Optional)"
+                      value={serviceReopenTime}
+                      onChangeText={setServiceReopenTime}
+                      hint="E.g. 5:00 PM, Tomorrow at 8 AM"
+                      keyboardType="default"
+                    />
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
 
           {/* SECTION 1: Driver Earnings */}
           <View style={styles.sectionCard}>
@@ -889,6 +984,142 @@ const OperationsConfigScreen = ({ navigation }) => {
               <Text style={styles.fieldHint}>
                 Format: HH:MM AM/PM (e.g. 5:00 AM). Full-time drivers are always
                 active.
+              </Text>
+            </View>
+          </View>
+
+          {/* SECTION 9: Restaurant Menu Hours */}
+          <View style={styles.sectionCard}>
+            <View
+              style={[
+                styles.sectionHeader,
+                { backgroundColor: "rgba(236,72,153,0.06)" },
+              ]}
+            >
+              <View style={styles.sectionHeaderRow}>
+                <Ionicons name="restaurant-outline" size={18} color="#EC4899" />
+                <Text style={styles.sectionTitle}>Restaurant Menu Hours</Text>
+                <View style={[styles.badge, { backgroundColor: "#FCE7F3" }]}>
+                  <Text style={[styles.badgeText, { color: "#EC4899" }]}>
+                    Customer Facing
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.sectionDesc}>
+                Set times when Breakfast, Lunch, and Dinner menus are available.
+              </Text>
+            </View>
+            <View style={styles.sectionBody}>
+              <View style={styles.fieldRow}>
+                <View
+                  style={[
+                    styles.shiftCard,
+                    {
+                      backgroundColor: "rgba(251,191,36,0.06)",
+                      borderColor: "#FEF3C7",
+                    },
+                  ]}
+                >
+                  <View style={styles.shiftHeader}>
+                    <Ionicons name="cafe-outline" size={16} color="#F59E0B" />
+                    <Text style={styles.shiftTitle}>Breakfast</Text>
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>Start</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={breakfastStart}
+                      onChangeText={setBreakfastStart}
+                      placeholder="5:00 AM"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>End</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={breakfastEnd}
+                      onChangeText={setBreakfastEnd}
+                      placeholder="11:59 AM"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    styles.shiftCard,
+                    {
+                      backgroundColor: "rgba(16,185,129,0.06)",
+                      borderColor: "#D1FAE5",
+                    },
+                  ]}
+                >
+                  <View style={styles.shiftHeader}>
+                    <Ionicons name="fast-food-outline" size={16} color="#10B981" />
+                    <Text style={styles.shiftTitle}>Lunch</Text>
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>Start</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={lunchStart}
+                      onChangeText={setLunchStart}
+                      placeholder="12:01 PM"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>End</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={lunchEnd}
+                      onChangeText={setLunchEnd}
+                      placeholder="6:00 PM"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                </View>
+              </View>
+
+              <View style={[styles.fieldRow, { marginTop: 12 }]}>
+                <View
+                  style={[
+                    styles.shiftCard,
+                    {
+                      backgroundColor: "rgba(99,102,241,0.06)",
+                      borderColor: "#E0E7FF",
+                    },
+                  ]}
+                >
+                  <View style={styles.shiftHeader}>
+                    <Ionicons name="moon-outline" size={16} color="#6366F1" />
+                    <Text style={styles.shiftTitle}>Dinner</Text>
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>Start</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={dinnerStart}
+                      onChangeText={setDinnerStart}
+                      placeholder="6:00 PM"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>End</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={dinnerEnd}
+                      onChangeText={setDinnerEnd}
+                      placeholder="5:00 AM"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                </View>
+              </View>
+              <Text style={styles.fieldHint}>
+                Format: HH:MM AM/PM. Dinner typically spans overnight.
               </Text>
             </View>
           </View>

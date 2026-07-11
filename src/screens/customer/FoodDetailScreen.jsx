@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+const GREEN = "#06C168";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -110,12 +112,52 @@ export default function FoodDetailScreen({ route, navigation }) {
   const [selectedSize, setSelectedSize] = useState("regular");
   const [quantity, setQuantity] = useState(1);
   const [addingToCart, setAddingToCart] = useState(false);
+  const [countdown, setCountdown] = useState(null);
+
+  useEffect(() => {
+    if (food?.is_available === false && food.next_available_seconds > 0) {
+      setCountdown(food.next_available_seconds);
+      const interval = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            fetchFood(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setCountdown(null);
+    }
+  }, [food]);
+
+  const formatCountdown = (totalSeconds) => {
+    if (!totalSeconds) return "";
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = Math.floor(totalSeconds % 60);
+    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
 
   useEffect(() => {
     fetchFood();
-  }, [restaurantId, foodId]);
+    
+    // Auto refresh every 2 minutes ONLY if food is currently unavailable
+    let interval;
+    if (food && !food.is_available) {
+      interval = setInterval(() => {
+        fetchFood(true);
+      }, 120000); // 2 minutes
+    }
 
-  const fetchFood = async () => {
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [restaurantId, foodId, food?.is_available]);
+
+  const fetchFood = async (forceRefresh = false) => {
     try {
       const shouldShowLoading = !(restaurant && food);
       if (shouldShowLoading) {
@@ -136,7 +178,7 @@ export default function FoodDetailScreen({ route, navigation }) {
           }
           return payload;
         },
-        { ttlMs: 180000 },
+        { ttlMs: 180000, forceRefresh },
       );
       setRestaurant(restaurantData.restaurant);
 
@@ -153,7 +195,7 @@ export default function FoodDetailScreen({ route, navigation }) {
           }
           return payload;
         },
-        { ttlMs: 180000 },
+        { ttlMs: 180000, forceRefresh },
       );
 
       setFood(foodData.food);
@@ -273,19 +315,8 @@ export default function FoodDetailScreen({ route, navigation }) {
       DeviceEventEmitter.emit("cart:changed");
 
       if (goToCheckout) {
-        // Navigate to Cart and auto-select this restaurant's cart
         const cartId = data.cartId || data.cart_id || data.cart?.id;
-        navigation.navigate("MainTabs", {
-          screen: "Cart",
-          params: {
-            screen: "CartMain",
-            params: {
-              buyNowCartId: cartId || undefined,
-              buyNowRestaurantId: restaurantId,
-              buyNowTs: Date.now(),
-            },
-          },
-        });
+        navigation.navigate("Checkout", { cartId });
         return;
       }
 
@@ -342,15 +373,25 @@ export default function FoodDetailScreen({ route, navigation }) {
         {/* Hero Image */}
         <View style={styles.heroWrap}>
           <View style={styles.heroContainer}>
-            <OptimizedImage
-              uri={
-                food.image_url ||
-                "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=900&q=80"
-              }
-              style={styles.heroImg}
-              transition={120}
-              cloudinaryPreset="hero"
-            />
+            {food.image_url ? (
+              <OptimizedImage
+                uri={food.image_url}
+                style={styles.heroImg}
+                transition={120}
+                cloudinaryPreset="hero"
+              />
+            ) : (
+              <LinearGradient
+                colors={[GREEN, "#06C168"]}
+                style={[styles.heroImg, { justifyContent: 'center', alignItems: 'center' }]}
+              >
+                <Ionicons
+                  name="restaurant-outline"
+                  size={48}
+                  color="rgba(255,255,255,0.6)"
+                />
+              </LinearGradient>
+            )}
             {/* Restaurant Badge */}
             <View style={styles.restaurantBadge}>
               <View style={styles.restaurantBadgeIcon}>
@@ -377,7 +418,9 @@ export default function FoodDetailScreen({ route, navigation }) {
                 </View>
                 {food.available_time?.length > 0 && (
                   <Text style={styles.unavailSubText}>
-                    Available during: {food.available_time.join(", ")}
+                    {countdown !== null
+                      ? `Available in ${formatCountdown(countdown)}`
+                      : `Available during: ${food.available_time.join(", ")}`}
                   </Text>
                 )}
               </View>
@@ -484,7 +527,8 @@ export default function FoodDetailScreen({ route, navigation }) {
               <View style={styles.quantityStepper}>
                 <Pressable
                   onPress={() => setQuantity(Math.max(1, quantity - 1))}
-                  style={styles.qtyBtnMinus}
+                  style={[styles.qtyBtnMinus, food.is_available === false && { opacity: 0.5 }]}
+                  disabled={food.is_available === false}
                 >
                   <Ionicons name="remove" size={20} color="#0F172A" />
                 </Pressable>
@@ -493,7 +537,8 @@ export default function FoodDetailScreen({ route, navigation }) {
                 </Text>
                 <Pressable
                   onPress={() => setQuantity(quantity + 1)}
-                  style={styles.qtyBtnPlus}
+                  style={[styles.qtyBtnPlus, food.is_available === false && { opacity: 0.5 }]}
+                  disabled={food.is_available === false}
                 >
                   <Ionicons name="add" size={20} color="#fff" />
                 </Pressable>
@@ -505,12 +550,12 @@ export default function FoodDetailScreen({ route, navigation }) {
           <View style={styles.bottomActions}>
             <View style={styles.btnRow}>
               <Pressable
-                disabled={addingToCart}
+                disabled={addingToCart || food.is_available === false}
                 onPress={() => addToCart({ goToCheckout: true })}
                 style={({ pressed }) => [
                   styles.buyNowBtn,
                   pressed && { opacity: 0.8 },
-                  addingToCart && { opacity: 0.6 },
+                  (addingToCart || food.is_available === false) && { opacity: 0.6, borderColor: "#CBD5E1" },
                 ]}
               >
                 <Text style={styles.buyNowText}>
@@ -518,12 +563,12 @@ export default function FoodDetailScreen({ route, navigation }) {
                 </Text>
               </Pressable>
               <Pressable
-                disabled={addingToCart}
+                disabled={addingToCart || food.is_available === false}
                 onPress={() => addToCart()}
                 style={({ pressed }) => [
                   styles.addToCartBtn,
                   pressed && { opacity: 0.8 },
-                  addingToCart && { opacity: 0.6 },
+                  (addingToCart || food.is_available === false) && { opacity: 0.6, backgroundColor: "#94A3B8" },
                 ]}
               >
                 <Text style={styles.addToCartText}>

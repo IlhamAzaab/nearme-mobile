@@ -1,12 +1,11 @@
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   DeviceEventEmitter,
-  Image,
   Linking,
   Modal,
   Pressable,
@@ -23,6 +22,8 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
+import pushNotificationService from "../../services/pushNotificationService";
+import OptimizedImage from "../../components/common/OptimizedImage";
 import { useSocket } from "../../context/SocketContext";
 import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
 import { getAccessToken } from "../../lib/authStorage";
@@ -299,6 +300,15 @@ export default function Orders() {
 
   const slideAnim = useRef(new Animated.Value(400)).current;
   const pageEnterStyle = usePageEnterAnimation();
+
+  // Stop alarm when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (pushNotificationService?.stopAlarm) {
+        pushNotificationService.stopAlarm().catch(() => {});
+      }
+    }, [])
+  );
 
   const showBanner = (type, message) => {
     setBanner({ type, message });
@@ -724,6 +734,9 @@ export default function Orders() {
 
   const handleAcceptOrder = async (orderId) => {
     setProcessingOrderId(orderId);
+    if (pushNotificationService?.stopAlarm) {
+      pushNotificationService.stopAlarm().catch(() => {});
+    }
 
     try {
       await acceptOrderMutation.mutateAsync(orderId);
@@ -763,6 +776,9 @@ export default function Orders() {
 
     setRejectModal({ open: false, orderId: null });
     setProcessingOrderId(orderId);
+    if (pushNotificationService?.stopAlarm) {
+      pushNotificationService.stopAlarm().catch(() => {});
+    }
 
     try {
       await rejectOrderMutation.mutateAsync({
@@ -1154,9 +1170,10 @@ export default function Orders() {
                             style={styles.itemRowCard}
                           >
                             {item.food_image_url ? (
-                              <Image
-                                source={{ uri: item.food_image_url }}
+                              <OptimizedImage
+                                uri={item.food_image_url}
                                 style={styles.itemImage}
+                                cloudinaryOptions={{ width: 150, crop: "fill" }}
                               />
                             ) : (
                               <View style={styles.itemImageFallback}>
@@ -1605,9 +1622,10 @@ function OrderDetailsModal({
                       style={styles.detailItemCard}
                     >
                       {item.food_image_url ? (
-                        <Image
-                          source={{ uri: item.food_image_url }}
+                        <OptimizedImage
+                          uri={item.food_image_url}
                           style={styles.detailItemImage}
+                          cloudinaryOptions={{ width: 200, crop: "fill" }}
                         />
                       ) : (
                         <View style={styles.detailItemImageFallback}>

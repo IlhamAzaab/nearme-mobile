@@ -7,7 +7,6 @@ import {
   Animated,
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -23,6 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
 import usePageEnterAnimation from "../../hooks/usePageEnterAnimation";
 import { getAccessToken } from "../../lib/authStorage";
+import OptimizedImage from "../../components/common/OptimizedImage";
 
 const FOOD_CATEGORIES = [
   "Koththu",
@@ -289,7 +289,11 @@ export default function Products() {
       <View style={styles.productCardContent}>
         <View style={styles.productImageContainer}>
           {food.image_url ? (
-            <Image source={{ uri: food.image_url }} style={styles.productImage} />
+            <OptimizedImage
+              uri={food.image_url}
+              style={styles.productImage}
+              cloudinaryOptions={{ width: 200, crop: "fill" }}
+            />
           ) : (
             <View style={styles.noImagePlaceholder}>
               <Text style={styles.noImageText}>No img</Text>
@@ -824,9 +828,10 @@ function AddProductModal({ visible, food, onClose, onSave }) {
               <View style={modalStyles.imageSection}>
                 {formData.image_url ? (
                   <View style={modalStyles.previewWrap}>
-                    <Image
-                      source={{ uri: formData.image_url }}
+                    <OptimizedImage
+                      uri={formData.image_url}
                       style={modalStyles.previewImage}
+                      cloudinaryOptions={{ width: 400, crop: "fill" }}
                     />
 
                     <TouchableOpacity

@@ -66,7 +66,7 @@ const FoodCarousel3D = ({ items = [], onItemPress }) => {
                 onPress={() => onItemPress?.(item)}
               >
                 {item.image ? (
-                  <OptimizedImage uri={item.image} style={styles.image} />
+                  <OptimizedImage uri={item.image} style={styles.image} cloudinaryPreset="card" />
                 ) : (
                   <View style={[styles.image, styles.placeholder]}>
                     <Text style={styles.placeholderText}>🍽️</Text>

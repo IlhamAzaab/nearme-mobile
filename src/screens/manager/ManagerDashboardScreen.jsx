@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { useIsFocused, useNavigation, useFocusEffect } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import ManagerHeader from "../../components/manager/ManagerHeader";
 import { API_URL } from "../../config/env";
+import pushNotificationService from "../../services/pushNotificationService";
 
 const screenWidth = Dimensions.get("window").width;
 
@@ -60,6 +61,15 @@ export default function ManagerDashboardScreen() {
   const isFocused = useIsFocused();
   const queryClient = useQueryClient();
   const [userName, setUserName] = useState("");
+  // --- STOP ALARM ON FOCUS ---
+  useFocusEffect(
+    useCallback(() => {
+      if (pushNotificationService?.stopAlarm) {
+        pushNotificationService.stopAlarm().catch(() => {});
+      }
+    }, [])
+  );
+
   const EMPTY_STATS = useMemo(
     () => ({
       todayEarnings: 0,

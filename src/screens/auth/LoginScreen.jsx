@@ -478,7 +478,7 @@ export default function LoginScreen({ navigation }) {
                     value={email}
                     onChangeText={setEmail}
                     inactivePlaceholder="Email or Phone"
-                    activePlaceholder="Eg: 0751234567"
+                    activePlaceholder="Eg: 07XXXXXXXX or email@test.com"
                     keyboardType="email-address"
                     autoCapitalize="none"
                     leftIcon={<UserIcon size={20} color="#9CA3AF" />}

@@ -10,6 +10,8 @@ export function normalizeSriLankaPhone(phone) {
     normalized = `+${p}`;
   } else if (p.startsWith("0")) {
     normalized = `+94${p.slice(1)}`;
+  } else if (p.startsWith("7")) {
+    normalized = `+94${p}`;
   } else {
     return null;
   }
@@ -26,5 +28,6 @@ export function isPhoneLikeIdentifier(identifier) {
   const cleaned = String(identifier || "")
     .trim()
     .replace(/[\s-]/g, "");
-  return /^(\+94|94|0)7\d{8}$/.test(cleaned);
+  return /^(\+94|94|0)?7\d{8}$/.test(cleaned);
 }
+

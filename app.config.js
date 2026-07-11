@@ -15,12 +15,18 @@ export default {
   expo: {
     name: "Meezo",
     slug: "nearme-mobile",
-    version: "1.0.3",
+    version: "1.0.4",
     orientation: "portrait",
     icon: BRAND_ASSETS.appIcon,
     scheme: "nearmemobile",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
+    updates: {
+      url: "https://u.expo.dev/ae8e5d23-1d5a-4b87-81bf-feb46fe5dedb"
+    },
+    runtimeVersion: {
+      policy: "appVersion"
+    },
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.nearme.mobile",
@@ -35,7 +41,7 @@ export default {
     },
     android: {
       package: "com.nearme.mobile",
-      versionCode: 3,
+      versionCode: 4,
       // In EAS Build, the file-type env var contains the path to the temp file.
       // Locally, fall back to ./google-services.json for development.
       googleServicesFile:

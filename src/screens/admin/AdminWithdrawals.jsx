@@ -3,7 +3,6 @@ import { Feather } from "@expo/vector-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  Image,
   Modal,
   Pressable,
   RefreshControl,
@@ -19,6 +18,7 @@ import {
 } from "react-native-safe-area-context";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
+import OptimizedImage from "../../components/common/OptimizedImage";
 
 const DEFAULT_SUMMARY = {
   total_earnings: 0,
@@ -656,15 +656,14 @@ export default function AdminWithdrawals() {
                       )
                     }
                   >
-                    <Image
-                      source={{
-                        uri: getReceiptImageUrl(
-                          selectedPayment.proof_url,
-                          selectedPayment.proof_type,
-                        ),
-                      }}
+                    <OptimizedImage
+                      uri={getReceiptImageUrl(
+                        selectedPayment.proof_url,
+                        selectedPayment.proof_type,
+                      )}
                       style={styles.proofImage}
-                      resizeMode="contain"
+                      contentFit="contain"
+                      cloudinaryOptions={{ width: 400 }}
                     />
                     <View style={styles.proofImageFooter}>
                       <Text style={styles.proofImageHint}>
@@ -727,13 +726,14 @@ export default function AdminWithdrawals() {
               maximumZoomScale={3}
               minimumZoomScale={1}
             >
-              <Image
-                source={{ uri: receiptViewer.url }}
+              <OptimizedImage
+                uri={receiptViewer.url}
                 style={[
                   styles.previewImage,
                   { transform: [{ scale: receiptZoom }] },
                 ]}
-                resizeMode="contain"
+                contentFit="contain"
+                cloudinaryOptions={{ width: 1200 }}
               />
             </ScrollView>
           </Pressable>

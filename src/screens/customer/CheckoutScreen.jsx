@@ -1360,6 +1360,87 @@ export default function CheckoutScreen({ route, navigation }) {
           </Pressable>
         </View>
 
+        {/* ✅ Price summary */}
+        {!isPricingReady ? (
+          <View style={styles.card}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <MaterialIcons
+                name="receipt-long"
+                size={20}
+                color="#06C168"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 24 }}>
+              <ActivityIndicator size="small" color="#06C168" style={{ marginRight: 8 }} />
+              <Text style={[styles.value, { color: "#6b7280" }]}>Calculating delivery charges...</Text>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.card}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <MaterialIcons
+                name="receipt-long"
+                size={20}
+                color="#06C168"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
+            </View>
+
+            {isLaunchPromoApplied && (
+              <View style={styles.launchPromoBadgeWrap}>
+                <View style={styles.launchPromoBadgeHeader}>
+                  <View style={styles.launchPromoBadgeTitleWrap}>
+                    <Ionicons name="pricetag" size={14} color="#065F46" />
+                    <Text style={styles.launchPromoBadgeTitle}>
+                      Launch Offer Applied
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.launchPromoBadgeSubText}>
+                  delivery fees offer activated for this order.
+                </Text>
+              </View>
+            )}
+
+            <Row
+              label="Subtotal"
+              value={subtotal !== null ? formatPrice(subtotal) : "--"}
+            />
+
+            <Row
+              label="Delivery fee"
+              value={deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
+            />
+            <Row
+              label="Service fee"
+              value={serviceFee !== null ? formatPrice(serviceFee) : "--"}
+            />
+
+            <View style={styles.divider} />
+            <Row
+              label="Total"
+              value={finalTotal !== null ? formatPrice(finalTotal) : "--"}
+              isBold
+              isTotal
+            />
+          </View>
+        )}
+
         {/* ✅ Address card */}
         <View style={styles.card}>
           <View style={styles.rowBetween}>
@@ -1522,86 +1603,6 @@ export default function CheckoutScreen({ route, navigation }) {
             </View>
           </View>
         </View>
-
-        {/* ✅ Price summary */}
-        {!isPricingReady ? (
-          <View style={styles.card}>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                marginBottom: 12,
-              }}
-            >
-              <MaterialIcons
-                name="receipt-long"
-                size={20}
-                color="#06C168"
-                style={{ marginRight: 8 }}
-              />
-              <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 24 }}>
-              <ActivityIndicator size="small" color="#06C168" style={{ marginRight: 8 }} />
-              <Text style={[styles.value, { color: "#6b7280" }]}>Calculating delivery charges...</Text>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.card}>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                marginBottom: 12,
-              }}
-            >
-              <MaterialIcons
-                name="receipt-long"
-                size={20}
-                color="#06C168"
-                style={{ marginRight: 8 }}
-              />
-              <Text style={styles.sectionTitleNoMargin}>Price Details</Text>
-            </View>
-
-            {isLaunchPromoApplied && (
-              <View style={styles.launchPromoBadgeWrap}>
-                <View style={styles.launchPromoBadgeHeader}>
-                  <View style={styles.launchPromoBadgeTitleWrap}>
-                    <Ionicons name="pricetag" size={14} color="#065F46" />
-                    <Text style={styles.launchPromoBadgeTitle}>
-                      Launch Offer Applied
-                    </Text>
-                  </View>
-                </View>
-                <Text style={styles.launchPromoBadgeSubText}>
-                  delivery fees offer activated for this order.
-                </Text>
-              </View>
-            )}
-
-            <Row
-              label="Subtotal"
-              value={subtotal !== null ? formatPrice(subtotal) : "--"}
-            />
-
-            <Row
-              label="Delivery fee"
-              value={deliveryFee !== null ? formatPrice(deliveryFee) : "--"}
-            />
-            <Row
-              label="Service fee"
-              value={serviceFee !== null ? formatPrice(serviceFee) : "--"}
-            />
-
-            <View style={styles.divider} />
-            <Row
-              label="Total"
-              value={finalTotal !== null ? formatPrice(finalTotal) : "--"}
-              isBold
-            />
-          </View>
-        )}
       </ScrollView>
 
       {/* ✅ Sticky CTA */}
@@ -1741,16 +1742,24 @@ export default function CheckoutScreen({ route, navigation }) {
   );
 }
 
-function Row({ label, value, isBold }) {
+function Row({ label, value, isBold, isTotal }) {
   return (
     <View style={[styles.rowBetween, { marginBottom: 8 }]}>
       <Text
-        style={[styles.rowLabel, isBold && { fontWeight: "900", color: TEXT }]}
+        style={[
+          styles.rowLabel, 
+          isBold && { fontWeight: "900", color: TEXT },
+          isTotal && { fontSize: 20 }
+        ]}
       >
         {label}
       </Text>
       <Text
-        style={[styles.rowValue, isBold && { fontWeight: "900", color: TEXT }]}
+        style={[
+          styles.rowValue, 
+          isBold && { fontWeight: "900", color: TEXT },
+          isTotal && { fontSize: 22 }
+        ]}
       >
         {value}
       </Text>

@@ -5,6 +5,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
+  BackHandler,
 } from "react-native";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,6 +18,9 @@ import colors from "../../constants/colors";
 import OSMMapView from "../../components/maps/OSMMapView";
 import { API_BASE_URL } from "../../constants/api";
 import { getAccessToken } from "../../lib/authStorage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useAuth } from "../../app/providers/AuthProvider";
+import { SIGNUP_FLOW_STATE_KEY } from "../../constants/signupFlowState";
 
 const GEOCODE_DEBOUNCE_MS = 700;
 const GEOCODE_TIMEOUT_MS = 6500;
@@ -98,6 +103,12 @@ function parseNullableCoordinate(value) {
 }
 
 export default function AddressPickerScreen({ navigation, route }) {
+  const {
+    markProfileCompleted,
+    preparePostLoginTransition,
+    refreshAuthState,
+    profileCompleted,
+  } = useAuth();
   const insets = useSafeAreaInsets();
 
   const mapRef = useRef(null);
@@ -590,6 +601,25 @@ export default function AddressPickerScreen({ navigation, route }) {
     }, 80);
   };
 
+  const handleBackPress = useCallback(() => {
+    Alert.alert(
+      "Wait!",
+      "This is the last step of your account creation. Please mark your delivery location.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "OK", onPress: () => handleUseCurrentLocation() }
+      ]
+    );
+    return true; // prevent default back navigation
+  }, []);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", handleBackPress);
+    return () => {
+      subscription.remove();
+    };
+  }, [handleBackPress]);
+
   const handleUseCurrentLocation = async () => {
     if (locating || saving) return;
 
@@ -678,6 +708,14 @@ export default function AddressPickerScreen({ navigation, route }) {
         throw new Error(saveJson?.message || "Failed to save location pin");
       }
 
+      if (route?.params?.isAuthFlow || !profileCompleted) {
+        await AsyncStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
+        await markProfileCompleted();
+        preparePostLoginTransition();
+        await refreshAuthState();
+        return;
+      }
+
       const redirectTo = route?.params?.redirectTo;
       const redirectCartId = route?.params?.cartId;
 
@@ -703,7 +741,7 @@ export default function AddressPickerScreen({ navigation, route }) {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={handleBackPress}
         >
           <Ionicons name="arrow-back" size={24} color="#06C168" />
         </TouchableOpacity>

@@ -113,7 +113,7 @@ export default function SignupScreen({ navigation }) {
       triggerShake();
       Alert.alert(
         "Invalid number",
-        "Enter a valid Sri Lankan phone number (0771234567).",
+        "Enter a valid Sri Lankan phone number (e.g. 07XXXXXXXX or 7XXXXXXXX).",
       );
       return;
     }
@@ -243,7 +243,7 @@ export default function SignupScreen({ navigation }) {
                   value={phone}
                   onChangeText={setPhone}
                   inactivePlaceholder="Phone"
-                  activePlaceholder="Eg: 0751234567"
+                  activePlaceholder="Eg: 07XXXXXXXX"
                   keyboardType="phone-pad"
                   autoCapitalize="none"
                   leftIcon={<PhoneIcon size={20} color="#9CA3AF" />}

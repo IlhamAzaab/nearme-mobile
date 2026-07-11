@@ -56,14 +56,30 @@ const AdminSocketConnector = ({ restaurantId }) => {
       });
     };
 
+    const handleOrderStatusUpdated = (data) => {
+      const orderId = data?.order_id || data?.orderId;
+      const status = data?.status;
+      
+      if (orderId && status) {
+        DeviceEventEmitter.emit(ADMIN_ORDER_STATUS_EVENT, {
+          orderId: String(orderId),
+          status: status,
+          reason: data?.reason || null,
+          source: 'orders_socket',
+        });
+      }
+    };
+
     on('new_order', handleNewOrder);
     on('order_cancelled', handleOrderCancelled);
     on('driver_assigned', handleDriverAssigned);
+    on('order:status_update', handleOrderStatusUpdated);
 
     return () => {
       off('new_order', handleNewOrder);
       off('order_cancelled', handleOrderCancelled);
       off('driver_assigned', handleDriverAssigned);
+      off('order:status_update', handleOrderStatusUpdated);
     };
   }, [isConnected, restaurantId, on, off, addNotification]);
 

@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  Image,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -22,6 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import FreeMapView from "../../components/maps/FreeMapView";
 import { API_URL } from "../../config/env";
 import { getAccessToken } from "../../lib/authStorage";
+import OptimizedImage from "../../components/common/OptimizedImage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -508,9 +508,10 @@ export default function RestaurantDetail() {
                 <View style={styles.logoSection}>
                   <View style={styles.logoContainer}>
                     {formData.logo_url ? (
-                      <Image
-                        source={{ uri: formData.logo_url }}
+                      <OptimizedImage
+                        uri={formData.logo_url}
                         style={styles.logoImage}
+                        cloudinaryOptions={{ width: 300, crop: "fill" }}
                       />
                     ) : (
                       <View style={styles.logoPlaceholder}>
@@ -542,9 +543,10 @@ export default function RestaurantDetail() {
                 <Text style={styles.sectionLabel}>Cover Image</Text>
                 <View style={styles.coverContainer}>
                   {formData.cover_image_url ? (
-                    <Image
-                      source={{ uri: formData.cover_image_url }}
+                    <OptimizedImage
+                      uri={formData.cover_image_url}
                       style={styles.coverImage}
+                      cloudinaryOptions={{ width: 800, crop: "fill" }}
                     />
                   ) : (
                     <View style={styles.coverPlaceholder}>

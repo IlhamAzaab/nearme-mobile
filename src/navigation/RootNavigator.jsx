@@ -11,6 +11,7 @@ import SplashScreen from "../screens/SplashScreen";
 import { useAuth } from "../app/providers/AuthProvider";
 import { API_BASE_URL } from "../constants/api";
 import { fetchJsonWithCache } from "../lib/publicDataCache";
+import { getAccessToken } from "../lib/authStorage";
 import { startBackgroundCacheRefresher } from "../services/CacheRefresher";
 import {
   getCachedFoodItems,
@@ -46,6 +47,7 @@ function isVersionStale(current, minimum) {
 
 export default function RootNavigator() {
   const {
+    isLoading,
     isAuthenticated,
     userRole,
     authTransitionMode,
@@ -118,8 +120,16 @@ export default function RootNavigator() {
 
     checkAppVersion();
 
+    // Re-check periodically when app comes to foreground
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        checkAppVersion();
+      }
+    });
+
     return () => {
       active = false;
+      sub?.remove();
     };
   }, []);
 
@@ -175,7 +185,9 @@ export default function RootNavigator() {
           fetchJsonWithCache(
             RESTAURANTS_CACHE_KEY,
             async () => {
-              const res = await fetch(`${API_BASE_URL}/public/restaurants`);
+              const token = await getAccessToken();
+              const headers = token ? { Authorization: `Bearer ${token}` } : {};
+              const res = await fetch(`${API_BASE_URL}/public/restaurants`, { headers });
               return res.json().catch(() => ({}));
             },
             { ttlMs: 180000 },
@@ -183,7 +195,9 @@ export default function RootNavigator() {
           fetchJsonWithCache(
             FOODS_CACHE_KEY,
             async () => {
-              const res = await fetch(`${API_BASE_URL}/public/foods`);
+              const token = await getAccessToken();
+              const headers = token ? { Authorization: `Bearer ${token}` } : {};
+              const res = await fetch(`${API_BASE_URL}/public/foods`, { headers });
               return res.json().catch(() => ({}));
             },
             { ttlMs: 180000 },
@@ -256,6 +270,8 @@ export default function RootNavigator() {
   };
 
   const renderMainNavigator = () => {
+    if (isLoading) return null;
+
     if (isUpdateRequired) {
       return (
         <View style={styles.blockerContainer}>
@@ -282,7 +298,7 @@ export default function RootNavigator() {
           if (!profileCompleted) {
             return (
               <AuthNavigator
-                initialRouteName="CompleteProfile"
+                initialRouteName={authInitialRoute === "AddressPicker" ? "AddressPicker" : "CompleteProfile"}
                 initialRouteParams={authInitialParams}
               />
             );
